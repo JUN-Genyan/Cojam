@@ -1,0 +1,59 @@
+{
+  "id": "opencode",
+  "label": "OpenCode",
+  "color": "#f97316",
+  "driver": "cli",
+  "bin": [
+    "opencode"
+  ],
+  "verified": false,
+  "note": "命令和参数照这台机器上 opencode run --help 抄的；会话 id 从 --format json 每行的 sessionID 取（实测到）。文本事件的形状没跑通（免费额度用完），parse.text 可能要按实际输出调一下：用 python -m bridge.doctor opencode 看。",
+  "args": {
+    "base": [],
+    "read": [],
+    "work": [
+      "--auto"
+    ],
+    "new": [
+      "run",
+      "--format",
+      "json",
+      "{prompt}"
+    ],
+    "resume": [
+      "run",
+      "--session",
+      "{session}",
+      "--format",
+      "json",
+      "{prompt}"
+    ]
+  },
+  "prompt": "arg",
+  "images": [
+    "-f",
+    "{path}"
+  ],
+  "parse": {
+    "type": "ndjson",
+    "text": "part.text",
+    "session": "sessionID",
+    "filter": {
+      "type": "text"
+    },
+    "join": ""
+  },
+  "context": "delta",
+  "models": [],
+  "efforts": [],
+  "default": [
+    "",
+    ""
+  ],
+  "caps": {
+    "images": true,
+    "handoff": true,
+    "tools": false
+  },
+  "handoff": "opencode run --session {session}"
+}

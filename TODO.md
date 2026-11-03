@@ -22,3 +22,14 @@
 - [ ] **codex 用命令行写的文件撤不回**：撤回清单只认它打补丁（apply_patch）改的文件。现在靠规矩提醒它尽量用补丁改。
 - [ ] **讨论模式下 codex 读不了只对本人账户开放的文件夹**：只读沙箱的限制。实测 `AppData\Local\Temp` 下读不了，`D:\` 下的普通文件夹没问题；桌面、文档可能也一样。干活模式不受影响。
 - [ ] **codex 沙箱再卡住**：先退出 Codex 桌面应用再试。病根是桌面应用攒下的 node_repl 进程占着文件；反复出现就去 Codex 的 GitHub 报问题。
+
+
+## 多厂商接入（2026-11-03）
+
+框架和内置预置都做完了，下面是还没验到的：
+
+- [ ] **预置实测**：gemini / qwen / crush / aider / cursor 的预置是照文档写的，没真跑过。验完把那份 json 里的 `verified` 改成 true（界面和 doctor 会跟着变）。
+- [ ] **opencode 的文本事件**：会话 id 已经验到了（`--format json` 每行都有 `sessionID`），但回复文本的 `part.text` 没跑通（免费额度用完）。`python -m bridge.doctor opencode` 跑一次，按实际输出调 `parse.text`。
+- [ ] **http 驱动只在测试里验过**：拿本地假服务验了请求 / 回复格式，还没接过真的 harness。
+- [ ] **三个以上 AI 的会议没在真会议上跑过**：界面上 3 个胶囊的冒烟截图正常，实际让 3-4 个一起回话、一起改文件的场面还没试。
+- [ ] **exe 没打过**：`build_exe.ps1` 写好了，没装 PyInstaller 试。

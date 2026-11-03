@@ -1,0 +1,53 @@
+{
+  "id": "cursor",
+  "label": "Cursor Agent",
+  "color": "#7c3aed",
+  "driver": "cli",
+  "bin": [
+    "cursor-agent"
+  ],
+  "verified": false,
+  "note": "参数照 cursor-agent --help 抄的。--output-format json 的实际形状没验到（这台机器上没登录：agent login）。用 python -m bridge.doctor cursor 跑一次，按它打出来的 JSON 调 parse.text / parse.session。",
+  "args": {
+    "base": [],
+    "read": [
+      "--mode",
+      "plan"
+    ],
+    "work": [
+      "--force"
+    ],
+    "new": [
+      "-p",
+      "--output-format",
+      "json",
+      "{prompt}"
+    ],
+    "resume": [
+      "-p",
+      "--output-format",
+      "json",
+      "--resume",
+      "{session}",
+      "{prompt}"
+    ]
+  },
+  "prompt": "arg",
+  "parse": {
+    "type": "json",
+    "text": "",
+    "session": "chatId"
+  },
+  "context": "full",
+  "models": [],
+  "efforts": [],
+  "default": [
+    "",
+    ""
+  ],
+  "caps": {
+    "images": false,
+    "handoff": false,
+    "tools": false
+  }
+}

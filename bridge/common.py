@@ -1,12 +1,18 @@
 # -*- coding: utf-8 -*-
 """路径、上限、规矩文本、小工具。别的模块都从这里拿，测试改环境变量要在 import 之前。"""
-import hashlib, json, os, re, subprocess, threading, time
+import hashlib, json, os, re, subprocess, sys, threading, time
 from datetime import datetime
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("ROUNDTABLE_PORT", "8765"))
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # 项目根（index.html 在这里）
-LOG_DIR = os.environ.get("ROUNDTABLE_LOG_DIR", os.path.join(HERE, "data"))   # 会议记录、附件、私有 index；不进 git
+# 项目根（index.html、static 在这里）。用 PyInstaller 打成 exe 之后，这些文件被解到 _MEIPASS 里
+if getattr(sys, "frozen", False):
+    HERE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.executable)))
+    _APPDIR = os.path.dirname(os.path.abspath(sys.executable))      # 数据放 exe 旁边，别放进临时目录
+else:
+    HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _APPDIR = HERE
+LOG_DIR = os.environ.get("ROUNDTABLE_LOG_DIR", os.path.join(_APPDIR, "data"))   # 会议记录、附件、私有 index；不进 git
 # 默认工作文件夹：老会议没记工作文件夹时用它，新会议弹窗没东西可带时也用它
 PROJECT = os.path.normpath(os.environ.get("ROUNDTABLE_DEFAULT_DIR") or os.path.expanduser("~"))
 # 附件路径相对谁记：会议记录目录在默认工作文件夹里就相对它（最早的记录都是这么存的），不在就相对会议记录目录（跨盘也不出错）。
@@ -26,8 +32,10 @@ TIMEOUT = 600          # 会议室自己跑的小命令（压缩之类）
 IDLE_LIMIT = {"discuss": 600, "work": 1200}
 TOTAL_LIMIT = {"discuss": 1800, "work": 7200}
 MODES = ("discuss", "work")
-AIS = ("claude", "codex")
-# 外部程序经 /api/post 或 MCP 只能以 claude / codex 身份发言（会议室外的同名 AI，消息带 origin=external）。
+# 能进会议室的 AI：由 registry 在加载配置后原地改这个 list（别的模块 import 到的是同一个对象，不用改 import）。
+# 默认就是原来那两个；装了别的 CLI 或写了 agents.d 配置，这里会变成更多。
+AIS = ["claude", "codex"]
+# 外部程序经 /api/post 或 MCP 只能以这些身份发言（会议室外的同名 AI，消息带 origin=external）。
 # 你 / 系统 不在内：你 = 只能来自网页上用户的操作；系统 = 会议室自己
 EXTERNAL_SPEAKERS = AIS
 SID_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z\-]{7,63}$")   # 会话 id 只能是这种字符，防止拼路径拼出别的地方
@@ -35,17 +43,15 @@ ROOM_RE = re.compile(r"^[^\\/:*?\"<>|\x00-\x1f]{1,120}$")   # 会议目录名（
 
 # ===== 规矩（前言）=====
 PREAMBLE_BASE = (
-    "这是一个三方会议室，参与者是用户、claude（Claude Code）、codex（Codex），"
-    "工作目录是 {wd}。回答简短直接，用大白话。\n"
-    "会议记录里署名 claude / codex 的话，有些是在会议室外（用户桌面或终端里）的同名 AI 说的，你没说过的就当是它说的，接着讨论即可；"
+    "这是一个会议室，参与者是用户、{names}，工作目录是 {wd}。回答简短直接，用大白话。\n"
+    "会议记录里署名 {ids} 的话，有些是在会议室外（用户桌面或终端里）的同名 AI 说的，你没说过的就当是它说的，接着讨论即可；"
     "只有署名“你”的才是用户本人。\n"
-    "说话必须 @ 对象：对用户说就写 @用户，对另一个 AI 说就写 @claude 或 @codex。"
-    "只在真需要对方接话时才 @ 另一个 AI，避免来回空转；@ 自己没有用。\n"
-    "用户没 @ 任何人时，claude 和 codex 两个都会被叫。"
-    "用户发言时你和另一个 AI 是同时回答的，看不到对方这一轮的回答；回完后如果发现对方说的跟你冲突或需要补充，再 @ 它。\n"
+    "说话必须 @ 对象：对用户说就写 @用户，对别的 AI 说就写它的名字（{at}）。"
+    "只在真需要对方接话时才 @ 别人，避免来回空转；@ 自己没有用。\n"
+    "用户没 @ 任何人时，默认叫全部：{names}。"
+    "用户发言时你和别人是同时回答的，看不到对方这一轮的回答；回完后如果发现对方说的跟你冲突或需要补充，再 @ 它。\n"
     "默认先简单聊天：短答，不主动查文件、不调工具；用户要深入、要核对或要干活时再查。\n"
-    "你在这场会议里有一个固定的会话：之后每次叫你，只会递给你自上次以来的新消息（格式 [发言人] 正文），"
-    "之前的内容你自己记得。\n"
+    "{session_note}\n"
     "这场会议有一个目标（用户写的，随时会改），以它为准安排你的事。"
     "同一时间可能还有别的会议室在跑，别的会议里的 AI 也可能在同一个文件夹里干活。\n"
     "附件给的是本机路径，用读文件工具（Read）去看，图片也可以直接读。"
@@ -53,7 +59,8 @@ PREAMBLE_BASE = (
 
 MODE_DISCUSS = (
     "【当前是讨论模式】你只能看文件，不能改任何东西；要改的话让用户切到干活模式，或回各自的会话去做。"
-    "讨论模式只接会议室自己的 bridge 工具，别的 MCP 工具不加载。codex 注意：命令行能用来读文件，但在只读沙箱里，写不进任何东西。"
+    "讨论模式只接会议室自己的 bridge 工具，别的 MCP 工具不加载。"
+    "（只读沙箱的 CLI 注意：命令行能用来读文件，但在只读沙箱里写不进任何东西。）"
 )
 
 MODE_WORK = (
@@ -92,7 +99,7 @@ SEND_RULES = (
     "已经知道是哪个文件、只是发给用户时，直接写【发送】，不用先打开看（打开只是你自己看到，用户看不到，还白占上下文）；"
     "要靠看内容才能挑出来时照常看，但先用文件名和文件夹缩小范围，一次少看几张。"
     "说“出了一张图”“做好了”的时候，就用【发送】把它发出来，别只描述。\n"
-    "出图：codex 自带生图（不占本机显卡，用户账号的额度），出概念图、氛围图优先让 codex 用它，生成的图会议室会自动发出来。"
+    "出图：谁自带生图（比如 codex）就用它出概念图、氛围图——不占本机显卡，花的是用户账号的额度，生成的图会议室会自动发出来。"
     "本机显卡（ComfyUI 出图、渲染、训练这类重活）同一时间只能一个人用：动手前先 @ 对方说一声，对方在跑就等它跑完，别同时往上提交。\n"
     "跑很久的活：先说一句在干什么、大概要多久。会议室 %d 分钟（讨论模式 %d 分钟）收不到你任何动静就会把你停掉，"
     "等后台任务时隔一阵说一句进度，别一声不吭等太久；真要等很久就先结束这一轮，@用户 说清楚怎么接着看结果。"
@@ -109,8 +116,38 @@ def mode_key(mode):
     return mode + ":" + hashlib.sha1(mode_text(mode).encode("utf-8")).hexdigest()[:8]
 
 
-def preamble(mode, wd):
-    return PREAMBLE_BASE.replace("{wd}", wd) + "\n" + mode_text(mode)
+def display_name(pid):
+    """给文字用的名字：claude（Claude Code）这样；别的 agent 用它配置里的 label。"""
+    try:
+        from . import registry
+        s = registry.get(pid)
+        if s and s.get("label") and s["label"].lower() != pid.lower():
+            return "%s（%s）" % (pid, s["label"])
+    except Exception:
+        pass
+    return pid
+
+
+def preamble(mode, wd, ais=None):
+    """给某个 AI 的开场说明。ais = 这场会议有谁（不传就用注册表里启用的全部）。"""
+    ids = [a for a in (AIS if ais is None else ais)]
+    if not ids:
+        ids = list(AIS)
+    names = "、".join(display_name(a) for a in ids)
+    stateless = []
+    try:
+        from . import registry
+        stateless = [a for a in ids if (registry.get(a) or {}).get("context") == "full"]
+    except Exception:
+        pass
+    session_note = ("你每次都是重新接手，会议室会把到目前的整份会议记录递给你，之前的内容不在你的记忆里。"
+                    if stateless else
+                    "你在这场会议里有一个固定的会话：之后每次叫你，只会递给你自上次以来的新消息（格式 [发言人] 正文），"
+                    "之前的内容你自己记得。")
+    head = (PREAMBLE_BASE.replace("{wd}", wd).replace("{names}", names)
+            .replace("{ids}", " / ".join(ids)).replace("{at}", " 或 ".join("@" + a for a in ids))
+            .replace("{session_note}", session_note))
+    return head + "\n" + mode_text(mode)
 
 
 def timeout_for(mode):
@@ -161,13 +198,25 @@ def is_archived(status):
     return status in ("archived", "closed")   # 老数据的 closed 读作已归档
 
 
-MENTION = re.compile(r"@(claude|codex|用户|user)(?![A-Za-z0-9_])", re.I)
+_mention_cache = {}
+
+
+def _mention_re(ids):
+    """@ 后面能跟的名字：注册表里启用的 agent id + 用户。id 变了就重编一次。"""
+    key = tuple(ids)
+    hit = _mention_cache.get("re")
+    if hit and hit[0] == key:
+        return hit[1]
+    names = [re.escape(x) for x in key] + ["用户", "user"]
+    rx = re.compile(r"@(" + "|".join(names) + r")(?![A-Za-z0-9_])", re.I)
+    _mention_cache["re"] = (key, rx)
+    return rx
 
 
 def mentions(text, exclude=None):
-    """按出现顺序返回名字列表：claude / codex / 用户。"""
+    """按出现顺序返回名字列表：注册表里的 agent id / 用户。"""
     seen = []
-    for mt in MENTION.finditer(text):
+    for mt in _mention_re(list(AIS)).finditer(text):
         n = mt.group(1).lower()
         if n == "user":
             n = "用户"

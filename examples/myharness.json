@@ -1,0 +1,17 @@
+{
+  "id": "myharness",
+  "label": "My Harness",
+  "color": "#7c3aed",
+  "letter": "H",
+  "driver": "http",
+  "endpoint": "http://127.0.0.1:9100/bridge",
+  "note": "例子：examples/harness_stub.py 起来的桩。换成你自己的服务地址。",
+  "context": "delta",
+  "models": [],
+  "efforts": [],
+  "default": [
+    "",
+    ""
+  ],
+  "enabled": true
+}

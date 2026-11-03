@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-bridge-room"
+version = "2.1.0"
+description = "本机多会议室：你 + 任意几个 AI（Claude Code、Codex、Gemini CLI、自己的 harness……）一起开会、一起干活"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+keywords = ["ai", "agent", "claude", "codex", "meeting", "roundtable", "local"]
+classifiers = [
+  "Environment :: Win32 (MS Windows)",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Communications :: Chat",
+]
+dependencies = []
+
+[project.scripts]
+ai-bridge = "bridge.web:main"
+ai-bridge-doctor = "bridge.doctor:cli"
+
+[project.urls]
+Documentation = "https://github.com/"
+
+[tool.setuptools]
+packages = ["bridge"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+bridge = ["presets/*.json"]
+
+[tool.pytest.ini_options]
+# 测试都是 unittest，每个文件单独跑（python tests\test_xxx.py）
+testpaths = ["tests"]

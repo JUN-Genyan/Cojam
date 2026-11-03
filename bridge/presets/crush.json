@@ -1,0 +1,34 @@
+{
+  "id": "crush",
+  "label": "Crush",
+  "color": "#ec4899",
+  "driver": "cli",
+  "bin": [
+    "crush"
+  ],
+  "verified": false,
+  "note": "crush run 是它的非交互模式。会话怎么续没核实，所以这里当无会话用（每轮递整份会议记录）。没实测。",
+  "args": {
+    "base": [],
+    "read": [],
+    "work": [
+      "--yolo"
+    ],
+    "new": [
+      "run",
+      "{prompt}"
+    ]
+  },
+  "prompt": "arg",
+  "parse": {
+    "type": "text"
+  },
+  "context": "full",
+  "models": [],
+  "efforts": [],
+  "default": [
+    "",
+    ""
+  ],
+  "caps": {}
+}

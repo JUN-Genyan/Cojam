@@ -8,7 +8,7 @@ import hmac, json, mimetypes, os, re, secrets, socket, threading, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote
 
-from . import agents, mcp, room as R
+from . import agents, install, mcp, registry, room as R
 from .common import (AIS, EXTERNAL_SPEAKERS, HERE, HOST, MAX_ANN, MAX_BODY, MAX_UPLOAD, MEET_DIR, PORT, PROJECT,
                      in_dir, kind_of)
 from .guard import USER, guard
@@ -164,6 +164,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"trash": R.list_trash()})
         if path == "/api/claims":
             return self._json(200, {"claims": guard.listing()})
+        if path == "/api/agents":
+            if (q.get("reload") or [""])[0] in ("1", "true", "yes"):
+                registry.load()      # 用户刚改了 data/agents.d：重读一遍，不用重启服务器
+            return self._json(200, dict(registry.catalog(), default_dir=PROJECT, hosts=install.hosts_status(),
+                                        mcp_url="http://127.0.0.1:%d/mcp" % PORT))
         if path in ("/api/state", "/api/messages"):   # 老页面（服务器换了新版、页面还没刷新）：按最近打开的那场回
             rid = R.last_room()
             r = R.rooms.get(rid) if rid else None
@@ -184,8 +189,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, r.api_state())
             if act == "tools":
                 ai = (q.get("ai") or [""])[0]
-                if ai not in AIS:
-                    return self._json(400, {"error": "ai 只能是 claude / codex"})
+                if ai not in r.ais:
+                    return self._json(400, {"error": "ai 只能是这场会议里的：" + "、".join(r.ais)})
                 return self._json(200, r.tools_info(ai))
         return self._send(404, b"not found", "text/plain")
 
@@ -200,6 +205,30 @@ class Handler(BaseHTTPRequestHandler):
             return self._guard(path[len("/api/guard/"):])
         if path == "/api/post":
             return self._external_post()
+        if path == "/api/agents/add":         # 页面上"手动添加"，不让人碰 json
+            data = self._read_json()
+            if data is None:
+                return
+            if not self._from_browser():
+                return self._json(403, {"error": USER_ONLY_MSG})
+            ok, msg = registry.save_agent(data.get("spec") or {})
+            return self._json(200 if ok else 400, {"ok": ok, "error": msg, "agents": registry.catalog()["agents"]})
+        if path == "/api/agents/remove":
+            data = self._read_json()
+            if data is None:
+                return
+            if not self._from_browser():
+                return self._json(403, {"error": USER_ONLY_MSG})
+            ok, msg = registry.remove_agent(str(data.get("id") or ""))
+            return self._json(200 if ok else 409, {"ok": ok, "error": msg})
+        if path == "/api/agents/install":     # 页面上的"一键接入"，不让人碰命令行
+            data = self._read_json()
+            if data is None:
+                return
+            if not self._from_browser():
+                return self._json(403, {"error": USER_ONLY_MSG})
+            ok, msg = install.host_install(str(data.get("host") or ""))
+            return self._json(200 if ok else 409, {"ok": ok, "msg": msg, "hosts": install.hosts_status()})
         if not self._from_browser():
             return self._json(403, {"error": USER_ONLY_MSG})
         m = ROOM_PATH.match(path)
@@ -321,14 +350,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200 if ok else 409, {"ok": ok, "error": msg})
         if act == "stop":
             who = str(data.get("ai") or "")
-            if who and who not in AIS:
-                return self._json(400, {"error": "ai 只能是 claude / codex，或者不填（全停）"})
-            return self._json(200, {"ok": True, "msg": r.stop_ais([who] if who else AIS)})
+            if who and who not in r.ais:
+                return self._json(400, {"error": "ai 只能是这场会议里的：" + "、".join(r.ais) + "；不填 = 全停"})
+            return self._json(200, {"ok": True, "msg": r.stop_ais([who] if who else None)})
+        if act == "participants":
+            ok, msg = r.set_participants(data.get("participants"))
+            return self._json(200 if ok else 409, {"ok": ok, "error": msg, "participants": list(r.ais)})
+
         if act == "compact":
             who = str(data.get("ai") or "")
-            if who and who not in AIS:
-                return self._json(400, {"error": "ai 只能是 claude / codex，或者不填（两个都压）"})
-            todo = r.request_compact([who] if who else AIS)
+            if who and who not in r.ais:
+                return self._json(400, {"error": "ai 只能是这场会议里的：" + "、".join(r.ais) + "；不填 = 全压"})
+            todo = r.request_compact([who] if who else None)
             if not todo:
                 return self._json(409, {"error": "%s已经在压缩了" % (who or "两个都")})
             return self._json(200, {"ok": True, "ais": todo})
@@ -339,13 +372,21 @@ class Handler(BaseHTTPRequestHandler):
         data = self._read_json()
         if data is None:
             return
-        speaker = str(data.get("speaker") or "").strip()
-        if speaker not in EXTERNAL_SPEAKERS:
-            return self._json(400, {"error": "speaker 必填，且只能是：" + "、".join(EXTERNAL_SPEAKERS)})
+        speaker = str(data.get("speaker") or "").strip().lower()
+        if not speaker:
+            return self._json(400, {"error": "speaker 必填（你以谁的身份发言）"})
         rid = str(data.get("room") or "").strip() or R.last_room()
         r = R.rooms.get(rid) if rid else None
         if r is None:
             return self._json(409 if not rid else 404, {"error": "还没有会议，先开一个" if not rid else "没有这场会议：" + rid})
+        if speaker not in EXTERNAL_SPEAKERS and speaker not in r.ais:
+            # 谁都能进来：第一次带上 "join": true 就到这场会议报到
+            if not data.get("join"):
+                return self._json(400, {"error": "speaker %r 还没在这场会议里。第一次发言带上 \"join\": true 就行；"
+                                                 "已经接好的：%s" % (speaker, "、".join(EXTERNAL_SPEAKERS))})
+            ok, err = r.join_external(speaker, data.get("label"))
+            if not ok:
+                return self._json(400, {"error": err})
         text = str(data.get("text", "")).strip()
         if not text:
             return self._json(400, {"error": "empty"})

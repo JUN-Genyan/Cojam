@@ -1,6 +1,8 @@
 # AI Bridge
 
-一个本地网页"会议室"：你、Claude Code、Codex 三方在同一个聊天里开会，两个 AI 各用你本机已经登录好的 CLI（`claude`、`codex`），看得到彼此说的话，可以互相 @、分工、一起改同一个项目。几场会议可以同时开、同时跑；文件护栏保证两个 AI 不会同时改同一个文件；会议室自己带一个 MCP 服务，网页能装成 app。
+一个本地网页"会议室"：你和几个 AI 在同一个聊天里开会。默认是 Claude Code（`claude`）和 Codex（`codex`），各用你本机已经登录好的 CLI；装了别的（Gemini CLI、OpenCode、Cursor Agent……），或者写一段配置接自己的 harness，也能坐进来。与会者看得到彼此说的话，可以互相 @、分工、一起改同一个项目。几场会议可以同时开、同时跑；文件护栏保证两个 AI 不会同时改同一个文件；会议室自己带一个 MCP 服务，网页能装成 app。
+
+接新的 AI 只用写配置，不改代码：见 [docs/PROVIDERS.md](docs/PROVIDERS.md)。
 
 ![icon](roundtable_preview.png)
 
@@ -8,12 +10,15 @@
 
 - Windows（主要在 Windows 11 上用；codex 沙箱那几条是 Windows 专属的处理，别的系统没测过）。
 - Python 3.11+（只用标准库，不用装包）。
-- [Claude Code](https://docs.claude.com/en/docs/claude-code) 的 `claude` 命令、[Codex CLI](https://github.com/openai/codex) 的 `codex` 命令，都已登录，在 PATH 里。
+- 至少一个能用的 AI：[Claude Code](https://docs.claude.com/en/docs/claude-code) 的 `claude`、[Codex CLI](https://github.com/openai/codex) 的 `codex`，都已经登录、在 PATH 里。
+  装了别的 CLI 也行（gemini / opencode / cursor-agent 等有内置预置，见 [接更多 AI](#接更多-ai不止-claude--codex)）。
 - 工作文件夹最好是 git 仓库：干活模式靠 git 记每一步改了什么、能撤回；不是 git 仓库也能用，只是撤不回。
 
 ## 怎么开
 
-- 双击 `start.bat`（带黑窗口，关掉就停），或者双击 `open.pyw`（后台开，不弹窗，没开就开、开了就直接打开网页）。地址 http://127.0.0.1:8765 。也可以 `python roundtable.py` 或 `python -m bridge`。
+- **下载版**：解压 `AIBridge-2.1.0-win64.zip`，双击 `AIBridge.exe`（不用装 Python）。自己打：`build_exe.ps1`。
+- 源码版：双击 `start.bat`（带黑窗口，关掉就停），或者双击 `open.pyw`（后台开，不弹窗，没开就开、开了就直接打开网页）。地址 http://127.0.0.1:8765 。也可以 `python roundtable.py` 或 `python -m bridge`。
+- 接别的工具（Antigravity / Cursor / Claude Code / Codex）一条命令：`AIBridge.exe install antigravity`（源码版 `python roundtable.py install ...`）。见"接更多 AI"。
 - 第一次打开会让你开一场会议：标题、目标、工作文件夹（两个 AI 在哪个文件夹里干活）。
 - 会议记录、附件都存在本文件夹的 `data\`（不进 git）。
 - 装成 app：电脑上 Chrome / Edge 地址栏右边的"安装"图标；手机经 `tailscale serve` 的 https 地址打开后"添加到主屏幕"。见"装成 app"一节。
@@ -27,6 +32,8 @@
 | `ROUNDTABLE_DEFAULT_DIR` | 新会议默认的工作文件夹（这个标签页没开着会议、也没用过别的文件夹时） | 你的用户目录 |
 | `ROUNDTABLE_NO_BROWSER` | 设成 1 启动时不自动开浏览器 | 不设 |
 | `ROUNDTABLE_CODEX` | 设成 `exec` 退回旧的每轮一个 `codex exec` | `appserver` |
+| `ROUNDTABLE_AGENTS` | 再读一份 agent 配置（文件或目录），覆盖同 id 的 | 不设 |
+| `ROUNDTABLE_NO_PRESETS` | 设成 1 就不读自带的预置，只用你自己的配置 | 不设 |
 
 没做完的事见 [TODO.md](TODO.md)。
 
@@ -42,12 +49,38 @@
 | `bridge\common.py` | 路径、上限、规矩文本、小工具（跑子进程、找 claude / codex 的真身） |
 | `bridge\room.py` | 一场会议 = 一个 Room：消息、排队、每个 AI 一把锁、叫 AI、看板、发文件、压缩、停、撤回；会议目录的增删、回收站；`Rooms` 管读进内存的会议 |
 | `bridge\agents.py` | 怎么叫 claude（每轮一个 `claude -p`）、codex（每场会议一个 app-server）；模型、MCP / 插件 / 技能开关；护栏钩子 |
+| `bridge\registry.py` | 参与者注册表：读 `presets\` 和 `data\agents.d\`，决定会议室里有哪些 AI、每个怎么叫 |
+| `bridge\install.py` | 一条命令把会议室接进别的工具（写它们的 MCP 配置，改之前备份） |
+| `bridge\drivers.py` | 通用驱动：`cli`（起命令行程序）、`http`（POST 给你自己的服务）；按注册表里的配置拼命令、解析输出 |
+| `bridge\doctor.py` | `python -m bridge.doctor`：验一个 agent 接没接上（不用开会） |
+| `bridge\presets\*.json` | 内置预置：gemini、opencode、crush、aider、qwen、cursor |
 | `bridge\guard.py` | 文件护栏：谁占着哪个文件，跨会议 |
 | `bridge\mcp.py` | 会议室自己的 MCP 服务（`/mcp`） |
 | `bridge\workspace.py` | 干活模式的 git 存档点、改动清单 |
 | `bridge\web.py` | HTTP 接口和启动 |
 | `bridge\hook_codex.py` | codex 改文件前跑的钩子脚本（问护栏） |
 | `index.html`、`static\` | 网页、装成 app 用的 manifest / service worker / 图标 |
+| `docs\PROVIDERS.md` | 怎么接一个**新**的 agent（自己的 harness 也在内） |
+| `examples\` | 能跑的样板：`harness_stub.py`（http 驱动的桩）+ 它的配置 |
+| `pyproject.toml`、`build_exe.ps1`、`packaging\` | 装成包 / 打成单文件 exe / 发行包里的说明 |
+
+## 接更多 AI（不止 claude / codex）
+
+会议室里有谁，由**注册表**决定，不用改代码：
+
+- **装了什么就有什么**：除了 `claude`、`codex`，仓库自带 gemini / opencode / crush / aider / qwen / cursor 的预置。命令在 PATH 里就算"启用"，没装就不出现。
+- **写配置**：`data\agents.d\<名字>.json`（一个 agent 一个文件），或 `data\agents.json` 里写 `{"agents": [...]}`。存的是纯 JSON，改完不用重启服务器。
+- **自己的 harness**：让它监听一个 HTTP 端口（`driver: "http"`），会议室每轮把话 POST 过去，它回 `{"text": "..."}` 就行。协议很短，见文档。
+- **不想写任何东西**：任何能发 HTTP 的程序都能直接进来 —— `POST /api/post {"speaker":"myharness","text":"...","join":true}`，第一次带 `join` 就报到；或者连 `/mcp` 用 `list_rooms` / `read_room` / `post_to_room` / `wait_for_message`。
+- **接现成的 IDE**：`AIBridge.exe install antigravity` / `cursor` / `claude` / `codex`，一条命令写进它的 MCP 配置（先备份），重启那个工具就有工具可用了。
+- **先验一遍**：`python -m bridge.doctor` 列出读到的 agent 和哪份配置读坏了；`python -m bridge.doctor gemini` 真跑一次，把回复、会话 id、报错都打出来——不用开会，也不占会议室。
+- **每场会议各自选人**：顶部"AI 成员"里勾上谁参加这场会议。新会议默认 claude + codex（两个都没装就放启用的全部）。被移出去的 AI 会话还留着，重新勾上就接得上；@ 一个不在会里的 AI，不会顺手把别人叫起来。
+- **界面上直接加，不用写配置**：点顶部"AI 成员"，里面能看到这台电脑上装了什么、哪个还没接上（按钮就是"接上"，一键写好它的 MCP 配置）；底部"＋ 手动添加"填名字、命令、参数就加进来了，加完自动进当前这场会议。
+
+  ![AI 成员](docs/ai-members.png)
+
+三种驱动：`claude`、`codex` 是专门写的（各有一套管会话的方式），`cli` 给普通命令行程序，`http` 给自己的服务。
+字段、占位符、输出解析、常见厂商例子、排错，全在 [docs/PROVIDERS.md](docs/PROVIDERS.md)。
 
 ## 详细说明
 
@@ -169,17 +202,17 @@
 - 电脑：用 Chrome / Edge 打开 http://127.0.0.1:8765 ，地址栏右边"安装"，之后像普通程序一样从开始菜单打开，单独一个窗口。
 - 手机：要 https（`tailscale serve --bg 8765` 给的地址），Safari / Chrome 里"添加到主屏幕"。
 - 图标由 `make_icon.py` 生成（`static\icon-192.png`、`icon-512.png`、`icon-maskable-512.png`）。
-- exe：还没做（要装 PyInstaller）。
+- exe：`build_exe.ps1`（先 `pip install pyinstaller`），产物 `dist\AIBridge.exe`，双击就能用，用户不用装 Python。
 
 ## 谁能用哪个接口（身份规则）
 
-发言人只有三种身份：`你`（用户）、`claude`、`codex`，加会议室自己的 `系统`。**每个参与者只能用自己的身份发言，`你` 只能来自用户在网页上的操作。**
+发言人是`你`（用户）、注册表里启用的每个 AI（默认 `claude`、`codex`），加会议室自己的 `系统`。**每个参与者只能用自己的身份发言，`你` 只能来自用户在网页上的操作。**
 
 - 接口地址：会议相关的都带会议号，`/api/r/<会议号>/<动作>`。GET：`messages?since=`、`state`、`tools?ai=`；POST：`send`、`upload`、`announcement`（目标）、`board`、`mode`、`undo`、`undo/preview`、`models`、`tools`、`handoff`、`compact`、`wrapup`、`stop`、`open`（记成最近打开的）。全局的：GET `/api/rooms`、`/api/trash`、`/api/claims`；POST `/api/rooms/new`、`/api/rooms/archive`、`/api/rooms/delete`、`/api/trash/restore`、`/api/trash/purge`、`/api/claims/release`、`/api/claims/mine`。
 - **代表用户的接口，只认浏览器**：上面所有 POST（`/api/post`、`/mcp`、`/api/guard/*` 除外）。要求请求头 `Sec-Fetch-Site: same-origin`（浏览器自动带），或带 `X-RT-Token`（每次启动随机生成，服务端把它注入网页 HTML，前端每个请求自动带）；两者满足其一，否则 403，正文"这个接口只给网页上的用户用；外部程序请用 /api/post 并写明自己的身份"。
   - 诚实说明：这是防误用，不是防故意伪造。curl 想手写 `Sec-Fetch-Site`、或者先 GET 首页拿 token，都做得到。它拦的是"外部程序不小心用用户的身份发了言"。
   - 经 `tailscale serve` 反代后 `Sec-Fetch-Site` 是否还在没有实测确认，所以留了 token 兜底：头被剥掉也能用。
-- **`/api/post`，给外部程序用**（桌面应用里的 Claude 主对话、终端里的 Claude / Codex 等；也可以用 MCP，见"会议室自己的 MCP"）：JSON `{"speaker": "claude" | "codex", "text": "...", "room": "会议号（可不填，= 最近打开的那场）"}`，`speaker` 必填，只允许 `claude` 或 `codex`；`你`、`系统`、空、别的名字一律 400。这类消息页面上显示就是普通的 claude / codex，内部带一个不显示的字段 `origin: "external"`（会议室自己叫起来的回复是 `room`）。
+- **`/api/post`，给外部程序用**（桌面应用里的 Claude 主对话、终端里的 Claude / Codex 等；也可以用 MCP，见"会议室自己的 MCP"）：JSON `{"speaker": "<agent id>", "text": "...", "room": "会议号（可不填，= 最近打开的那场）"}`，`speaker` 必填，允许 `GET /api/agents` 里启用的那些 id；`你`、`系统`、空、别的名字一律 400。这类消息页面上显示就是普通的 claude / codex，内部带一个不显示的字段 `origin: "external"`（会议室自己叫起来的回复是 `room`）。
   - 递送：外部 claude 的话会递给会议室里的 claude（它不知道外面那个 claude 说了啥），外部 codex 同理；`origin=room` 的才按"不含它自己的话"排除。前言里也告诉了两个 AI "署名 claude / codex 的话有些是会议室外同名 AI 说的"。
   - 路由：按"AI 发言"算。正文里 `@claude` / `@codex` 都会叫会议室里的对应 AI（外部发言的 @ 不按"@自己不算"排除）；`@用户` 标 to_user，不叫 AI。不带 @ 的不叫任何人。
   - 示例：

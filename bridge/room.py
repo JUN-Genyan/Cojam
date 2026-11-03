@@ -11,17 +11,18 @@ import json, os, queue, re, secrets, shutil, threading, time
 from datetime import datetime
 from urllib.parse import quote
 
-from . import agents, workspace as ws
+from . import agents, drivers, registry, workspace as ws
 from .common import (AIS, ATT_BASE, LAST_FILE, LOG_DIR, MAX_ATTACH, MAX_IMAGES, MAX_UPLOAD, MEET_DIR, MODES, PROJECT,
                      ROOM_RE, SID_RE, TRASH_DIR, in_dir, is_archived, kill_tree, kind_of, mentions, mode_key, mode_text,
                      norm, now_str, preamble, read_json, ref_safe, safe_title, sanitize_name, write_json)
 from .guard import guard
 
 # 测试时可替换：ai_caller(ai, prompt, sid, images, mode, room) -> (ok, text, sid, edits)
-ai_caller = agents.call_ai
+ai_caller = drivers.call
 ai_native_compact = agents.compact_native   # (ai, sid, room) -> bool
 
 QUOTE_LEN = 200
+MAX_CONTEXT = 120          # context = full 的 AI（没有会话、每轮递整份记录）最多递多少条，再长就只给最近的
 MAX_BOARD = 100
 MAX_BOARD_TEXT = 500
 BOARD_CMD = re.compile(r"^\s*[【\[](公告|待办|完成|删)[】\]]\s*(.*?)\s*$")
@@ -41,41 +42,62 @@ def who_by_key(key):
         return KEYS.get(key or "")
 
 
+# 每个 AI 各一份的那些字段，缺了按这里的默认值补（装了新 agent 之后老会议也能用）
+PER_AI_EMPTY = {"last_seen": -1, "announcement_seen": 0, "handed_off": False, "returned": False,
+                "mode_seen": "discuss", "ctx": None, "old_sessions": []}
+
+
 def default_meta(title, ann, wd=None):
     return {"title": title or "会议", "announcement": ann or "", "ann_ver": 1, "created": now_str(),
             "workdir": wd or PROJECT,
-            "status": "open", "claude_session": None, "codex_session": None,
-            "last_seen": {"claude": -1, "codex": -1}, "announcement_seen": {"claude": 0, "codex": 0},
-            "handed_off": {"claude": False, "codex": False}, "returned": {"claude": False, "codex": False},
-            "mode": "discuss", "mode_seen": {"claude": "discuss", "codex": "discuss"},
+            "status": "open",
+            "last_seen": {a: -1 for a in AIS}, "announcement_seen": {a: 0 for a in AIS},
+            "handed_off": {a: False for a in AIS}, "returned": {a: False for a in AIS},
+            "mode": "discuss", "mode_seen": {a: "discuss" for a in AIS},
             "step_seq": 0, "steps": {},
-            "board": [], "board_seq": 0, "ctx": {"claude": None, "codex": None},
-            "models": {"claude": {"model": "", "effort": ""}, "codex": {"model": "", "effort": ""}},
+            "board": [], "board_seq": 0, "ctx": {a: None for a in AIS},
+            "models": {a: {"model": "", "effort": ""} for a in AIS},
             "tools": {a: agents.default_tools(a) for a in AIS},
             "goal_synced": {"codex": None},
-            "old_sessions": {"claude": [], "codex": []}}
+            "participants": registry.default_participants(),
+            "old_sessions": {a: [] for a in AIS}}
 
 
 def fix_meta(m):
     d = default_meta("", "")
     for k, v in d.items():
         m.setdefault(k, v)
-    for k in ("last_seen", "announcement_seen", "handed_off", "returned", "mode_seen", "ctx", "old_sessions"):
+    for k, empty in PER_AI_EMPTY.items():
+        if not isinstance(m.get(k), dict):
+            m[k] = dict(d.get(k) or {})
         for a in AIS:
-            m[k].setdefault(a, d[k][a])
+            if a in d.get(k, {}):
+                m[k].setdefault(a, d[k][a])
+            else:
+                m[k].setdefault(a, list() if isinstance(empty, list) else empty)
     if not isinstance(m.get("models"), dict):
-        m["models"] = d["models"]
+        m["models"] = dict(d["models"])
     for a in AIS:
         if not isinstance(m["models"].get(a), dict):
             m["models"][a] = {"model": "", "effort": ""}
         m["models"][a].setdefault("model", "")
         m["models"][a].setdefault("effort", "")
     if not isinstance(m.get("tools"), dict):
-        m["tools"] = d["tools"]
+        m["tools"] = dict(d["tools"])
     for a in AIS:
         m["tools"][a] = agents.fix_tools(a, m["tools"].get(a))
     if not isinstance(m.get("goal_synced"), dict):
         m["goal_synced"] = {"codex": None}
+    # 谁参加这场会议。老会议没有这个字段：按原来的 claude + codex 算，不让它们突然多出几个 AI
+    ok = registry.enabled_ids()
+    cur = m.get("participants")
+    if not isinstance(cur, list):
+        cur = [a for a in ("claude", "codex") if a in ok] or list(ok)
+    cur = [a for a in cur if isinstance(a, str) and (a in ok or registry.get(a) is None)]
+    for a in AIS:      # 已经建过会话的，就算没勾也留着：不然会议记录里它说过的话没人认
+        if m.get(a + "_session") and a not in cur:
+            cur.append(a)
+    m["participants"] = cur or (ok[:1] if ok else ["claude"])
     return m
 
 
@@ -165,7 +187,8 @@ class Room:
         self.live = {}        # ai -> {"text": 这一轮最近说的一句中途的话, "time": 时:分:秒, "since": 开跑的时间戳}
         self.last_ctx = {}    # call_ai 填，process_job 成功后搬进 meta["ctx"]
         self.procs = {}       # ai -> 正在跑的子进程（claude -p），"停"的时候连同子孙进程一起杀
-        self.ai_locks = {a: threading.Lock() for a in AIS}
+        self.ai_locks = {}           # 按需创建：会开完之后才装上的 agent 也得能叫
+        self._locks_guard = threading.Lock()
         self.jobs = queue.Queue()   # 这场会议 AI 之间的对话：(标签, 类型, ai)，一个跑完下一个才开始
         self.codex = None     # agents.CodexServer，第一次叫 codex 时起
         self.keys = {}
@@ -180,6 +203,34 @@ class Room:
         threading.Thread(target=agents.prewarm, args=(self.workdir(),), daemon=True).start()
 
     # ---------- 基本 ----------
+    @property
+    def ais(self):
+        """这场会议有哪些 AI。注册表里启用的 + 会外参与者（自己经 /api/post 报到的，注册表里没有）。"""
+        cur = self.meta.get("participants") or []
+        got = [a for a in cur if a in AIS or registry.get(a) is None]
+        return got or list(AIS)[:1]
+
+    def is_guest(self, ai):
+        """会外参与者：不在注册表里（IDE 里的 agent、随便哪个 harness 自己报到的）。"""
+        return registry.get(ai) is None
+
+    def join_external(self, pid, label=None):
+        """让一个会外的东西自己进来：第一次发言带 join=true 就到这场会议报到。返回 (ok, 错误)。"""
+        pid = (pid or "").strip().lower()
+        if not registry.ID_RE.match(pid):
+            return False, "id 只能是小写字母开头、字母数字和 - _，最长 24"
+        if pid in registry.RESERVED or pid in registry.CANT_MENTION:
+            return False, "%s 是会议室自己用的名字" % pid
+        with self.lock:
+            cur = list(self.meta.get("participants") or [])
+            if pid in cur:
+                return True, ""
+            self._ensure_meta_for([pid])
+            self.meta["participants"] = cur + [pid]
+            self.save_meta()
+            self.add_message("系统", "%s 加入了（会外参与者，会议室不主动叫它）" % (label or pid), quiet=True)
+        return True, ""
+
     def workdir(self):
         """这场会议的工作文件夹：两个 AI 在这里跑、git 存档 / 撤回也在这里。开会时定死（claude 的会话按文件夹存，中途换了接不上）。"""
         return self.meta.get("workdir") or PROJECT
@@ -468,10 +519,15 @@ class Room:
         return d, upto
 
     def build_prompt(self, ai, mode=None):
-        """返回 (prompt, upto, ann_ver, images)。会话还没建 = 第一次叫，带前言和目标；否则只递增量。"""
+        """返回 (prompt, upto, ann_ver, images)。会话还没建 = 第一次叫，带前言和目标；否则只递增量。
+        配置里 context = full 的（没有会话概念的 CLI：gemini、crush 之类）每轮都递整份会议记录，它自己没有记忆。"""
         with self.lock:
+            full = (registry.get(ai) or {}).get("context") == "full"
             first = not self.meta.get(ai + "_session")
             d, upto = self.delta_for(ai)
+            if full:                      # 没会话的：给整份记录，太长的截掉前面
+                d = [m for m in self.messages if not m.get("quiet") and m.get("not_for") != ai][-MAX_CONTEXT:]
+                first = True
             ver = self.meta["ann_ver"]
             parts = []
             mode = mode or self.mode()
@@ -487,7 +543,8 @@ class Room:
                 if self.meta["returned"][ai]:
                     parts.append("（你刚才在终端里跟用户单独干了一段活，那段你自己记得；下面是这期间会议室里的新消息）")
             body = "\n\n".join(fmt_message(m) for m in d) or "（没有新消息）"
-            parts += [("会议记录：\n" if first else "新消息：\n") + body, CLOSING % ai]
+            head = "会议记录：" if full else ("会议记录：" if first else "新消息：")
+            parts += [head + "\n" + body, CLOSING % ai]
         return "\n\n".join(parts), upto, ver, delta_images(d)
 
     # ---------- 模型 / effort ----------
@@ -512,7 +569,7 @@ class Room:
 
     def set_models(self, ai, model, effort):
         """改某个 AI 在这场会议的模型 / effort（空 = 用会议室默认）。返回 (ok, 错误, 是否换了模型)。"""
-        if ai not in AIS:
+        if ai not in self.ais:
             return False, "未知 AI", False
         model, effort = (model or "").strip(), (effort or "").strip()
         if model and not agents.MODEL_RE.match(model):
@@ -537,7 +594,7 @@ class Room:
 
     def set_tools(self, ai, cfg):
         """改这场会议里某个 AI 的 MCP / 技能 / 插件开关。返回 (ok, 错误)。"""
-        if ai not in AIS:
+        if ai not in self.ais:
             return False, "未知 AI"
         new = agents.fix_tools(ai, cfg)
         with self.lock:
@@ -550,6 +607,46 @@ class Room:
             self.add_message("系统", "%s 的工具换了：%s" % (ai, agents.tools_summary(ai, new)), quiet=True)
         if ai == "codex":
             agents.stop_codex(self)   # 下一轮按新配置重起
+        return True, ""
+
+    # ---------- 谁参加这场会议 ----------
+    def _ensure_meta_for(self, ids):
+        """把一个新 agent 在这场比赛里要用的那些字段补上（老会议里没有它）。"""
+        for a in ids:
+            for k, empty in PER_AI_EMPTY.items():
+                self.meta.setdefault(k, {})
+                self.meta[k].setdefault(a, list() if isinstance(empty, list) else empty)
+            self.meta.setdefault("models", {}).setdefault(a, {"model": "", "effort": ""})
+            self.meta.setdefault("tools", {}).setdefault(a, agents.default_tools(a))
+
+    def set_participants(self, ids):
+        """改这场会议有哪些 AI。返回 (ok, 错误)。没装/没启用的不能勾；至少要留一个。"""
+        ok_ids = registry.enabled_ids()
+        want = [a for a in (ids or []) if isinstance(a, str)]
+        bad = [a for a in want if a not in ok_ids]
+        if bad:
+            return False, "没装或没启用：%s" % "、".join(bad)
+        want = [a for a in ok_ids if a in want]      # 按注册表的顺序
+        if not want:
+            return False, "至少要留一个 AI"
+        with self.lock:
+            if self.busy_for():
+                return False, "AI 还在回复，等它们说完再改"
+            old = list(self.ais)
+            if want == old:
+                return True, ""
+            self._ensure_meta_for(want)
+            self.meta["participants"] = want
+            self.meta["tools"] = {a: self.meta["tools"].get(a) or agents.default_tools(a) for a in AIS}
+            self.save_meta()
+            added = [a for a in want if a not in old]
+            gone = [a for a in old if a not in want]
+            bits = ["这场会议现在有：" + "、".join(want)]
+            if added:
+                bits.append("新加入：" + "、".join(added))
+            if gone:
+                bits.append("退出：" + "、".join(gone) + "（它的会话还留着，重新勾上就能接上）")
+            self.add_message("系统", "；".join(bits), quiet=True)
         return True, ""
 
     # ---------- 模式 ----------
@@ -708,8 +805,15 @@ class Room:
         return True, ""
 
     # ---------- 发言、排队、叫 AI ----------
+    def ai_lock(self, ai):
+        with self._locks_guard:
+            lk = self.ai_locks.get(ai)
+            if lk is None:
+                lk = self.ai_locks[ai] = threading.Lock()
+            return lk
+
     def job_tag(self, ai):
-        return "%s#%d" % (self.id, self.state["epoch"][ai])
+        return "%s#%d" % (self.id, self.state["epoch"].get(ai, 0))
 
     def busy_for(self, ai=None):
         with self.lock:
@@ -747,7 +851,7 @@ class Room:
             if not 0 <= mid < len(self.messages):
                 return None
             m = self.messages[mid]
-        if m["speaker"] not in ("你",) + AIS:
+        if m["speaker"] not in ("你",) + tuple(AIS):
             return None
         t = re.sub(r"(\*\*|__|~~|`+|^#+\s*|^\s*[-*>]\s+)", "", m.get("text") or "", flags=re.M)   # 摘要里不要 markdown 符号
         t = " ".join(t.split())
@@ -767,23 +871,28 @@ class Room:
                 return False
             cmd = text.strip().lower().split()
             if speaker == "你" and not attachments and cmd and cmd[0] == "/compact" and len(cmd) <= 2 and set(cmd[1:]) <= set(AIS):
-                self.request_compact(cmd[1:] or AIS)
+                self.request_compact(cmd[1:] or self.ais)
                 return True
             if speaker == "你":
                 names = mentions(text)
                 # 没 @ 人、引用的是某个 AI 的话：就是回它，只叫它
-                quoted = reply_to["speaker"] if reply_to and reply_to["speaker"] in AIS else None
-                targets = [n for n in names if n in AIS] or ([quoted] if quoted else list(AIS))
+                quoted = reply_to["speaker"] if reply_to and reply_to["speaker"] in self.ais else None
+                want = [n for n in names if n not in ("用户",)]
+                targets = [n for n in want if n in self.ais]
+                if not want:                      # 没 @ 任何 AI（只 @ 了用户或什么都没 @）：叫会里的全部
+                    targets = [quoted] if quoted else list(self.ais)
+                elif not targets:                 # @ 了一个不在会里的 AI：别顺手把别人叫起来
+                    self.system_note("%s 不在这场会议里（现在有：%s）" % ("、".join(want), "、".join(self.ais)))
                 to_user = False
-            elif speaker in AIS:
+            elif speaker in self.ais:
                 # external 的 @自己 也要叫会议室里的同名 AI，所以不排除
                 names = mentions(text, exclude=None if external else speaker)
-                targets = [n for n in names if n in AIS]
+                targets = [n for n in names if n in self.ais]
                 to_user = "用户" in names
             else:
                 targets, to_user = [], False
             changes, send_errs = [], []
-            if speaker in AIS:
+            if speaker in self.ais:
                 text, changes = self.apply_board_cmds(speaker, text)
                 text, sent, send_errs = self.apply_send_cmds(text)
                 attachments = (attachments or []) + sent
@@ -794,6 +903,13 @@ class Room:
             if speaker == "你":
                 self.state["chain"] = 0
             for t in targets:
+                if t not in self.ais:
+                    continue
+                if self.is_guest(t) or (registry.get(t) or {}).get("driver") == "external":
+                    if t in names:      # 会外参与者只在被点名时提示一句，不叫、不排队
+                        self.system_note("%s 是会外参与者：要在它自己的界面里看这场会议、用 MCP 的 post_to_room 发言"
+                                         % ((registry.get(t) or {}).get("label") or t))
+                    continue
                 if self.meta["handed_off"][t]:
                     self.system_note("%s 现在在终端里，回来后会补看" % t)
                 else:
@@ -834,7 +950,7 @@ class Room:
 
     def process_job(self, ai, tag, user=False):
         """叫一次 AI。整个过程持有这个 AI 自己的锁（同一个 AI 永远串行）；增量在拿到锁之后才取快照。"""
-        with self.ai_locks[ai]:
+        with self.ai_lock(ai):
             with self.lock:
                 if ai in self.pending:
                     self.pending.remove(ai)
@@ -911,10 +1027,11 @@ class Room:
                 guard.release_turn((self.id, ai))
 
     # ---------- 压缩 ----------
-    def request_compact(self, targets=AIS):
+    def request_compact(self, targets=None):
         """每个 AI 各压各的：各开一个线程，只等它自己的锁，另一个 AI 照常能叫。返回这次排上的 AI（已在压的不重复排）。"""
+        targets = self.ais if targets is None else targets
         with self.lock:
-            todo = [a for a in AIS if a in targets and a not in self.state["compacting"]]
+            todo = [a for a in self.ais if a in targets and a not in self.state["compacting"]]
             self.state["compacting"].update(todo)
             if todo:
                 self.system_note("开始压缩：" + "、".join(todo))
@@ -975,7 +1092,7 @@ class Room:
     def process_compact(self, ai):
         """压一个 AI：等它手上的活干完（它自己的锁），压完插一条系统消息。"""
         try:
-            with self.ai_locks[ai]:
+            with self.ai_lock(ai):
                 with self.lock:
                     if self.closed:
                         return
@@ -1012,13 +1129,13 @@ class Room:
         return True, ""
 
     # ---------- 停 ----------
-    def stop_ais(self, targets=AIS):
+    def stop_ais(self, targets=None):
         """用户按"停"：targets 里正在跑的 AI 连同它起的命令（git push 之类）一起杀掉，它们排着的全部作废；别的 AI、别的会议不受影响。
         返回给人看的描述。"""
-        targets = [a for a in targets if a in AIS]
+        targets = [a for a in (self.ais if targets is None else targets) if a in self.ais]
         with self.lock:
             for a in targets:
-                self.state["epoch"][a] += 1     # 已经排上的（队列里、等锁的）开跑时对不上计数，自己放弃
+                self.state["epoch"][a] = self.state["epoch"].get(a, 0) + 1     # 已经排上的（队列里、等锁的）开跑时对不上计数，自己放弃
             self.pending[:] = [a for a in self.pending if a not in targets]
             keep = []
             while True:
@@ -1052,12 +1169,14 @@ class Room:
     # ---------- 交给终端 ----------
     def set_handoff(self, ai, on):
         """返回 (ok, 错误或提示)。"""
-        if ai not in AIS:
+        if ai not in self.ais:
             return False, "未知 AI"
         with self.lock:
             if on == self.meta["handed_off"][ai]:
                 return True, ""
             if on:
+                if not (registry.get(ai) or {}).get("caps", {}).get("handoff"):
+                    return False, "这个 AI 不支持交给终端"
                 if not self.meta.get(ai + "_session"):
                     return False, "还没叫过它，先在会议里 @ 它一次"
                 if self.busy_for(ai):
@@ -1072,11 +1191,27 @@ class Room:
                 self.system_note("%s 回到会议室" % ai)
         return True, ""
 
+    def can_handoff(self, ai):
+        """这个 AI 能不能"交给终端"：得有会话，而且驱动支持（配置里给了 handoff 命令模板）。"""
+        spec = registry.get(ai) or {}
+        return bool(self.meta.get(ai + "_session")) and bool((spec.get("caps") or {}).get("handoff"))
+
     def handoff_cmd(self, ai):
+        """在终端里接着聊这个会话的命令；不支持返回 None。"""
         sid = self.meta.get(ai + "_session")
-        if not sid:
+        spec = registry.get(ai) or {}
+        if not sid or not (spec.get("caps") or {}).get("handoff"):
             return None
-        return "cd \"%s\"; %s" % (self.workdir(), "claude --resume " + sid if ai == "claude" else "codex resume " + sid)
+        if ai == "claude":
+            line = "claude --resume " + sid
+        elif ai == "codex":
+            line = "codex resume " + sid
+        else:
+            tpl = spec.get("handoff") or ""
+            if not tpl:
+                return None
+            line = tpl.replace("{session}", sid)
+        return "cd \"%s\"; %s" % (self.workdir(), line)
 
     # ---------- 给页面 ----------
     def summary(self):
@@ -1091,19 +1226,26 @@ class Room:
                     "last_time": self.messages[-1]["time"] if self.messages else ""}
 
     def api_state(self):
+        gi = ws.git_info(self.workdir())   # 锁外跑 git
         with self.lock:
             ais = {}
-            for a in AIS:
+            for a in self.ais:
                 ais[a] = {"session": bool(self.meta.get(a + "_session")), "handed_off": self.meta["handed_off"][a],
                           "busy": self.busy_for(a), "compacting": a in self.state["compacting"], "cmd": self.handoff_cmd(a),
+                        "caps": dict((registry.get(a) or {}).get("caps") or {}), "handoff": self.can_handoff(a),
                           "model": self.model_info(a), "ctx": self.meta["ctx"].get(a),
                           "tools": agents.tools_summary(a, self.meta["tools"][a])}
             return {"meeting": self.id, "title": self.meta["title"], "status": self.meta["status"],
+                    "participants": list(self.ais), "agents": registry.catalog()["agents"],
                     "archived": is_archived(self.meta["status"]),
                     "announcement": self.meta["announcement"], "ann_ver": self.meta["ann_ver"], "ais": ais,
                     "board": self.meta["board"], "workdir": self.workdir(), "default_workdir": PROJECT, "stop_each": True,
                     "mode": self.mode(),
                     "steps_undone": [int(k) for k, v in self.meta["steps"].items() if v.get("undone")],
+                    "steps": [{"seq": int(k), "ai": v.get("ai", "?"), "time": v.get("time", ""), "undone": bool(v.get("undone")),
+                               "files": [{"path": f.get("path", ""), "st": f.get("st", "M")} for f in v.get("files") or []]}
+                              for k, v in sorted(self.meta["steps"].items(), key=lambda kv: int(kv[0]))[-40:]],
+                    "git": gi,
                     "running": list(self.state["running"]), "queued": self.queued_count(),
                     "claims": [c for c in guard.listing() if c["room"] == self.id or in_dir(c["shown"], self.workdir())],
                     "live": {a: {"text": v["text"], "time": v["time"], "secs": int(time.time() - v["since"])} for a, v in list(self.live.items())}}
@@ -1176,7 +1318,9 @@ def meeting_sessions(m):
     out = {}
     for a in AIS:
         ss = [m.get(a + "_session")] + list(((m.get("old_sessions") or {}).get(a)) or [])
-        out[a] = [v for i, v in enumerate(ss) if isinstance(v, str) and SID_RE.match(v) and v not in ss[:i]]
+        ids = [v for i, v in enumerate(ss) if isinstance(v, str) and SID_RE.match(v) and v not in ss[:i]]
+        if ids or (a + "_session") in m:     # 这场会议用过的才列（老会议没有新 agent 的字段）
+            out[a] = ids
     return out
 
 

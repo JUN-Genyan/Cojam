@@ -1,0 +1,38 @@
+{
+  "id": "gemini",
+  "label": "Gemini CLI",
+  "color": "#4285f4",
+  "driver": "cli",
+  "bin": [
+    "gemini"
+  ],
+  "verified": false,
+  "note": "照 gemini-cli 的 headless 文档写的：-p 提问、--output-format json 回一个 {response, stats} 对象。文档里的 JSON 格式不带会话 id，所以这里当无会话用（每轮递整份会议记录）。没实测。",
+  "args": {
+    "base": [],
+    "read": [],
+    "work": [
+      "--approval-mode",
+      "yolo"
+    ],
+    "new": [
+      "-p",
+      "{prompt}",
+      "--output-format",
+      "json"
+    ]
+  },
+  "prompt": "arg",
+  "parse": {
+    "type": "json",
+    "text": "response"
+  },
+  "context": "full",
+  "models": [],
+  "efforts": [],
+  "default": [
+    "",
+    ""
+  ],
+  "caps": {}
+}

@@ -136,7 +136,7 @@ class CodexImages(unittest.TestCase):
 
     def test_rules(self):
         pre = common.preamble("work", "D:/x")
-        for k in ("codex 自带生图", "同一时间只能一个人用", "20 分钟", "别只描述"):
+        for k in ("自带生图", "同一时间只能一个人用", "20 分钟", "别只描述"):
             self.assertIn(k, pre)
 
 

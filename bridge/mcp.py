@@ -60,10 +60,18 @@ EXT_TOOLS = [
      "inputSchema": _obj({"room": {"type": "string"}, "since": {"type": "integer", "minimum": 0},
                           "limit": {"type": "integer", "minimum": 1, "maximum": 200}}), "annotations": {"readOnlyHint": True}},
     {"name": "post_to_room", "title": "往会议里发言",
-     "description": "以 claude 或 codex 的身份往会议里发一句（页面上显示成会议外的同名 AI 说的）。里面 @claude / @codex 会叫会议里的 AI 回话，@用户 会提醒用户。"
-                    "room 不填 = 用户最近打开的那场。",
-     "inputSchema": _obj({"room": {"type": "string"}, "speaker": {"type": "string", "enum": list(EXTERNAL_SPEAKERS)},
-                          "text": {"type": "string"}}, ["speaker", "text"])},
+     "description": "以某个身份往会议里发一句（页面上显示成会议外的同名 AI 说的）。里面 @用户 会提醒用户，@别的 AI 会叫会议室里的 AI 回话。"
+                    "第一次用一个新名字时带 join=true 报到，之后就用这个名字发言。room 不填 = 用户最近打开的那场。",
+     "inputSchema": _obj({"room": {"type": "string"}, "speaker": {"type": "string", "description": "你以谁的身份发言，小写字母开头，比如 myharness"},
+                          "text": {"type": "string"}, "join": {"type": "boolean", "description": "第一次用时设 true"},
+                          "label": {"type": "string", "description": "界面上显示的名字（可不填）"}},
+                         ["speaker", "text"])},
+    {"name": "wait_for_message", "title": "等新消息",
+     "description": "长轮询：一直等到这场会议有新消息、或者超时（最多 55 秒）。用来等 @自己 的话，然后 read_room 看内容再 post_to_room 回。"
+                    "返回新消息和下次用的 since；超时返回空。",
+     "inputSchema": _obj({"room": {"type": "string"}, "since": {"type": "integer", "minimum": 0},
+                          "timeout": {"type": "integer", "minimum": 1, "maximum": 55}},
+                         ["since"]), "annotations": {"readOnlyHint": True}},
 ]
 
 
@@ -181,15 +189,39 @@ def call_ext_tool(name, args):
         return "会议：%s（%s）\n目标：\n%s\n\n看板：\n%s\n\n消息（共 %d 条，下次从 since=%d 读起）：\n%s" % (
             r.title(), r.id, r.goal_text(), r.board_text(), len(r.messages), len(r.messages), body)
     if name == "post_to_room":
-        sp = str(args.get("speaker") or "")
-        if sp not in EXTERNAL_SPEAKERS:
-            raise ToolError("speaker 只能是 " + " / ".join(EXTERNAL_SPEAKERS))
+        sp = str(args.get("speaker") or "").strip().lower()
+        if not sp:
+            raise ToolError("speaker 必填（你以谁的身份发言）")
         text = str(args.get("text") or "").strip()
         if not text:
             raise ToolError("text 不能为空")
         r = _room_for(args.get("room"))
+        if sp not in EXTERNAL_SPEAKERS and sp not in r.ais:
+            if not args.get("join"):
+                raise ToolError("speaker %r 还没在这场会议里；第一次带上 join=true" % sp)
+            ok, err = r.join_external(sp, args.get("label"))
+            if not ok:
+                raise ToolError(err)
         r.handle_message(sp, text, origin="external")
-        return "发到「%s」了" % r.title()
+        return "发到「%s」了（以 %s 的身份）" % (r.title(), sp)
+    if name == "wait_for_message":
+        r = _room_for(args.get("room"))
+        try:
+            since = max(0, int(args.get("since") or 0))
+            wait = max(1, min(55, int(args.get("timeout") or 30)))
+        except (TypeError, ValueError):
+            raise ToolError("since / timeout 要是整数")
+        end = time.time() + wait
+        while True:
+            with r.lock:
+                msgs = [m for m in r.messages[since:] if not m.get("quiet")]
+            if msgs or time.time() >= end:
+                break
+            time.sleep(0.5)
+        if not msgs:
+            return "（%d 秒内没有新消息，下次还是从 since=%d 读）" % (wait, since)
+        body = "\n\n".join("#%d %s %s" % (m["id"], m["time"], R.fmt_message(m)) for m in msgs)
+        return "新消息 %d 条（下次从 since=%d 读）：\n%s" % (len(msgs), len(r.messages), body)
     raise ToolError("没有这个工具：%s" % name)
 
 

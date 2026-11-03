@@ -1,0 +1,39 @@
+{
+  "id": "aider",
+  "label": "Aider",
+  "color": "#22c55e",
+  "driver": "cli",
+  "bin": [
+    "aider"
+  ],
+  "verified": false,
+  "note": "aider --message 跑一次就退出；它的记忆在仓库里，没有会话 id，所以这里当无会话用。输出里会混着 diff 和统计行，回复不一定干净，用 doctor 看看再决定要不要留。没实测。",
+  "args": {
+    "base": [],
+    "read": [
+      "--dry-run",
+      "--yes"
+    ],
+    "work": [
+      "--yes",
+      "--no-auto-commits"
+    ],
+    "new": [
+      "--message",
+      "{prompt}",
+      "--no-pretty"
+    ]
+  },
+  "prompt": "arg",
+  "parse": {
+    "type": "text"
+  },
+  "context": "full",
+  "models": [],
+  "efforts": [],
+  "default": [
+    "",
+    ""
+  ],
+  "caps": {}
+}

@@ -1,0 +1,19 @@
+{
+  "id": "antigravity",
+  "label": "Antigravity",
+  "letter": "A",
+  "color": "#34a853",
+  "driver": "external",
+  "detect": [
+    "%LOCALAPPDATA%\\Programs\\antigravity\\resources\\bin\\language_server.exe",
+    "%LOCALAPPDATA%\\Programs\\Antigravity\\resources\\bin\\language_server.exe"
+  ],
+  "note": "会外参与者：会议室不叫它，你在 Antigravity 里让它用 MCP 的 ai-bridge 工具（list_rooms / read_room / post_to_room）发言。接法：python -m bridge.install antigravity，然后重启 Antigravity。",
+  "context": "full",
+  "models": [],
+  "efforts": [],
+  "default": [
+    "",
+    ""
+  ]
+}

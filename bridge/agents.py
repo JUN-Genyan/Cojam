@@ -8,6 +8,7 @@ codex：每场会议一个常驻的 codex app-server（stdio 上收发 JSON-RPC�
 import glob, json, os, queue, re, shutil, subprocess, sys, tempfile, threading, time, uuid
 from datetime import datetime
 
+from . import registry
 from .common import (AIS, LOG_DIR, NO_WINDOW, PORT, PROJECT, TIMEOUT, in_dir, kill_tree, norm, read_json,
                      resolve_cmd, run_cmd, run_stream, timeout_for, timeout_text)
 from .guard import block_note, block_text, guard
@@ -30,8 +31,17 @@ CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"]   # claude --help 里
 CODEX_EFFORTS_DEFAULT = ["low", "medium", "high"]
 MODEL_RE = re.compile(r"^[A-Za-z0-9][\w.\-:/\[\]]{0,79}$")
 EFFORT_RE = re.compile(r"^[A-Za-z0-9_\-]{1,20}$")
-# 会议没自己设时用的模型 / effort（用户 2026-10-16 定），不再跟随 ~/.claude、~/.codex 的全局设置
-ROOM_DEFAULTS = {"claude": ("claude-opus-5-5", "medium"), "codex": ("gpt-6.1-sol", "medium")}
+# 会议没自己设时用的模型 / effort（用户 2026-10-16 定），不再跟随 ~/.claude、~/.codex 的全局设置。
+# 别的 agent 从注册表里那份配置的 default 取（内置这两个写死，保持原样）。
+class _Defaults(dict):
+    def __getitem__(self, ai):
+        if dict.__contains__(self, ai):
+            return dict.__getitem__(self, ai)
+        d = list(((registry.get(ai) or {}).get("default") or [])) + ["", ""]
+        return (d[0], d[1])
+
+
+ROOM_DEFAULTS = _Defaults({"claude": ("claude-opus-5-5", "medium"), "codex": ("gpt-6.1-sol", "medium")})
 
 
 def global_claude(for_model=None):
@@ -82,6 +92,8 @@ def codex_catalog():
 def effort_options(ai, model=None):
     if ai == "claude":
         return list(CLAUDE_EFFORTS)
+    if ai != "codex":
+        return list((registry.get(ai) or {}).get("efforts") or [])
     cur = model or ROOM_DEFAULTS["codex"][0]
     for slug, lv in codex_catalog():
         if slug == cur and lv:
@@ -95,9 +107,14 @@ def effort_options(ai, model=None):
 
 
 def model_options(ai):
-    out = list(CLAUDE_MODEL_PRESETS) if ai == "claude" else [s for s, _ in codex_catalog()]
+    if ai == "claude":
+        out = list(CLAUDE_MODEL_PRESETS)
+    elif ai == "codex":
+        out = [s for s, _ in codex_catalog()]
+    else:
+        out = list((registry.get(ai) or {}).get("models") or [])
     d = ROOM_DEFAULTS[ai][0]
-    if d not in out:
+    if d and d not in out:
         out.insert(0, d)
     return out
 
@@ -140,6 +157,8 @@ def plugin_on(p, cfg):
 
 
 def tools_summary(ai, cfg):
+    if ai not in ("claude", "codex"):
+        return "这个 AI 不接 MCP / 插件 / 技能开关"
     bits = ["MCP：" + ("、".join(cfg["mcp"]) + "（干活模式）" if cfg["mcp"] else "只有 bridge")]
     if cfg["plugins"]:
         on = sum(1 for v in cfg["plugins"].values() if v)
@@ -326,6 +345,8 @@ def prewarm(wd):
 
 def tools_info(ai, cfg, wd):
     """胶囊弹窗里"工具"那一栏：能选的 MCP、插件、技能，各自在这场会议里开没开。"""
+    if ai not in ("claude", "codex"):
+        return {"ai": ai, "mcp": [], "plugins": [], "skills": [], "cfg": cfg, "note": "这个 AI 不接 MCP / 插件 / 技能"}
     if ai == "claude":
         defs = _cached(("cmcp", wd), lambda: claude_mcp_defs(wd), 20)
         plugs = _cached(("cplug", wd), lambda: claude_plugins(wd))
@@ -588,6 +609,8 @@ def claude_boundaries(sid):
 
 def compact_native(ai, sid, room=None):
     """能真压缩就压缩，返回 True；这个 AI 不支持（codex exec 把 /compact 当普通文字）返回 False。"""
+    if ai not in ("claude", "codex"):
+        return False
     if ai == "codex":
         if CODEX_BACKEND == "exec":
             return False

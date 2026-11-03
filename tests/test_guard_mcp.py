@@ -219,7 +219,7 @@ class MCP(unittest.TestCase):
         r = R.rooms.create("给外面读", "目标E", WD)
         R.set_last(r.id)
         names = [t["name"] for t in self.rpc("tools/list")[1]["result"]["tools"]]
-        self.assertEqual(names, ["list_rooms", "read_room", "post_to_room"])
+        self.assertEqual(names, ["list_rooms", "read_room", "post_to_room", "wait_for_message"])
         res = self.rpc("tools/call", {"name": "list_rooms", "arguments": {}})[1]["result"]
         self.assertIn(r.id, res["content"][0]["text"])
         res = self.rpc("tools/call", {"name": "post_to_room", "arguments": {"speaker": "codex", "text": "外面的 codex 说话", "room": r.id}})[1]["result"]

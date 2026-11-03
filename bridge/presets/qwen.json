@@ -1,0 +1,38 @@
+{
+  "id": "qwen",
+  "label": "Qwen Code",
+  "color": "#615ced",
+  "driver": "cli",
+  "bin": [
+    "qwen"
+  ],
+  "verified": false,
+  "note": "Qwen Code 是 gemini-cli 的分支，命令和输出格式基本一样（-p + --output-format json → {response}）。没实测。",
+  "args": {
+    "base": [],
+    "read": [],
+    "work": [
+      "--approval-mode",
+      "yolo"
+    ],
+    "new": [
+      "-p",
+      "{prompt}",
+      "--output-format",
+      "json"
+    ]
+  },
+  "prompt": "arg",
+  "parse": {
+    "type": "json",
+    "text": "response"
+  },
+  "context": "full",
+  "models": [],
+  "efforts": [],
+  "default": [
+    "",
+    ""
+  ],
+  "caps": {}
+}

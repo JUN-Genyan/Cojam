@@ -51,11 +51,13 @@ body.work header{box-shadow:inset 0 -2px 0 var(--work)}
 #bMode.on{border-color:color-mix(in srgb,var(--work) 50%,transparent);color:var(--work);background:color-mix(in srgb,var(--work) 8%,transparent)}
 #menu{display:none;font-size:18px;padding:2px 10px;border:1px solid var(--line);background:transparent;color:var(--fg);border-radius:8px}
 
-/* 两个 AI 的胶囊：名字前一个色点，在想时会呼吸 */
+/* AI 的胶囊：名字前一个色点，在想时会呼吸 */
 .cap .cn{font-weight:600}
 .cap .cn::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:1px;background:var(--faint)}
 #capClaude .cn::before{background:var(--claude)}
 #capCodex .cn::before{background:var(--codex)}
+.cap .cn::before{background:var(--c,var(--faint))}
+#caps{display:contents}
 .cap .cm,.cap .cs,.cap .cx{color:var(--mut)}
 .cap .cm::before,.cap .cs::before,.cap .cx::before{content:" · "}
 .cap .cx.hi{color:var(--danger);font-weight:600}
@@ -84,10 +86,6 @@ body.work header{box-shadow:inset 0 -2px 0 var(--work)}
 #menu.attn::after{content:"";position:absolute;top:3px;right:3px;width:8px;height:8px;border-radius:50%;background:var(--work)}
 
 /* ===== 正在改的文件（文件护栏）===== */
-#claims{display:none;margin-top:14px;border-top:1px solid var(--line);padding-top:10px}
-#claims.on{display:block}
-#claims .ch{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;color:var(--faint);letter-spacing:.08em;margin-bottom:6px}
-#claims .ch button{margin-left:auto;font-size:11.5px;letter-spacing:0;font-weight:500}
 #claimList{list-style:none;margin:0;padding:0}
 #claimList li{display:flex;gap:8px;align-items:flex-start;padding:5px 6px;border-radius:8px;font-size:12.5px;line-height:1.45}
 #claimList li:hover{background:var(--hover)}
@@ -108,6 +106,19 @@ body.work header{box-shadow:inset 0 -2px 0 var(--work)}
 .tl li.lk{opacity:.6}
 .tl .empty{color:var(--mut);justify-content:center}
 #mbox h4{margin:12px 0 6px;font-size:13px;font-weight:650;color:var(--mut)}
+/* AI 成员：右边的操作（一键接入 / 删除） */
+.tl li{position:relative}
+.tl .agAct{margin-left:auto;display:flex;gap:6px;align-items:center;flex:none;flex-wrap:wrap;justify-content:flex-end}
+.tl .agBtn{font-size:12px;padding:3px 10px;border:1px solid var(--line);background:transparent;color:var(--fg);border-radius:999px;cursor:pointer;white-space:nowrap}
+.tl .agBtn:hover{background:var(--soft)}
+.tl .agBtn.del{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 45%,transparent)}
+.tl .agOk{font-size:12px;color:var(--mut);white-space:nowrap}
+#agList{max-height:46vh}
+.tl .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}
+#mbox code{display:inline-block;background:var(--soft);padding:2px 7px;border-radius:6px;font-size:12.5px;word-break:break-all}
+.agF{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 10px;align-items:center;margin:12px 0 4px}
+.agF label{font-size:12.5px;color:var(--mut);text-align:right;white-space:nowrap}
+.agF input,.agF select{margin-bottom:0}
 
 /* ===== 弹窗 ===== */
 #modal{display:none;position:fixed;inset:0;z-index:50;background:rgba(10,10,12,.4);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);align-items:center;justify-content:center;padding:16px}
@@ -135,21 +146,65 @@ body.work header{box-shadow:inset 0 -2px 0 var(--work)}
 #mbox code{display:block;background:var(--code);border:1px solid var(--line);padding:9px 11px;border-radius:9px;font:12.5px/1.45 var(--mono);word-break:break-all;margin:6px 0 12px}
 #mbox .hint{font-size:13px;color:var(--mut);margin:4px 0 10px;line-height:1.5}
 
-/* ===== 公告 / 看板 ===== */
-#ann{background:var(--side);border-bottom:1px solid var(--line);padding:8px 16px;font-size:13px}
-#ann .top{display:flex;gap:8px;align-items:flex-start}
-#annText{flex:1;min-width:0;white-space:pre-wrap;word-break:break-word;color:var(--mut);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer;line-height:1.55}
-#ann.open #annText{display:block;max-height:40vh;overflow-y:auto;color:var(--fg)}
-#ann button{font-size:12.5px;padding:3px 10px;border:1px solid var(--line);background:var(--bar);color:var(--fg);border-radius:7px;flex:none}
-#ann button:hover{background:var(--soft)}
+/* ===== 右边面板（像桌面版右侧那一栏）：目标、看板、正在改的文件、环境、上下文、工具、产出，一张张卡片，标题点一下收起 ===== */
+#side{position:fixed;top:0;right:0;bottom:0;z-index:40;width:min(380px,100vw);background:var(--side);border-left:1px solid var(--line);overflow-y:auto;padding:calc(12px + env(safe-area-inset-top)) 12px calc(16px + env(safe-area-inset-bottom));transform:translateX(105%);transition:transform .2s ease-out;box-shadow:var(--shadow-lg);display:flex;flex-direction:column;gap:10px}
+#side.on{transform:none}
+#sideBg{display:none;position:fixed;inset:0;z-index:39;background:rgba(10,10,12,.3)}
+#sideBg.on{display:block}
+#side .sh{display:flex;align-items:center;font-size:11.5px;font-weight:600;color:var(--faint);letter-spacing:.08em;padding:2px 4px}
+#sideX{margin-left:auto;border:0;background:transparent;color:var(--mut);font-size:22px;line-height:1;padding:0 4px}
+.card{background:var(--bar);border:1px solid var(--line);border-radius:14px;padding:10px 14px 12px;font-size:13.5px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+.card h4{display:flex;align-items:center;gap:6px;margin:0;font-size:13.5px;font-weight:600;cursor:pointer;-webkit-user-select:none;user-select:none;min-height:26px}
+.card h4::after{content:"";order:9;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid var(--mut);transition:transform .15s;margin-left:2px}
+.card h4 .ct{order:0}
+.card h4 .cn{order:1;font-weight:500;font-size:12px;color:var(--mut)}
+.card h4 button{order:8;margin-left:auto;font-size:12px;font-weight:500;padding:2px 9px;border:1px solid var(--line);background:var(--bar);color:var(--fg);border-radius:7px}
+.card h4 button:hover{background:var(--soft)}
+.card h4:not(:has(button))::after{margin-left:auto}
+.card.shut h4::after{transform:rotate(-90deg)}
+.card .cb{margin-top:8px}
+.card.shut .cb{display:none}
+.card .cb button{font-size:12px;padding:2px 9px;border:1px solid var(--line);background:var(--bar);color:var(--fg);border-radius:7px}
+.card .cb button:hover:not(:disabled){background:var(--soft)}
+.card .cb button:disabled{opacity:.45}
+.kv{display:flex;align-items:baseline;gap:10px;padding:4px 0;line-height:1.45}
+.kv>span:first-child{flex:none;width:56px;color:var(--mut);font-size:12.5px}
+.kv .v{flex:1;min-width:0;word-break:break-all}
+.kv .v.mono{font:12.5px/1.45 var(--mono)}
+.kv button{flex:none}
+.cx-row{padding:6px 0}
+.cx-row+.cx-row{border-top:1px solid var(--line)}
+.cx-row .top{display:flex;align-items:center;gap:8px}
+.cx-row .nm{font-weight:600}
+.cx-row .nm::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:1px}
+.cx-row.claude .nm::before{background:var(--claude)}.cx-row.codex .nm::before{background:var(--codex)}
+.cx-row .sub{color:var(--mut);font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meter{height:6px;border-radius:999px;background:var(--soft);overflow:hidden;margin:6px 0 2px}
+.meter i{display:block;height:100%;background:var(--btn);border-radius:inherit}
+.meter.hi i{background:var(--danger)}
+.cx-row .num{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
+.outl{list-style:none;margin:0;padding:0}
+.outl li{display:flex;gap:8px;align-items:baseline;padding:4px 6px;margin:0 -6px;border-radius:8px;font-size:12.5px;line-height:1.45;cursor:pointer}
+.outl li:hover{background:var(--hover)}
+.outl li.un{opacity:.5;text-decoration:line-through}
+.outl .st{flex:none;width:18px;font-weight:700;font-size:11px;text-align:center;border-radius:4px}
+.outl .st.A{color:var(--codex)}.outl .st.M{color:var(--work)}.outl .st.D{color:var(--danger)}
+.outl .p{flex:1;min-width:0;word-break:break-all}
+.outl .p small{color:var(--mut);margin-left:6px}
+.outl .who{flex:none;font-size:11.5px;color:var(--mut)}
+.outh{font-size:11.5px;font-weight:600;color:var(--faint);letter-spacing:.06em;margin:10px 0 4px}
+.outh:first-child{margin-top:0}
+.thumbs{display:flex;flex-wrap:wrap;gap:6px}
+.thumbs img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:pointer}
+.card .empty{color:var(--faint);font-size:12.5px}
+#bSide.attn{position:relative}
+#bSide.attn::after{content:"";position:absolute;top:3px;right:3px;width:7px;height:7px;border-radius:50%;background:var(--work)}
+#ann{font-size:13.5px}
+#annText{white-space:pre-wrap;word-break:break-word;line-height:1.55;color:var(--fg)}
+#annText.empty{color:var(--mut)}
 #annEdit{display:none}
-#annEdit textarea{width:100%;font-size:15px;min-height:110px;max-height:40vh;border-radius:10px}
+#annEdit textarea{width:100%;font-size:14px;min-height:160px;max-height:50vh;border-radius:10px}
 #annEdit .btns{display:flex;gap:8px;margin-top:8px}
-#boardBtn{display:inline-block}
-#board{display:none;margin-top:8px;border-top:1px solid var(--line);padding-top:8px}
-#ann.open #board{display:block}
-#claims.on{display:none}
-#ann.open #claims.on{display:block}
 #boardList{list-style:none;margin:0 0 8px;padding:0;max-height:40vh;overflow-y:auto}
 #boardList li{display:flex;gap:8px;align-items:flex-start;padding:6px;border-radius:8px}
 #boardList li:hover{background:var(--hover)}
@@ -163,7 +218,7 @@ body.work header{box-shadow:inset 0 -2px 0 var(--work)}
 @media(hover:none){#boardList li .bx{opacity:1}}
 #boardList .empty{color:var(--faint)}
 #board .badd{display:flex;gap:6px;align-items:center}
-#board .badd select,#board .badd input{font-size:15px;font-family:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+#board .badd select,#board .badd input{font-size:13.5px;font-family:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
 #board .badd input{flex:1;min-width:0}
 
 /* ===== 消息流：AI 左对齐带色块头像，你的话靠右浅色气泡，系统消息是居中小字 ===== */
@@ -179,6 +234,9 @@ body.work header{box-shadow:inset 0 -2px 0 var(--work)}
 .msg.codex::before{content:"X";background:var(--codex)}
 .msg.claude .nm{color:var(--claude)}
 .msg.codex .nm{color:var(--codex)}
+.msg.ai{padding:2px 0 2px 40px}
+.msg.ai::before{position:absolute;left:0;top:2px;width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font:700 13px/1 var(--font);color:#fff;content:attr(data-l);background:var(--c)}
+.msg.ai .nm{color:var(--c)}
 .msg.me{margin-left:auto;max-width:80%;width:fit-content;background:var(--me);border:1px solid var(--me-line);padding:8px 14px 10px;border-radius:18px 18px 6px 18px}
 .msg.me .who{justify-content:flex-end}
 .msg.me .who .nm{display:none}
@@ -287,15 +345,15 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
   .atts img{max-width:240px;max-height:240px}
 }
 
-/* ===== 电脑：左边栏（标题、两个 AI、按钮、完整公告）+ 右边聊天 ===== */
+/* ===== 电脑：左边栏（标题、各 AI 胶囊、按钮、完整公告）+ 右边聊天 ===== */
 @media(min-width:1000px){
-  body{display:grid;grid-template-columns:300px minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr) auto auto;
-       grid-template-areas:"rooms feed" "head feed" "ann feed" "ann status" "ann foot"}
-  #rooms{display:block;grid-area:rooms;background:var(--side);border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:14px 10px 10px;max-height:36vh;overflow-y:auto}
+  body{display:grid;grid-template-columns:280px minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto auto;
+       grid-template-areas:"rooms feed" "head feed" "head status" "head foot"}
+  #rooms{display:block;grid-area:rooms;background:var(--side);border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:14px 10px 10px;max-height:45vh;overflow-y:auto}
   #rooms .rh{display:flex;align-items:center;gap:6px;padding:0 8px 6px;font-size:11.5px;font-weight:600;color:var(--faint);letter-spacing:.08em}
   #rooms .rh button{margin-left:auto;font-size:12px;letter-spacing:0;padding:2px 9px;border:1px solid var(--line);background:var(--bar);color:var(--fg);border-radius:7px}
   #rooms .rh button:hover{background:var(--soft)}
-  header{grid-area:head;flex-direction:column;align-items:stretch;gap:14px;padding:22px 18px 16px;border-bottom:0;border-right:1px solid var(--line);background:var(--side);backdrop-filter:none;-webkit-backdrop-filter:none}
+  header{grid-area:head;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:14px;padding:22px 18px 16px;overflow-y:auto;border-bottom:0;border-right:1px solid var(--line);background:var(--side);backdrop-filter:none;-webkit-backdrop-filter:none}
   body.work header{box-shadow:inset 0 3px 0 var(--work)}
   #title{white-space:normal;font-size:18px;line-height:1.35}
   #modeTag{align-self:flex-start;margin-top:-6px}
@@ -304,26 +362,23 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
   #bar{display:grid;grid-template-columns:1fr 1fr;gap:6px}
   #bar button{font-size:13.5px;padding:7px 10px;border-radius:9px}
   #bar .cap{grid-column:1/-1;text-align:left;white-space:normal;line-height:1.45;padding:10px 12px;border-radius:11px;box-shadow:var(--shadow)}
-  #bar #capClaude{margin-top:6px}
+  #bar #caps .cap:first-child{margin-top:6px}#bar #capClaude{margin-top:6px}
   #bar .cap .cm,#bar .cap .cs,#bar .cap .cx{display:block;font-size:12px;padding-left:15px}
   #bar .cap .cm::before,#bar .cap .cs::before,#bar .cap .cx::before{content:none}
   #bar .cap.off .cn{color:var(--fg)}
-  #ann{grid-area:ann;border-bottom:0;border-right:1px solid var(--line);padding:4px 18px 18px;overflow-y:auto;font-size:13.5px}
-  #ann::before{content:"目标";display:block;font-size:11.5px;font-weight:600;color:var(--faint);margin:8px 0;letter-spacing:.08em}
-  #ann .top{flex-direction:column;align-items:stretch;gap:8px}
-  #annText,#ann.open #annText{display:block;-webkit-line-clamp:unset;overflow:visible;max-height:none;color:var(--fg);cursor:default}
-  #ann button{align-self:flex-start}
-  #boardBtn{display:none !important}
-  #board{display:block;margin-top:18px;padding-top:14px}
-  #claims.on{display:block}
-  #board::before{content:"看板";display:block;font-size:11.5px;font-weight:600;color:var(--faint);margin-bottom:8px;letter-spacing:.08em}
-  #boardList{max-height:none}
-  #board .badd select,#board .badd input{font-size:13.5px}
-  #annEdit textarea{min-height:240px;max-height:60vh;font-size:14px}
   #feed{grid-area:feed;padding:28px max(32px,calc((100% - 820px)/2))}
   #status{grid-area:status;padding-left:max(32px,calc((100% - 820px)/2));padding-right:max(32px,calc((100% - 820px)/2))}
   footer{grid-area:foot;padding:6px max(32px,calc((100% - 820px)/2)) 20px}
   .msg.me{max-width:72%}
+}
+/* 宽屏：右边面板常驻，成第三栏 */
+@media(min-width:1280px){
+  body{grid-template-columns:280px minmax(0,1fr) 340px;grid-template-areas:"rooms feed side" "head feed side" "head status side" "head foot side"}
+  #side{grid-area:side;position:static;width:auto;transform:none;box-shadow:none;transition:none;z-index:auto;padding:14px 12px 16px;min-height:0}
+  #sideX,#bSide,#sideBg,#sideBg.on{display:none !important}
+  #feed{padding:28px max(28px,calc((100% - 780px)/2))}
+  #status{padding-left:max(28px,calc((100% - 780px)/2));padding-right:max(28px,calc((100% - 780px)/2))}
+  footer{padding:6px max(28px,calc((100% - 780px)/2)) 20px}
 }
 
 /* ===== 手机 ===== */
@@ -336,7 +391,6 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
   #bar button{font-size:15px;padding:10px;border-radius:10px}
   #bar .cap{grid-column:1/-1;text-align:left}
   .cap .cm{display:none}
-  #ann{padding:6px 12px}
   #feed{padding:14px 12px}
   .msg.claude,.msg.codex{padding-left:34px}
   .msg.claude::before,.msg.codex::before{width:24px;height:24px;font-size:12px;border-radius:7px}
@@ -419,20 +473,29 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
   <div id="title">会议室</div><div id="wd"></div><span id="modeTag">干活模式</span>
   <button type="button" id="menu" aria-label="菜单">&#9776;</button>
   <div id="bar">
-    <button type="button" id="bList">会议列表</button><button type="button" id="bNew">新会议</button><button type="button" id="bMode">讨论模式</button><button type="button" id="bWrap">落盘</button>
-    <button type="button" class="cap" id="capClaude">claude</button><button type="button" class="cap" id="capCodex">codex</button>
+    <button type="button" id="bList">会议列表</button><button type="button" id="bNew">新会议</button><button type="button" id="bMode">讨论模式</button><button type="button" id="bAgents">参会者</button><button type="button" id="bWrap">落盘</button><button type="button" id="bSide">面板</button>
+    <div id="caps"></div>
   </div>
 </header>
 <div id="modal"><div id="mbox"></div></div>
 <div id="cmenu"></div>
-<div id="ann">
-  <div class="top"><div id="annText">（还没写这场会议的目标）</div><button type="button" id="boardBtn">看板</button><button type="button" id="annBtn">编辑目标</button></div>
-  <div id="annEdit"><textarea id="annTa" placeholder="这场会议要做成什么…（两个 AI 每次被叫时都会看到最新的）"></textarea>
-    <div class="btns"><button type="button" id="annSave">保存</button><button type="button" id="annCancel">取消</button></div></div>
-  <div id="board"><ul id="boardList"></ul>
-    <div class="badd"><select id="bKind"><option value="todo">待办</option><option value="note">公告</option></select><input id="bText" maxlength="500" placeholder="加一条…"><button type="button" id="bAdd">加</button></div></div>
-  <div id="claims"><div class="ch">正在改的文件<button type="button" id="cMine" title="你自己在手动改的文件，占住它，AI 就不会去改">我在改…</button></div><ul id="claimList"></ul></div>
-</div>
+<div id="sideBg"></div>
+<aside id="side" aria-label="这场会议的面板">
+  <div class="sh">这场会议<button type="button" id="sideX" aria-label="关闭面板">&times;</button></div>
+  <section class="card" data-k="goal"><h4><span class="ct">目标</span><button type="button" id="annBtn">编辑</button></h4>
+    <div class="cb" id="ann"><div class="top"><div id="annText">（还没写这场会议的目标）</div><button type="button" id="boardBtn" hidden>看板</button></div>
+      <div id="annEdit"><textarea id="annTa" placeholder="这场会议要做成什么…（两个 AI 每次被叫时都会看到最新的）"></textarea>
+        <div class="btns"><button type="button" id="annSave">保存</button><button type="button" id="annCancel">取消</button></div></div></div></section>
+  <section class="card" data-k="board"><h4><span class="ct">看板</span><span class="cn" id="boardN"></span></h4>
+    <div class="cb" id="board"><ul id="boardList"></ul>
+      <div class="badd"><select id="bKind"><option value="todo">待办</option><option value="note">公告</option></select><input id="bText" maxlength="500" placeholder="加一条…"><button type="button" id="bAdd">加</button></div></div></section>
+  <section class="card" data-k="claims"><h4><span class="ct">正在改的文件</span><span class="cn" id="claimN"></span><button type="button" id="cMine" title="你自己在手动改的文件，占住它，AI 就不会去改">我在改…</button></h4>
+    <div class="cb" id="claims"><ul id="claimList"></ul></div></section>
+  <section class="card" data-k="env"><h4><span class="ct">环境</span></h4><div class="cb" id="envBox"></div></section>
+  <section class="card" data-k="ctx"><h4><span class="ct">上下文</span></h4><div class="cb" id="ctxBox"></div></section>
+  <section class="card" data-k="tools"><h4><span class="ct">工具</span></h4><div class="cb" id="toolBox"></div></section>
+  <section class="card" data-k="out"><h4><span class="ct">产出</span><span class="cn" id="outN"></span></h4><div class="cb" id="outBox"></div></section>
+</aside>
 <div id="feed"></div>
 <div id="toc"><div class="hd">我的发言 <span class="n" id="tocN"></span><input id="tocQ" placeholder="搜一下…" aria-label="搜我的发言"><button type="button" id="tocX" aria-label="关闭">&times;</button></div><ul id="tocList"></ul></div>
 <div id="viewer">
@@ -452,7 +515,7 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
 <div id="jump"><button type="button" id="jToc" title="我的发言目录" aria-label="我的发言目录"><svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg></button><button type="button" id="jUp" title="上一条我的发言（长按：到顶）" aria-label="上一条我的发言"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button><button type="button" id="jDn" title="下一条我的发言（长按：到底）" aria-label="下一条我的发言"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button></div>
 <div id="status"><div id="stMain"><span id="stText"></span><div id="stLive"></div></div><span id="stops"></span></div>
 <footer>
-  <div class="quick"><button type="button" data-ins="@claude ">@claude</button><button type="button" data-ins="@codex ">@codex</button><button type="button" data-ins="@用户 ">@用户</button></div>
+  <div class="quick" id="quick"></div>
   <div id="quote"><span class="qtx"></span><button type="button" id="quoteX" aria-label="取消引用">&times;</button></div>
   <div id="pend"></div>
   <div class="row"><button id="clip" type="button" aria-label="添加附件">&#128206;</button><input type="file" id="file" multiple hidden><textarea id="ta" rows="1" placeholder="说点什么…"></textarea><button id="send" type="button">发送</button></div>
@@ -544,13 +607,14 @@ function attHtml(list){
 }
 function add(m){
   const d=document.createElement('div');
-  const cls=m.speaker==='你'?'me':m.speaker==='claude'?'claude':m.speaker==='codex'?'codex':'sys';
+  const cls=m.speaker==='你'?'me':isAgent(m.speaker)?'ai':'sys';
   d.className='msg '+cls+(m.to_user?' touser':'')+(m.step!=null?' step':'');
+  if(cls==='ai'){d.style.setProperty('--c',agentColor(m.speaker));d.dataset.l=agentLetter(m.speaker)}
   const tag=m.to_user?'<span class="tag">→ 用户</span>':'';
   const who=cls==='sys'?'':'<div class="who"><span class="nm">'+esc(m.speaker)+'</span><span class="tm">'+esc(m.time)+'</span>'+tag+'<button type="button" class="rp" title="引用回复">↩ 引用</button></div>';
   const q=m.reply_to?'<div class="qt" data-to="'+m.reply_to.id+'">'+esc(m.reply_to.speaker)+'：'+(m.reply_to.part?'“'+esc(m.reply_to.text)+'”':esc(m.reply_to.text))+'</div>':'';
   d.dataset.id=m.id;msgById[m.id]=m;
-  const md=cls==='claude'||cls==='codex';
+  const md=cls==='ai';
   d.innerHTML=who+q+(m.text?'<div class="body'+(md?' md':'')+'">'+render(m.text,md)+'</div>':'')+attHtml(m.attachments)+(m.step!=null?'<button type="button" class="undo" data-step="'+m.step+'">撤回这一步</button>':'');
   feed.appendChild(d);
   const ub=d.querySelector('.undo');if(ub){ub.onclick=()=>undoStep(m.step);syncUndo()}
@@ -669,7 +733,7 @@ const cmenu=document.getElementById('cmenu');
 function hideMenu(){cmenu.classList.remove('on')}
 feed.addEventListener('contextmenu',e=>{
   const el=e.target.closest('.msg[data-id]');if(!el)return;
-  const m=msgById[+el.dataset.id];if(!m||!['你','claude','codex'].includes(m.speaker))return;
+  const m=msgById[+el.dataset.id];if(!m||!(m.speaker==='你'||isAgent(m.speaker)))return;
   const x=selIn(),part=x&&x.id===m.id?x.text:'';
   e.preventDefault();
   const items=[];
@@ -731,7 +795,7 @@ function drawBoard(){
   boardList.innerHTML=sorted.length?sorted.map(i=>'<li class="'+(i.done?'done':'')+'" data-id="'+i.id+'">'+
     (i.kind==='todo'?'<input type="checkbox"'+(i.done?' checked':'')+'>':'<span class="pin">&#128204;</span>')+
     '<span class="bt">#'+i.id+' '+esc(i.text)+'<small>'+esc(i.by)+'</small></span><button type="button" class="bx" title="删掉">&times;</button></li>').join('')
-    :'<li class="empty">（空的。你和两个 AI 都能往这写公告、待办）</li>';
+    :'<li class="empty">（空的。你和会里的 AI 都能往这写公告、待办）</li>';
 }
 async function boardPost(o){const [ok,j]=await post(api('board'),o);if(!ok)alert(j.error||'失败');await loadState();poll()}
 boardList.onclick=e=>{
@@ -758,6 +822,141 @@ function ctxTitle(x){
   const c=x&&x.ctx;if(!c||!c.used)return '上下文：还没数据（回过一轮话后显示）';
   return '上下文：'+fmtK(c.used)+(c.window?' / '+fmtK(c.window):'')+' tokens（'+c.time+' 那轮结束时）';
 }
+// ===== 参会者（不止 claude / codex）：颜色、首字母、胶囊 =====
+function agentMeta(id){return ((S&&S.agents)||[]).find(a=>a.id===id)||null}
+function isAgent(id){return !!(id&&id!=='你'&&(agentMeta(id)||((S&&S.participants)||[]).includes(id)))}
+function agentColor(id){const a=agentMeta(id);return (a&&a.color)||'#888'}
+function agentLetter(id){const a=agentMeta(id);return (a&&a.letter)||(id||'?').slice(0,1).toUpperCase()}
+
+const capsEl=document.getElementById('caps');
+function drawCaps(){
+  const ids=(S&&S.participants)||[];
+  const key=ids.join(',');
+  if(capsEl.dataset.k!==key){          // 参会的人变了才重建按钮，平时只改里面
+    capsEl.dataset.k=key;capsEl.innerHTML='';
+    ids.forEach(a=>{
+      const b=document.createElement('button');b.type='button';b.className='cap';b.dataset.ai=a;
+      b.style.setProperty('--c',agentColor(a));b.onclick=()=>openAi(a);capsEl.appendChild(b);
+    });
+  }
+  ids.forEach(a=>{
+    const b=capsEl.querySelector('.cap[data-ai="'+a+'"]');if(!b)return;
+    const [t,c]=capText(a);if(b.innerHTML!==t)b.innerHTML=t;
+    b.className=c;b.title=ctxTitle(S&&S.ais&&S.ais[a]);
+  });
+}
+const quickEl=document.getElementById('quick');
+function drawQuick(){          // 输入框上面那排 @：跟着这场会议的参会者走
+  if(!quickEl)return;
+  const ids=(S&&S.participants)||[];
+  const key=ids.join(',');
+  if(quickEl.dataset.k===key)return;
+  quickEl.dataset.k=key;
+  quickEl.innerHTML=ids.map(a=>'<button type="button" data-ins="@'+esc(a)+' ">@'+esc(a)+'</button>').join('')
+    +'<button type="button" data-ins="@用户 ">@用户</button>';
+  quickEl.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    const t=document.getElementById('ta');if(!t)return;t.value+=b.dataset.ins;t.focus();
+  });
+}
+const AG_DRV={cli:'命令行程序',http:'网页服务',external:'在它自己的界面里',claude:'Claude Code 命令行',codex:'Codex 常驻服务'};
+let agCat=null;
+async function openAgents(){
+  try{const r=await fetch('/api/agents?reload=1',{cache:'no-store'});if(r.ok)agCat=await r.json()}catch(e){}
+  renderAgents();
+}
+function renderAgents(){
+  const cat=agCat||{agents:(S&&S.agents)||[],hosts:[]};
+  const list=cat.agents||[],cur=new Set((S&&S.participants)||[]);
+  const hosts={};(cat.hosts||[]).forEach(h=>hosts[h.id]=h);
+  const row=a=>{
+    const h=hosts[a.id]||{};
+    const bits=[a.enabled?'这台电脑上有':'没装'];
+    if(a.driver==='external')bits.push('会外，要它自己来看');
+    if(a.verified===false)bits.push('没实测');
+    let act='';
+    if(h.present&&!h.installed)act+='<button type="button" class="agBtn" data-install="'+esc(a.id)+'" title="让这个工具里的 AI 也能看到这场会议">接上</button>';
+    else if(h.installed)act+='<span class="agOk">已接好</span>';
+    if(a.user)act+='<button type="button" class="agBtn del" data-remove="'+esc(a.id)+'">删除</button>';
+    return '<li class="'+(a.enabled?'':'lk')+'">'
+      +'<input type="checkbox" data-id="'+esc(a.id)+'"'+(cur.has(a.id)?' checked':'')+(a.enabled?'':' disabled')+'>'
+      +'<span class="tn"><b><i class="dot" style="background:'+esc(a.color||'#888')+'"></i>'+esc(a.label)+'</b>'
+      +' <small>@'+esc(a.id)+' · '+esc(AG_DRV[a.driver]||a.driver)+'</small>'
+      +'<small>'+bits.map(esc).join(' · ')+'</small></span>'
+      +'<span class="agAct">'+act+'</span></li>';
+  };
+  const errs=cat.errors||[],url=cat.mcp_url||'';
+  showModal('<h3>AI 成员</h3>'
+    +'<div class="hint">勾上的才会在这场会议里。没装的灰着（这台电脑上找不到它的命令）。</div>'
+    +'<ul class="tl" id="agList">'+list.map(row).join('')+'</ul>'
+    +(errs.length?'<h4>这些配置读不了</h4><ul class="tl">'+errs.map(e=>'<li><span class="tn">'+esc(e)+'</span></li>').join('')+'</ul>':'')
+    +'<h4>加一个新的</h4>'
+    +'<div class="hint">是命令行程序（比如 gemini、opencode）？填命令就行。<br>'
+    +'它在别的电脑 / 别的软件里？把这个地址填进它的 MCP 配置：<br>'
+    +'<code id="agUrl">'+esc(url)+'</code> '
+    +'<button type="button" class="agBtn" id="agCopyUrl">复制地址</button> '
+    +'<button type="button" class="agBtn" id="agCopyJson">复制配置 JSON</button></div>'
+    +'<div class="btns"><button type="button" id="agAddBtn">＋ 手动添加</button>'
+    +'<button type="button" id="agClose">关闭</button><button type="button" class="pri" id="agSave">保存</button></div>'
+    +'<div id="agForm" style="display:none">'
+    +'<div class="agF">'
+    +'<label>名字</label><input id="fId" placeholder="小写字母，比如 gemini（@ 它时用这个）">'
+    +'<label>类型</label><select id="fDrv"><option value="cli">命令行程序</option>'
+    +'<option value="http">网页服务（我自己的 harness）</option><option value="external">在我自己的界面里发言</option></select>'
+    +'<label>命令 / 地址</label><input id="fCmd" placeholder="gemini 或 http://127.0.0.1:9100/bridge">'
+    +'<label>参数</label><input id="fArgs" placeholder="-p {prompt}" value="-p {prompt}">'
+    +'<label>它的输出</label><select id="fParse"><option value="text">打出来就是回复</option>'
+    +'<option value="json">一段 JSON，回复在里面某个字段</option></select>'
+    +'<label>回复在哪个字段</label><input id="fText" placeholder="response">'
+    +'</div><div class="btns"><button type="button" class="pri" id="agDoAdd">加进来</button></div></div>');
+  const gel=(id)=>document.getElementById(id);
+  gel('agClose').onclick=hideModal;
+  gel('agAddBtn').onclick=()=>{const f=gel('agForm');f.style.display=f.style.display==='none'?'block':'none'};
+  gel('agCopyUrl').onclick=()=>{copyText(url);gel('agCopyUrl').textContent='已复制'};
+  gel('agCopyJson').onclick=()=>{copyText(JSON.stringify({mcpServers:{'ai-bridge':{url:url}}},null,2));gel('agCopyJson').textContent='已复制'};
+  gel('agSave').onclick=async()=>{
+    const ids=[...document.querySelectorAll('#agList input[data-id]')].filter(i=>i.checked).map(i=>i.dataset.id);
+    if(!ids.length){alert('至少要留一个 AI');return}
+    const [ok,j]=await post(api('participants'),{participants:ids});
+    if(!ok){alert(j.error||'失败');return}
+    hideModal();await loadState();poll();
+  };
+  document.querySelectorAll('[data-install]').forEach(b=>b.onclick=async()=>{
+    b.disabled=true;b.textContent='正在接…';
+    const [ok,j]=await post('/api/agents/install',{host:b.dataset.install});
+    alert(ok?j.msg:(j.error||j.msg||'没接上'));
+    await openAgents();
+  });
+  document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=async()=>{
+    if(!confirm('删掉 '+b.dataset.remove+'？只是把这个 AI 移除，会议记录不动。'))return;
+    const [ok,j]=await post('/api/agents/remove',{id:b.dataset.remove});
+    if(!ok){alert(j.error||'失败');return}
+    await openAgents();
+  });
+  gel('agDoAdd').onclick=async()=>{
+    const id=gel('fId').value.trim().toLowerCase(),drv=gel('fDrv').value,cmd=gel('fCmd').value.trim();
+    if(!id){alert('先给它起个名字');return}
+    if(!cmd){alert('填一下命令或地址');return}
+    const spec={id:id,label:id,driver:drv,verified:false};
+    if(drv==='cli'){
+      const argtxt=(gel('fArgs').value.trim()||'-p {prompt}').replace(/\s+/g,' ');
+      spec.bin=[cmd];
+      spec.prompt=argtxt.indexOf('{prompt}')>=0?'arg':'stdin';
+      spec.args={new:argtxt.split(' ')};
+      if(gel('fParse').value==='json'){spec.parse={type:'json',text:gel('fText').value.trim()||'response'};spec.context='full'}
+      else {spec.parse={type:'text'};spec.context='full'}
+    }else if(drv==='http'){
+      spec.endpoint=cmd;
+    }
+    const [ok,j]=await post('/api/agents/add',{spec:spec});
+    if(!ok){alert(j.error||'加不进去');return}
+    if(typeof RID!=='undefined'&&RID){        // 顺手加进这场会议，不用再勾一次
+      const cur=[...new Set([...((S&&S.participants)||[]),id])];
+      await post(api('participants'),{participants:cur});
+      await loadState();
+    }
+    agCat=null;await openAgents();
+  };
+}
 function capText(a){
   // 三段：名字 / 模型（手机上隐藏）/ 状态；电脑边栏里模型和状态各占一行
   const x=S&&S.ais&&S.ais[a];
@@ -779,8 +978,9 @@ function drawState(){
   titleEl.title=wd;
   document.getElementById('wd').textContent=has?'📁 '+wd:'';
   drawRooms();
-  [['claude','capClaude'],['codex','capCodex']].forEach(([a,id])=>{const b=document.getElementById(id),[t,c]=capText(a);if(b.innerHTML!==t)b.innerHTML=t;b.className=c;b.title=ctxTitle(S&&S.ais&&S.ais[a])});
-  const cx=S&&S.ais&&S.ais.claude;
+  drawCaps();
+  drawQuick();
+  const cx=S&&S.ais&&S.ais.claude;   // 落盘是 claude 的活：它不在会里就不能按
   document.getElementById('bWrap').disabled=!has||!cx||cx.handed_off||cx.busy;
   const work=!!(has&&S.mode==='work');
   document.body.classList.toggle('work',work);
@@ -828,7 +1028,7 @@ async function openNew(first){
   showModal('<h3>新会议</h3>'+(first?'<div class="hint">还没有会议，开一个吧。</div>':'<div class="hint">开着的会议照常跑，这个标签页切到新会议（想并排看就在新标签页里开）。</div>')+
     '<input id="nTitle" placeholder="标题" maxlength="60"><textarea id="nAnn" placeholder="目标：这场会议要做成什么（可留空，之后再写）"></textarea>'+
     (S&&!('default_workdir' in S)?'':'<input id="nWd" list="wdList" placeholder="工作文件夹，比如 D:\\别的项目" value="'+esc(defWd)+'"><datalist id="wdList">'+recent.map(w=>'<option value="'+esc(w)+'">').join('')+'</datalist>'+
-    '<div class="hint">两个 AI 在这个文件夹里看文件、干活。填完整路径（在资源管理器地址栏复制）；开会后不能改，换文件夹就开新会议。</div>')+
+    '<div class="hint">会里的 AI 在这个文件夹里看文件、干活。填完整路径（在资源管理器地址栏复制）；开会后不能改，换文件夹就开新会议。</div>')+
     '<div class="btns"><button type="button" id="nCancel">取消</button><button type="button" class="pri" id="nOk">开会</button></div>');
   document.getElementById('nCancel').onclick=hideModal;
   document.getElementById('nOk').onclick=async()=>{
@@ -879,7 +1079,7 @@ function openAi(a){
   else h+='<div class="hint">'+(x.handed_off?'现在在终端里，网页里不会叫它。':'在会议里。')+'</div><code>'+esc(x.cmd||'')+'</code>';
   h+='<div class="btns"><button type="button" id="aClose">关闭</button>';
   if(x.session)h+='<button type="button" id="aCopy">复制命令</button>';
-  h+='<button type="button" class="pri" id="aToggle"'+((!x.session||(!x.handed_off&&x.busy))?' disabled':'')+'>'+(x.handed_off?'收回':'交给终端')+'</button></div>';
+  h+='<button type="button" class="pri" id="aToggle"'+((!x.session||(!x.handed_off&&x.busy)||(!x.handoff&&!x.handed_off))?' disabled':'')+'>'+(x.handed_off?'收回':'交给终端')+'</button></div>';
   if(x.session&&!x.handed_off&&x.busy)h+='<div class="hint">它正在跑或排着队，说完才能交。</div>';
   const canC=x.session&&!x.handed_off&&!x.compacting;
   h+='<h3 style="margin-top:14px">压缩上下文</h3><div class="hint">'+(x.compacting?'正在压缩，压完会议里会插一条消息。':!x.session?'还没建会话，不用压。':x.handed_off?'在终端里，收回来再压。':'聊久了会变慢、变贵。压完它只记要点，另一个 AI 不受影响。'+(x.ctx&&x.ctx.used?'<br>现在上下文用了 '+fmtK(x.ctx.used)+(x.ctx.window?' / '+fmtK(x.ctx.window)+'（'+Math.round(x.ctx.used*100/x.ctx.window)+'%）':'')+'。':''))+'</div>'+
@@ -919,7 +1119,7 @@ document.getElementById('bMode').onclick=toggleMode;
 const stopsEl=document.getElementById('stops');
 function drawStops(){
   // 压缩停不了（也不该停），只在它真在回话或排着回话时出"停"
-  const busy=['claude','codex'].filter(a=>{const x=S&&S.ais&&S.ais[a];return S&&((S.running||[]).includes(a)||(x&&x.busy&&!x.compacting))});
+  const busy=((S&&S.participants)||[]).filter(a=>{const x=S&&S.ais&&S.ais[a];return S&&((S.running||[]).includes(a)||(x&&x.busy&&!x.compacting))});
   const each=!!(S&&S.stop_each);   // 旧版后端不认按人停，只给全停
   const want=(each?busy.map(a=>'停 '+a):[]).concat(busy.length>1||(!each&&busy.length)?['全停']:[]).join('|');
   if(stopsEl.dataset.k===want)return;stopsEl.dataset.k=want;
@@ -928,7 +1128,7 @@ function drawStops(){
   if(busy.length>1||(!each&&busy.length)){const b=document.createElement('button');b.type='button';b.textContent=each?'全停':'停';b.onclick=()=>stopAi('');stopsEl.appendChild(b)}
 }
 async function stopAi(a){
-  const who=a||'两个 AI';
+  const who=a||'会里的 AI';
   if(!confirm('强行打断 '+who+'？\n\n正在跑的立刻停掉，连同它起的命令（比如 git push）；它排着的也清掉。\n已经改了的文件不会自动还原，干活模式下可以按步骤撤回。'))return;
   const [ok,j]=await post(api('stop'),a?{ai:a}:{});if(!ok)alert(j.error||'失败');poll();
 }
@@ -936,12 +1136,11 @@ document.getElementById('bWrap').onclick=async()=>{
   if(!confirm('落盘？\n\nclaude 会把这场会议定下的结论写进工作文件夹里的文档（文件夹里有 wrapup 技能就照它做），然后 git 提交并推送。\n这一轮它有完整权限，不管现在是讨论还是干活模式。'))return;
   const [ok,j]=await post(api('wrapup'));if(!ok)alert(j.error||'失败');bar.classList.remove('show');poll();
 };
-document.getElementById('capClaude').onclick=()=>openAi('claude');
-document.getElementById('capCodex').onclick=()=>openAi('codex');
+document.getElementById('bAgents').onclick=openAgents;
 document.getElementById('send').onclick=send;
 ta.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!touch&&!e.isComposing){e.preventDefault();send()}});
 ta.addEventListener('input',()=>{ta.style.height='auto';ta.style.height=Math.min(ta.scrollHeight,140)+'px'});
-document.querySelectorAll('.quick button').forEach(b=>b.onclick=()=>{ta.value+=b.dataset.ins;ta.focus()});
+drawQuick();
 // 跳到我的发言：点 = 上一条 / 下一条"你"说的话，长按 = 到顶 / 到底
 const jumpEl=document.getElementById('jump'),jUp=document.getElementById('jUp'),jDn=document.getElementById('jDn');
 function feedTop(){return feed.getBoundingClientRect().top+12}

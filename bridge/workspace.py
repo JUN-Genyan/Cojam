@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """干活模式：存档点、改动清单、撤回要用到的 git 小工具。都按传进来的工作文件夹干活，不认"当前会议"。"""
-import hashlib, os, re, shutil, subprocess, threading
+import hashlib, os, re, shutil, subprocess, threading, time
 
 from .common import LOG_DIR, NO_WINDOW, in_dir, norm
 
@@ -42,6 +42,30 @@ def in_git(cwd):
         return git(["rev-parse", "--show-toplevel"], cwd, check=False).returncode == 0
     except Exception:
         return False
+
+
+_info_cache = {}   # 工作文件夹 -> (时间, 结果)；页面 1.5 秒拉一次状态，git 别跟着跑那么勤
+
+
+def git_info(cwd, ttl=10):
+    """右边面板"环境"那栏：分支、没提交的改动数。不是 git 仓库返回 None。"""
+    hit = _info_cache.get(cwd)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    info = None
+    try:
+        r = git(["status", "--porcelain=v1", "--branch", "--untracked-files=normal"], cwd, check=False)
+        if r.returncode == 0:
+            lines = r.stdout.decode("utf-8", "replace").splitlines()
+            head = lines[0][3:] if lines and lines[0].startswith("## ") else ""
+            branch, _, track = head.partition("...")
+            m = re.search(r"\[(.*)\]", track)
+            info = {"branch": branch.replace("No commits yet on ", "") or "?", "changed": len(lines) - (1 if head else 0),
+                    "track": m.group(1).replace("ahead", "领先").replace("behind", "落后") if m else ""}
+    except Exception:
+        pass
+    _info_cache[cwd] = (time.time(), info)
+    return info
 
 
 def snapshot_tree(cwd):
