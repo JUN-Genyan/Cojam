@@ -1,6 +1,6 @@
 // 装成 app 用的 service worker：页面、接口、附件一律直连服务器，从不拿缓存顶替（会议内容必须是最新的）。
 // 只缓存一张"会议室没开"的提示页：服务器没开时打开 app，看到的是它而不是浏览器的报错页。
-const V = 'rt-v2', OFF = '/static/offline.html';
+const V = 'ai-bridge-2.5.1', OFF = '/static/offline.html';
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(V).then(c => c.addAll([OFF, '/static/icon-192.png'])));
   self.skipWaiting();

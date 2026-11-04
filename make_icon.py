@@ -1,49 +1,54 @@
-"""生成会议室图标：俯视的一张圆桌，三个座位（用户 / claude / codex）。
-输出 roundtable.ico（桌面快捷方式）、roundtable_preview.png，以及装成 app 用的 static/icon-192.png、icon-512.png、icon-maskable-512.png。"""
-import math, os
+"""Export the selected Cojam ∀ / ∫ identity to SVG, ICO and PWA sizes.
+
+Vector geometry is shared with Pillow exports; no fonts or network required.
+"""
+from pathlib import Path
 from PIL import Image, ImageDraw
+ROOT=Path(__file__).resolve().parent
+STATIC=ROOT/'static'
+PURPLE,LIME,CREAM='#6022E8','#D5FF3F','#FFFCF5'
+S=1024
+LEFT=[('M',18,17),('C',13,12,21,9,29,9),('C',35,9,37,12,39,18),('L',53,56),('L',64,22),('L',74,27),('L',55,76),('C',51,84,45,84,40,76),('L',18,31),('C',12,27,12,21,18,17),('Z',)]
+INTEGRAL=[('M',79,8),('C',91,5,99,13,97,22),('C',95,30,85,31,80,25),('C',77,23,78,19,81,17),('C',71,19,69,29,67,43),('L',63,65),('C',60,84,45,96,30,91),('C',17,87,20,76,29,76),('C',36,76,39,83,34,87),('C',47,85,51,72,54,57),('L',60,27),('C',63,15,70,9,79,8),('Z',)]
+BAR=[('M',17,39),('L',57,31),('C',65,29,68,39,60,42),('L',21,51),('C',11,54,8,42,17,39),('Z',)]
 
-S = 1024  # 先画大图再缩小，边缘更平滑
-img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-d = ImageDraw.Draw(img)
+def path_text(commands):
+    return ' '.join(c[0]+' '.join(str(v) for v in c[1:]) for c in commands)
 
-# 底板：深墨蓝圆角方块
-d.rounded_rectangle([40, 40, S - 40, S - 40], radius=220, fill=(28, 32, 48, 255))
+def svg(icon=False,mono=False,dark=False):
+    bg='<rect width="100" height="100" rx="25" fill="'+PURPLE+'"/>' if icon else ''
+    transform='translate(8 8) scale(.84)' if icon else ''
+    colors=[CREAM if icon or dark else PURPLE,LIME,LIME] if not mono else ['currentColor']*3
+    paths=''.join('<path d="'+path_text(p)+'" fill="'+color+'"/>' for p,color in zip([LEFT,INTEGRAL,BAR],colors))
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><title>合拍 Cojam · ∀ + ∫</title>'+bg+'<g transform="'+transform+'">'+paths+'</g></svg>'
 
-c = S / 2
-# 桌面：暖灰圆环
-R = 250
-d.ellipse([c - R, c - R, c + R, c + R], fill=(58, 64, 86, 255))
-r2 = 150
-d.ellipse([c - r2, c - r2, c + r2, c + r2], fill=(28, 32, 48, 255))
+def points(commands):
+    out=[];current=(0,0)
+    for c in commands:
+        if c[0] in ('M','L'): current=(c[1],c[2]);out.append(current)
+        elif c[0]=='C':
+            a=current;b=c[1:3];d=c[3:5];e=c[5:7]
+            for i in range(1,81):
+                t=i/80;out.append(tuple((1-t)**3*a[k]+3*(1-t)**2*t*b[k]+3*(1-t)*t*t*d[k]+t**3*e[k] for k in (0,1)))
+            current=e
+    return out
 
-# 三个座位，分别是用户（白）、claude（橙）、codex（青）
-seats = [(-90, (240, 240, 235)), (30, (224, 122, 72)), (150, (72, 196, 178))]
-sr = 120
-for ang, col in seats:
-    a = math.radians(ang)
-    x, y = c + 330 * math.cos(a), c + 330 * math.sin(a)
-    d.ellipse([x - sr, y - sr, x + sr, y + sr], fill=col + (255,))
-    # 每个座位朝桌心伸一道细线，像在对话
-    x2, y2 = c + 170 * math.cos(a), c + 170 * math.sin(a)
-    d.line([x, y, x2, y2], fill=col + (255,), width=34)
+def render(maskable=False,plain=False):
+    im=Image.new('RGBA',(S,S),PURPLE if maskable else (0,0,0,0));draw=ImageDraw.Draw(im)
+    if not plain:draw.rounded_rectangle((0,0,S-1,S-1),S*.25,fill=PURPLE)
+    scale=.74 if maskable else (.84 if not plain else .96)
+    offset=(1-scale)*S/2
+    for commands,color in zip([LEFT,INTEGRAL,BAR],[PURPLE if plain else CREAM,LIME,LIME]):
+        draw.polygon([(offset+x*S/100*scale,offset+y*S/100*scale) for x,y in points(commands)],fill=color)
+    return im
 
-# 桌心一点，代表公告
-d.ellipse([c - 46, c - 46, c + 46, c + 46], fill=(240, 240, 235, 255))
-
-here = os.path.dirname(os.path.abspath(__file__))
-out = os.path.join(here, "roundtable.ico")
-img.resize((256, 256), Image.LANCZOS).save(out, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
-img.resize((256, 256), Image.LANCZOS).save(out.replace(".ico", "_preview.png"))
-print(out)
-
-# 装成 app 用的图标：普通的就是上面这张；maskable 的底色铺满整张、图案缩进安全区（手机会把它裁成圆形 / 圆角方块）
-st = os.path.join(here, "static")
-os.makedirs(st, exist_ok=True)
-for n in (192, 512):
-    img.resize((n, n), Image.LANCZOS).save(os.path.join(st, "icon-%d.png" % n))
-mask = Image.new("RGBA", (S, S), (28, 32, 48, 255))
-inner = img.resize((int(S * 0.8), int(S * 0.8)), Image.LANCZOS)
-mask.alpha_composite(inner, (int(S * 0.1), int(S * 0.1)))
-mask.resize((512, 512), Image.LANCZOS).save(os.path.join(st, "icon-maskable-512.png"))
-print(st)
+def main():
+    STATIC.mkdir(exist_ok=True)
+    for name,body in [('logo.svg',svg()),('logo-app.svg',svg(icon=True)),('logo-dark.svg',svg(dark=True)),('logo-mono.svg',svg(mono=True))]:(STATIC/name).write_text(body,encoding='utf-8')
+    im=render()
+    im.resize((256,256),Image.Resampling.LANCZOS).save(ROOT/'roundtable.ico',sizes=[(n,n) for n in (16,24,32,48,64,128,256)])
+    im.resize((512,512),Image.Resampling.LANCZOS).save(ROOT/'roundtable_preview.png')
+    for n in (192,512):im.resize((n,n),Image.Resampling.LANCZOS).save(STATIC/f'icon-{n}.png')
+    render(True).resize((512,512),Image.Resampling.LANCZOS).save(STATIC/'icon-maskable-512.png')
+    print('Generated Cojam vector mark, Windows ICO and PWA icons')
+if __name__=='__main__':main()

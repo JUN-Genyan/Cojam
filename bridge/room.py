@@ -7,15 +7,16 @@
 3. 增量在拿到锁之后才取快照，所以排着队的那段时间里新来的消息也会带上。
 
 本文件后半段是会议目录的增删（新建、列表、归档、回收站）和 Rooms（已经读进内存的会议）。"""
-import json, os, queue, re, secrets, shutil, threading, time
+import copy, json, os, queue, re, secrets, shutil, threading, time
 from datetime import datetime
 from urllib.parse import quote
 
-from . import agents, drivers, registry, workspace as ws
+from . import access, agents, drivers, registry, workspace as ws
 from .common import (AIS, ATT_BASE, LAST_FILE, LOG_DIR, MAX_ATTACH, MAX_IMAGES, MAX_UPLOAD, MEET_DIR, MODES, PROJECT,
                      ROOM_RE, SID_RE, TRASH_DIR, in_dir, is_archived, kill_tree, kind_of, mentions, mode_key, mode_text,
                      norm, now_str, preamble, read_json, ref_safe, safe_title, sanitize_name, write_json)
 from .guard import guard
+registry.ensure()
 
 # 测试时可替换：ai_caller(ai, prompt, sid, images, mode, room) -> (ok, text, sid, edits)
 ai_caller = drivers.call
@@ -94,10 +95,7 @@ def fix_meta(m):
     if not isinstance(cur, list):
         cur = [a for a in ("claude", "codex") if a in ok] or list(ok)
     cur = [a for a in cur if isinstance(a, str) and (a in ok or registry.get(a) is None)]
-    for a in AIS:      # 已经建过会话的，就算没勾也留着：不然会议记录里它说过的话没人认
-        if m.get(a + "_session") and a not in cur:
-            cur.append(a)
-    m["participants"] = cur or (ok[:1] if ok else ["claude"])
+    m["participants"] = cur
     return m
 
 
@@ -208,7 +206,7 @@ class Room:
         """这场会议有哪些 AI。注册表里启用的 + 会外参与者（自己经 /api/post 报到的，注册表里没有）。"""
         cur = self.meta.get("participants") or []
         got = [a for a in cur if a in AIS or registry.get(a) is None]
-        return got or list(AIS)[:1]
+        return got
 
     def is_guest(self, ai):
         """会外参与者：不在注册表里（IDE 里的 agent、随便哪个 harness 自己报到的）。"""
@@ -530,9 +528,11 @@ class Room:
                 first = True
             ver = self.meta["ann_ver"]
             parts = []
+            parts.append("本会话授予你的权限：" + json.dumps(access.permissions(self, ai), ensure_ascii=False) +
+                         "。false 表示禁止；不要通过命令行或其他工具绕过。")
             mode = mode or self.mode()
             if first:
-                parts += [preamble(mode, self.workdir()), "这场会议的目标：\n" + self.goal_text(), "看板：\n" + self.board_text()]
+                parts += [preamble(mode, self.execution_workdir(ai)), "这场会议的目标：\n" + self.goal_text(), "看板：\n" + self.board_text()]
             else:
                 seen = self.meta["mode_seen"].get(ai) or ""
                 if seen != mode_key(mode):
@@ -618,27 +618,40 @@ class Room:
                 self.meta[k].setdefault(a, list() if isinstance(empty, list) else empty)
             self.meta.setdefault("models", {}).setdefault(a, {"model": "", "effort": ""})
             self.meta.setdefault("tools", {}).setdefault(a, agents.default_tools(a))
+            if a not in self.keys:
+                with keys_lock:
+                    self.keys[a] = secrets.token_urlsafe(18)
+                    KEYS[self.keys[a]] = (self.id, a)
 
-    def set_participants(self, ids):
-        """改这场会议有哪些 AI。返回 (ok, 错误)。没装/没启用的不能勾；至少要留一个。"""
+    def set_participants(self, ids, member_permissions=None):
+        """Change members and optional permissions in one metadata save; an empty room is valid."""
         ok_ids = registry.enabled_ids()
-        want = [a for a in (ids or []) if isinstance(a, str)]
+        if not isinstance(ids, list):
+            return False, "成员必须是联系人 ID 列表"
+        want = [a for a in ids if isinstance(a, str)]
         bad = [a for a in want if a not in ok_ids]
         if bad:
             return False, "没装或没启用：%s" % "、".join(bad)
         want = [a for a in ok_ids if a in want]      # 按注册表的顺序
-        if not want:
-            return False, "至少要留一个 AI"
         with self.lock:
             if self.busy_for():
                 return False, "AI 还在回复，等它们说完再改"
             old = list(self.ais)
-            if want == old:
+            if want == old and member_permissions is None:
                 return True, ""
+            previous = copy.deepcopy(self.meta)
             self._ensure_meta_for(want)
             self.meta["participants"] = want
             self.meta["tools"] = {a: self.meta["tools"].get(a) or agents.default_tools(a) for a in AIS}
-            self.save_meta()
+            if member_permissions is not None:
+                self.meta["permissions"] = {pid: dict(access.PERMISSIONS, **member_permissions.get(pid, {})) for pid in want}
+            try:
+                self.save_meta()
+            except OSError:
+                self.meta = previous
+                raise
+            if want == old:
+                return True, ""
             added = [a for a in want if a not in old]
             gone = [a for a in old if a not in want]
             bits = ["这场会议现在有：" + "、".join(want)]
@@ -648,6 +661,35 @@ class Room:
                 bits.append("退出：" + "、".join(gone) + "（它的会话还留着，重新勾上就能接上）")
             self.add_message("系统", "；".join(bits), quiet=True)
         return True, ""
+
+    def set_members(self, ids, permissions):
+        if not isinstance(ids, list) or any(not isinstance(pid, str) for pid in ids):
+            return False, "成员必须是联系人 ID 列表"
+        if not isinstance(permissions, dict):
+            return False, "权限必须是对象"
+        for pid, value in permissions.items():
+            if pid not in (ids or []) or not isinstance(value, dict):
+                return False, "权限只能配置给已选择的联系人"
+            if any(k not in access.PERMISSIONS or not isinstance(v, bool) for k, v in value.items()):
+                return False, "未知权限或权限值不是布尔值"
+        ok, msg = self.set_participants(ids, permissions)
+        if not ok:
+            return ok, msg
+        agents.stop_codex(self)
+        return True, ""
+
+    def member_mode(self, ai, requested=None):
+        allowed = access.permissions(self, ai)["work"]
+        if (registry.get(ai) or {}).get("driver") == "external":
+            from .members import broker
+            allowed = allowed and broker.status(ai)["allow_work"]
+        return (requested or self.mode()) if allowed else "discuss"
+
+    def execution_workdir(self, ai):
+        if (registry.get(ai) or {}).get("driver") == "external":
+            from .members import broker
+            return broker.status(ai)["workdir"] or "该成员设备上配置的工作文件夹"
+        return self.workdir()
 
     # ---------- 模式 ----------
     def set_mode(self, mode):
@@ -873,7 +915,8 @@ class Room:
             if speaker == "你" and not attachments and cmd and cmd[0] == "/compact" and len(cmd) <= 2 and set(cmd[1:]) <= set(AIS):
                 self.request_compact(cmd[1:] or self.ais)
                 return True
-            if speaker == "你":
+            human = speaker == "你" or (registry.get(speaker) or {}).get("kind") == "user"
+            if human:
                 names = mentions(text)
                 # 没 @ 人、引用的是某个 AI 的话：就是回它，只叫它
                 quoted = reply_to["speaker"] if reply_to and reply_to["speaker"] in self.ais else None
@@ -893,9 +936,13 @@ class Room:
                 targets, to_user = [], False
             changes, send_errs = [], []
             if speaker in self.ais:
-                text, changes = self.apply_board_cmds(speaker, text)
-                text, sent, send_errs = self.apply_send_cmds(text)
-                attachments = (attachments or []) + sent
+                if access.permissions(self, speaker)["board"]:
+                    text, changes = self.apply_board_cmds(speaker, text)
+                if access.permissions(self, speaker)["files"] and (registry.get(speaker) or {}).get("driver") != "external":
+                    text, sent, send_errs = self.apply_send_cmds(text)
+                    attachments = (attachments or []) + sent
+                if not access.permissions(self, speaker)["trigger"]:
+                    targets = []
             if text or attachments or not (changes or send_errs):
                 self.add_message(speaker, text, attachments, to_user, origin="external" if external else None, reply_to=reply_to)
             self.board_note(speaker, changes, not_for=None if external else speaker)
@@ -903,17 +950,16 @@ class Room:
             if speaker == "你":
                 self.state["chain"] = 0
             for t in targets:
+                if not access.allowed(self, t, "read") or not access.allowed(self, t, "post"):
+                    continue
                 if t not in self.ais:
                     continue
-                if self.is_guest(t) or (registry.get(t) or {}).get("driver") == "external":
-                    if t in names:      # 会外参与者只在被点名时提示一句，不叫、不排队
-                        self.system_note("%s 是会外参与者：要在它自己的界面里看这场会议、用 MCP 的 post_to_room 发言"
-                                         % ((registry.get(t) or {}).get("label") or t))
+                if self.is_guest(t) or (registry.get(t) or {}).get("kind") == "user":
                     continue
                 if self.meta["handed_off"][t]:
                     self.system_note("%s 现在在终端里，回来后会补看" % t)
                 else:
-                    self.enqueue(t, user=(speaker == "你"))
+                    self.enqueue(t, user=human)
         return True
 
     def post_progress(self, ai, text, atts):
@@ -956,25 +1002,26 @@ class Room:
                     self.pending.remove(ai)
                 forced = ai in self.state["force_work"]   # 先取走：下面提前返回时也不能留到下一轮
                 self.state["force_work"].discard(ai)
-                if self.closed or tag != self.job_tag(ai) or self.meta["handed_off"][ai]:
+                if self.closed or ai not in self.ais or not access.allowed(self, ai, "read") or not access.allowed(self, ai, "post") or tag != self.job_tag(ai) or self.meta["handed_off"][ai]:
                     return
                 if not user and self.meta.get(ai + "_session") and not self.delta_for(ai)[0]:
                     return   # AI 之间的对话排到它时，该看的它已经看过了，不白叫
                 self.state["running"].append(ai)
                 self.live[ai] = {"text": "", "time": "", "since": time.time()}
             try:
-                mode = "work" if forced else self.mode()
+                mode = self.member_mode(ai, "work" if forced else self.mode())
                 wd = self.workdir()
+                remote = (registry.get(ai) or {}).get("driver") == "external"
                 pre = None
                 t0 = time.time()
-                if mode == "work" and not ws.in_git(wd):
+                if mode == "work" and not remote and not ws.in_git(wd):
                     with self.lock:
                         warn = not self.meta.get("nogit_warned")
                         self.meta["nogit_warned"] = True
                         self.save_meta()
                     if warn:
                         self.add_message("系统", "工作文件夹 %s 不是 git 仓库：干活模式照常改，但改了什么记不下来，也撤不回" % wd)
-                elif mode == "work":
+                elif mode == "work" and not remote:
                     try:
                         pre = ws.snapshot_tree(wd)   # 只用来取"改前"原文件；改了哪些文件以 AI 自己的操作记录为准
                     except Exception as e:
@@ -1006,7 +1053,9 @@ class Room:
                             self.meta["ctx"][ai] = self.last_ctx.pop(ai)
                         self.save_meta()
                         self.state["chain"] += 1
-                    if was_stopped:   # 刚好在"停"的时候说完：话照登，但里面的 @ 不再叫人
+                    if was_stopped and remote:
+                        self.add_message(ai, out, to_user="用户" in mentions(out, exclude=ai))
+                    elif was_stopped:   # 刚好在"停"的时候说完：话照登，但里面的 @ 不再叫人
                         rest, ch = self.apply_board_cmds(ai, out)
                         rest, sent, errs = self.apply_send_cmds(rest)
                         if rest or sent or not (ch or errs):
@@ -1151,6 +1200,8 @@ class Room:
             self.state["stopped"].update(running)
             for a in targets:
                 self.state["force_work"].discard(a)
+        from .members import broker
+        broker.cancel(self.id, targets)
         for a in running:
             p = self.procs.get(a)
             if p is not None and p.poll() is None:
@@ -1220,12 +1271,13 @@ class Room:
             last_tu = next((m["id"] for m in reversed(self.messages) if m.get("to_user")), -1)
             return {"id": self.id, "title": self.meta["title"], "created": self.meta.get("created", ""),
                     "status": self.meta.get("status", "open"), "archived": is_archived(self.meta.get("status")),
-                    "workdir": self.workdir(), "mode": self.mode(), "loaded": True,
+                    "workdir": self.workdir(), "project": self.meta.get("project", ""), "participants": list(self.ais), "mode": self.mode(), "loaded": True,
                     "running": [a for a in self.state["running"]], "queued": self.queued_count(),
                     "count": len(self.messages), "last_to_user": last_tu,
                     "last_time": self.messages[-1]["time"] if self.messages else ""}
 
     def api_state(self):
+        from .members import broker
         gi = ws.git_info(self.workdir())   # 锁外跑 git
         with self.lock:
             ais = {}
@@ -1237,6 +1289,8 @@ class Room:
                           "tools": agents.tools_summary(a, self.meta["tools"][a])}
             return {"meeting": self.id, "title": self.meta["title"], "status": self.meta["status"],
                     "participants": list(self.ais), "agents": registry.catalog()["agents"],
+                    "members": {a: dict(broker.status(a), transport="member") if (registry.get(a) or {}).get("driver") == "external" and (registry.get(a) or {}).get("kind") != "user" else {"automatic": (registry.get(a) or {}).get("kind") != "user", "transport": "human" if (registry.get(a) or {}).get("kind") == "user" else "http" if (registry.get(a) or {}).get("driver") == "http" else "local"} for a in self.ais},
+                    "project": self.meta.get("project", ""), "permissions": {a: access.permissions(self, a) for a in self.ais},
                     "archived": is_archived(self.meta["status"]),
                     "announcement": self.meta["announcement"], "ann_ver": self.meta["ann_ver"], "ais": ais,
                     "board": self.meta["board"], "workdir": self.workdir(), "default_workdir": PROJECT, "stop_each": True,
@@ -1270,7 +1324,7 @@ def scan(base):
             st = m.get("status", "closed")
             out.append({"id": name, "title": m.get("title", name), "created": m.get("created", ""),
                         "status": st, "archived": is_archived(st), "workdir": m.get("workdir") or PROJECT,
-                        "mode": m.get("mode", "discuss")})
+                        "project": m.get("project", ""), "participants": m.get("participants", ["claude", "codex"]), "mode": m.get("mode", "discuss")})
     return out
 
 
@@ -1364,7 +1418,7 @@ class Rooms:
         with self.lock:
             return list(self.loaded.values())
 
-    def create(self, title, ann="", wd=None):
+    def create(self, title, ann="", wd=None, project="", participants=None):
         """建一场新的。别的会议照常跑，不受影响。返回 Room。"""
         now = datetime.now()
         title = (title or "").strip() or "会议"
@@ -1374,6 +1428,10 @@ class Rooms:
             d = os.path.join(MEET_DIR, name)
             os.makedirs(os.path.join(d, "files"))
             meta = default_meta(title, ann, wd)
+            meta["project"] = project
+            if participants is not None:
+                meta["participants"] = list(participants)
+                meta["permissions"] = {a: dict(access.PERMISSIONS) for a in participants}
             write_json(os.path.join(d, "meeting.json"), meta)
             with open(os.path.join(d, "log.md"), "w", encoding="utf-8") as f:
                 f.write("# %s\n\n创建于 %s\n\n" % (title, meta["created"]))

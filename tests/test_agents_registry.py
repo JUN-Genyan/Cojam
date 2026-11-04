@@ -175,9 +175,10 @@ class Participants(Base):
         time.sleep(0.4)
         self.assertEqual(self.seen, [])
 
-    def test_cannot_remove_everyone_or_unknown(self):
+    def test_empty_conversation_and_unknown_contact(self):
         r = R.rooms.create("边界", "", self.wd)
-        self.assertFalse(r.set_participants([])[0])
+        self.assertTrue(r.set_participants([])[0])
+        self.assertEqual(r.ais, [])
         self.assertFalse(r.set_participants(["不存在的"])[0])
 
     def test_agent_installed_after_room_created(self):

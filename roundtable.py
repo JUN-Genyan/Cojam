@@ -16,6 +16,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 def main():
     args = sys.argv[1:]
     cmd = args[0].lower() if args else ""
+    if cmd == "member":
+        from bridge.member import main as member_main
+        raise SystemExit(member_main(args[1:]))
+    if cmd == "member-ui":
+        from bridge.member_ui import main as member_ui
+        raise SystemExit(member_ui())
+    if cmd == "hook-codex":
+        from bridge.hook_codex import main as hook
+        return hook()
     if cmd in ("install", "join", "doctor", "agents"):
         from bridge import install, doctor, registry
         if cmd == "install":

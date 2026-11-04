@@ -4,7 +4,7 @@ import json, os, sys, tempfile, threading, time, unittest, urllib.error, urllib.
 
 os.environ["ROUNDTABLE_LOG_DIR"] = tempfile.mkdtemp(prefix="rt_guard_")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from bridge import room as R, web, guard as G, agents
+from bridge import room as R, web, guard as G, agents, access
 from bridge.guard import FileGuard, guard
 
 WD = tempfile.mkdtemp(prefix="rt_guard_wd_")
@@ -193,9 +193,10 @@ class HookEndpoint(unittest.TestCase):
 class MCP(unittest.TestCase):
     def setUp(self):
         guard.items.clear()
+        self.external_key = access.credential("codex")
 
     def rpc(self, method, params=None, key=None, mid=1):
-        h = {"Authorization": "Bearer " + key} if key else {}
+        h = {"Authorization": "Bearer " + (key or self.external_key)}
         msg = {"jsonrpc": "2.0", "method": method}
         if mid is not None:
             msg["id"] = mid
@@ -219,7 +220,9 @@ class MCP(unittest.TestCase):
         r = R.rooms.create("给外面读", "目标E", WD)
         R.set_last(r.id)
         names = [t["name"] for t in self.rpc("tools/list")[1]["result"]["tools"]]
-        self.assertEqual(names, ["list_rooms", "read_room", "post_to_room", "wait_for_message"])
+        self.assertEqual(names[:4], ["list_rooms", "read_room", "post_to_room", "wait_for_message"])
+        self.assertIn("receive_task", names)
+        self.assertIn("reply_task", names)
         res = self.rpc("tools/call", {"name": "list_rooms", "arguments": {}})[1]["result"]
         self.assertIn(r.id, res["content"][0]["text"])
         res = self.rpc("tools/call", {"name": "post_to_room", "arguments": {"speaker": "codex", "text": "外面的 codex 说话", "room": r.id}})[1]["result"]
@@ -275,7 +278,7 @@ class MCP(unittest.TestCase):
     def test_origin_check(self):
         s, _ = raw("POST", "/mcp", {"jsonrpc": "2.0", "id": 1, "method": "ping"}, {"Origin": "http://evil.example"})
         self.assertEqual(s, 403)
-        s, _ = raw("POST", "/mcp", {"jsonrpc": "2.0", "id": 1, "method": "ping"}, {"Origin": "http://127.0.0.1:%d" % PORT})
+        s, _ = raw("POST", "/mcp", {"jsonrpc": "2.0", "id": 1, "method": "ping"}, {"Origin": "http://127.0.0.1:%d" % PORT, "Authorization": "Bearer " + self.external_key})
         self.assertEqual(s, 200)
 
 

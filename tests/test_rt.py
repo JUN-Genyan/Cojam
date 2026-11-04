@@ -258,12 +258,12 @@ class T(unittest.TestCase):
             self.assertEqual(call("POST", path, body, auth=False)[0], 403, path)
         self.assertEqual(status_of(a.id), "open")
         self.assertEqual(a.own_models("claude"), ("", ""))
-        # same-origin 头可以
+        # same-origin 头不能代替管理员 token
         self.assertEqual(call("POST", rp(a, "models"), {"ai": "claude", "model": "x", "effort": ""}, auth=False,
-                              extra={"Sec-Fetch-Site": "same-origin"})[0], 200)
+                              extra={"Sec-Fetch-Site": "same-origin"})[0], 403)
         # /api/post 只收 claude / codex
-        self.assertEqual(call("POST", "/api/post", {"speaker": "你", "text": "x"}, auth=False)[0], 400)
-        self.assertEqual(call("POST", "/api/post", {"speaker": "系统", "text": "x"}, auth=False)[0], 400)
+        self.assertEqual(call("POST", "/api/post", {"speaker": "你", "text": "x"}, auth=False)[0], 401)
+        self.assertEqual(call("POST", "/api/post", {"speaker": "系统", "text": "x"}, auth=False)[0], 401)
 
     def test_tools_config(self):
         r = new("工具")

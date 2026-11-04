@@ -183,6 +183,9 @@ def call_http(pid, spec, prompt, session_id, images, mode, room):
             "workdir": room.workdir() if room is not None else os.getcwd(),
             "goal": room.goal() if room is not None else "", "images": list(images or ()),
             "bridge_url": bridge_url("/mcp"), "bridge_key": (room.keys.get(pid, "") if room is not None else "")}
+    if room is not None:
+        from .access import permissions
+        body["permissions"] = permissions(room, pid)
     headers = {"Content-Type": "application/json"}
     headers.update(spec.get("headers") or {})
     if spec.get("token"):
@@ -225,7 +228,10 @@ def call(pid, prompt, session_id=None, images=(), mode=None, room=None):
         mode = room.mode() if room is not None else "discuss"
     try:
         if driver == "external":
-            return False, "%s 是会外参与者（在它自己的界面里用），会议室不主动叫它" % pid, session_id, []
+            from .members import broker
+            if room is None:
+                return False, "请先加入会话并连接成员执行端", session_id, []
+            return broker.call(pid, prompt, session_id, mode, room)
         if driver == "cli":
             return call_cli(pid, spec, prompt, session_id, images, mode, room)
         if driver == "http":

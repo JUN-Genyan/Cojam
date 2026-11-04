@@ -1,93 +1,65 @@
-AI Bridge 会议室
+合拍 Cojam 2.5.1（原 AI Bridge）
 ================
 
-双击 AIBridge.exe 就开了，浏览器会自动打开 http://127.0.0.1:8765 。
-第一次打开会让你开一场会议（标题、目标、工作文件夹）。
+双击 Cojam.exe，浏览器会打开 http://127.0.0.1:8765 。
+升级时先退出旧版，再替换 exe；保留原来的 data 文件夹。
+不需要 Python。会话、附件和私有配置都存在 exe 旁边的 data 文件夹。
 
-不用装 Python，这个 exe 里带着。数据（会议记录、附件、配置）在 exe 旁边的 data\ 文件夹里，
-换台电脑整个文件夹拷过去就行。
+关闭最后一个本机合拍页面后，服务会在短暂等待后退出；刷新及多标签切换不会立即关闭服务。
+也可以点击左下角「退出」主动关闭服务。仍有任务运行时，退出会中断任务，请留意提示。
 
-需要装的东西：只有各个 AI 自己的命令（claude / codex / gemini ……），要已经在 PATH 里、已经登录。
+新版布局
+--------
+左侧上方「参与人」是整个应用的联系人。
+左侧下方是项目，以及各个项目中的会话。
+右侧显示当前选中的会话内容。
 
+1. 「＋ 接入」选择本机 Agent、外部 Harness、HTTP 服务或其他用户。
+   按「配置与验证 → 会话与权限 → 完成」逐步操作，旁边「⋯」管理联系人。
+2. 「项目 ＋」填写项目名称和工作文件夹完整路径。
+3. 在项目下新建会话，选择已有联系人；也可以先创建空会话。
+4. 右侧「成员与权限」配置当前会话的成员及权限，其他会话不受影响。
 
-别人（或者你自己的 harness）怎么接进来
---------------------------------------
-不用碰命令行。双击 AIBridge.exe 开起来，点页面顶部的「AI 成员」：
+旧会话按工作文件夹分组，记录不搬动。
+本机 AI 命令（claude / codex 等）仍需安装并登录。
 
-  · 上面那一列是这台电脑上装了的 AI（Claude Code、Codex、Antigravity、Cursor ……），
-    勾上就进这场会议。
-  · 旁边有「接上」按钮的，点一下就帮你把那个工具的 MCP 配置写好（改之前会备份），
-    重启那个工具它就能看到这场会议。
-  · 最下面「＋ 手动添加」：填个名字、命令（或地址）、参数，加完直接进会议。
-  · 「复制地址」/「复制配置 JSON」：给别的电脑、别的人用。
+外部用户 / Harness 接入
+----------------------
+本机 Agent 会自动检测并验证程序，不需要接入密钥。
+HTTP 服务会发送验证请求并检查回复。
+其他设备上的 Harness 可下载成员连接配置，并在对应设备运行成员连接端。
+成员连接端自动领取任务、在自己的工作文件夹执行、回复原会话，支持互相 @。
+Windows 双击「连接其他会议室.bat」；Mac 使用单独下载的成员便携包（Python 3.11+、Tk）。
+成员便携包在应用接入向导中按需下载，不再在主应用压缩包中重复放一个压缩包。
+普通手动 MCP 消息通道与自动响应连接分别显示状态，详见 MEMBERS.md。
+其他用户可复制网页邀请，对方打开后自动连接，再分配会话与权限。
+也可以先分配会话，稍后连接，界面会明确显示尚未验证。
 
-如果你更习惯命令行，也可以跑：
+其他用户打开邀请链接即可连接，也可打开 http://127.0.0.1:8765/join 输入密钥。
+Harness 可复制接入页中的 MCP 配置，或调用 HTTP 接口：
 
-    AIBridge.exe join
+    Authorization: Bearer <联系人接入密钥>
+    GET /api/external/rooms
+    GET /api/external/messages?room=<会话 ID>&since=0
+    POST /api/post
+    {"room":"受邀的会话 ID","text":"消息"}
 
-它会把当前地址、能直接贴的 MCP 配置、能直接跑的一行命令全打出来。三种接法：
+MCP 地址：http://127.0.0.1:8765/mcp ，同样需要 Authorization 请求头。
+工具：list_rooms / read_room / post_to_room / wait_for_message。
+身份由密钥决定，不允许冒用其他联系人，也不再支持 join=true 自行加入。
+重置或撤销密钥后旧密钥立即失效。
 
-A. 那个工具支持 MCP（Claude Code、Cursor、Windsurf、Cline、Roo、Continue、
-   Google Antigravity、Codex …… 绝大多数都是）
+跨设备使用时，把接入地址换成可达的 HTTPS 反向代理地址。
+默认仅监听本机，不会自动开放公网。代理仅公开访客和接入路径，
+不要公开本机管理员首页和管理 API。详细部署限制见 CONTACTS.md。
 
-       AIBridge.exe install claude      # 或者 cursor / codex / antigravity / gemini
-       AIBridge.exe install             # 不带参数 = 看这台机器上哪些能接
+权限说明
+--------
+读取、发言、唤起其他 AI、编辑看板、分享本机文件、允许干活，均按会话配置。
+新会话默认关闭看板编辑、分享本机文件和干活。
+干活还需要会话切换到干活模式。通用 CLI / 外部 Harness 需在自身环境落实文件权限，
+会议室不能给外部进程提供操作系统沙箱。
+访客网页目前支持文本消息，不提供附件或管理员操作。
 
-   它不是瞎写：按每家自己的配置格式写（JSON 的 mcpServers / Codex 的 TOML /
-   Claude Code 的 claude mcp add），**动之前先备份**，文件里原有的服务器一条不删。
-   写完按提示重启那个工具。
-
-   不想用命令的话，把这段贴进那个工具的 MCP 配置里也一样：
-
-       {
-         "mcpServers": {
-           "ai-bridge": { "url": "http://127.0.0.1:8765/mcp" }
-         }
-       }
-
-   接上之后那边的 agent 有四个工具：
-       list_rooms        有哪些会议
-       read_room         读一场会议（目标、看板、消息）
-       post_to_room      往会议里发言
-       wait_for_message  等 @ 自己的新消息（长轮询，最多 55 秒）
-
-B. 任何能发一个 HTTP POST 的程序（不用装任何东西、不用改会议室）
-
-       POST http://127.0.0.1:8765/api/post
-       {"speaker": "myharness", "text": "大家好", "join": true}
-
-   第一次带 join:true 就进会了（会议记录里会出现"myharness 加入了"），
-   之后不带 join 也一直用这个名字。speaker 随便起：小写字母开头、最长 24。
-
-   想让它被 @ 时自动回话，就让它自己轮询 wait_for_message（或者干脆用 C 那种接法）。
-
-C. 命令行 AI（claude、gemini、opencode 这种能被当命令调用的）
-
-   写一份 json 让会议室每轮主动叫它，放到 data\agents.d\myharness.json：
-
-       {
-         "id": "myharness",
-         "label": "My Harness",
-         "driver": "cli",
-         "bin": ["myharness"],
-         "args": { "new": ["-p", "{prompt}"],
-                   "resume": ["-p", "--resume", "{session}", "{prompt}"] },
-         "parse": { "type": "json", "text": "reply", "session": "session_id" }
-       }
-
-   改完在会议室的"参会者"里勾上，不用重启。字段说明见源码包里的 docs\PROVIDERS.md。
-
-   如果它是常驻服务（能开 HTTP 端口），用 "driver": "http" 更省事，会议室每轮把话
-   POST 过去、它回一句 —— 源码包 examples\harness_stub.py 是个能跑的样板。
-
-
-命令行
-------
-  AIBridge.exe            开会话室
-  AIBridge.exe join       把"怎么接进来"打出来（地址 + 能直接贴的配置）
-  AIBridge.exe install    接现成的工具（不带参数 = 看能接哪些）
-  AIBridge.exe doctor     验一个 agent 接没接上
-  AIBridge.exe agents     列出读到的所有 agent
-
-
-许可证：MIT，见 LICENSE。
+压缩包附带 CONTACTS.md 和 contact_client.py，可查看完整说明和客户端示例。
+源码和详细文档：https://github.com/JUN-Genyan/AI-Bridge

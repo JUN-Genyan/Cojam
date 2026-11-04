@@ -2,16 +2,17 @@
 """HTTP 接口和启动。
 
 会议相关的接口都带会议号：/api/r/<会议号>/<动作>，每个浏览器标签页可以开着不同的会议，互不影响。
-代表用户的操作只认浏览器（Sec-Fetch-Site: same-origin，或页面注入的 X-RT-Token）；
+管理员接口只认页面注入的 X-RT-Token；
 外部程序用 /api/post 或 /mcp；钩子用 /api/guard/*（带钥匙）。"""
-import hmac, json, mimetypes, os, re, secrets, socket, threading, webbrowser
+import hmac, json, mimetypes, os, re, secrets, socket, sys, threading, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote
 
-from . import agents, install, mcp, registry, room as R
+from . import access, agents, connections, install, mcp, members, projects, registry, room as R
 from .common import (AIS, EXTERNAL_SPEAKERS, HERE, HOST, MAX_ANN, MAX_BODY, MAX_UPLOAD, MEET_DIR, PORT, PROJECT,
                      in_dir, kind_of)
 from .guard import USER, guard
+from .version import VERSION, API_REVISION
 
 RT_TOKEN = secrets.token_urlsafe(24)   # 每次启动随机；页面加载时注入 HTML，前端每个请求带 X-RT-Token
 USER_ONLY_MSG = "这个接口只给网页上的用户用；外部程序请用 /api/post 或 /mcp 并写明自己的身份"
@@ -63,10 +64,7 @@ class Handler(BaseHTTPRequestHandler):
         return data
 
     def _from_browser(self):
-        """代表用户的操作只认浏览器：Sec-Fetch-Site: same-origin，或页面注入的 X-RT-Token。
-        这是防误用，不是防故意伪造（curl 想伪造请求头是做得到的）。"""
-        if (self.headers.get("Sec-Fetch-Site") or "").strip().lower() == "same-origin":
-            return True
+        """Local administrator capability. External contacts use separate bearer credentials."""
         tok = self.headers.get("X-RT-Token") or ""
         return bool(tok) and hmac.compare_digest(tok.encode("utf-8"), RT_TOKEN.encode("utf-8"))
 
@@ -78,11 +76,19 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------- 静态 ----------
     def _static(self, name, ctype):
+        if name == "member-connector.zip":
+            if not self._from_browser() and "rt_owner=" + RT_TOKEN not in (self.headers.get("Cookie") or "").split("; "):
+                return self._json(403, {"error": USER_ONLY_MSG})
+            if not os.path.isfile(os.path.join(STATIC, name)) and not getattr(sys, "frozen", False):
+                from .member_package import build
+                build()
         p = os.path.join(STATIC, name)
         if not os.path.isfile(p):
             return self._send(404, b"not found", "text/plain")
-        with open(p, "rb") as f:
-            body = f.read()
+        body = getattr(self.server, "ui_assets", {}).get(name)
+        if body is None:
+            with open(p, "rb") as f:
+                body = f.read()
         extra = {"Service-Worker-Allowed": "/"} if name == "sw.js" else None
         self._send(200, body, ctype, extra)
 
@@ -143,10 +149,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path, _, qs = self.path.partition("?")
         q = parse_qs(qs)
+        if path == "/api/server/info":
+            return self._json(200, {"app": "AI Bridge", "version": VERSION, "api_revision": API_REVISION})
+        if path == "/join":
+            return self._static("join.html", "text/html; charset=utf-8")
         if path in ("/", "/index.html"):
-            with open(INDEX, "rb") as f:
-                html = f.read().replace(b"__RT_TOKEN__", RT_TOKEN.encode("ascii"))
-            return self._send(200, html, "text/html; charset=utf-8")
+            host = (self.headers.get("Host") or "").split(":")[0].lower()
+            forwarded = any(self.headers.get(h) for h in ("Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Real-IP"))
+            if forwarded or self.client_address[0] not in ("127.0.0.1", "::1") or host not in ("localhost", "127.0.0.1"):
+                return self._static("join.html", "text/html; charset=utf-8")
+            html = getattr(self.server, "ui_index", None)
+            if html is None:
+                with open(INDEX, "rb") as f:
+                    html = f.read()
+            html = html.replace(b"__RT_TOKEN__", RT_TOKEN.encode("ascii"))
+            return self._send(200, html, "text/html; charset=utf-8", {"Set-Cookie": "rt_owner=" + RT_TOKEN + "; HttpOnly; SameSite=Strict; Path=/"})
         if path == "/sw.js":
             return self._static("sw.js", "text/javascript; charset=utf-8")
         if path == "/manifest.webmanifest":
@@ -155,11 +172,24 @@ class Handler(BaseHTTPRequestHandler):
             name = path[len("/static/"):]
             return self._static(name, mimetypes.guess_type(name)[0] or "application/octet-stream")
         if path.startswith("/files/"):
+            if not self._from_browser() and not (self.headers.get("Cookie") or "").split("; ").count("rt_owner=" + RT_TOKEN):
+                return self._json(403, {"error": USER_ONLY_MSG})
             return self._serve_file(path[len("/files/"):])
         if path == "/mcp":
             return self._json(405, {"error": "这个 MCP 服务只收 POST"}, {"Allow": "POST"})
+        if path.startswith("/api/external/"):
+            return self._external_get(path, q)
+        if path.startswith("/api/") and not self._from_browser():
+            return self._json(403, {"error": USER_ONLY_MSG})
+        if path == "/api/server/runtime":
+            from .common import LOG_DIR
+            from .server_runtime import installation
+            return self._json(200, {"install": installation(), "data": os.path.realpath(LOG_DIR)})
         if path == "/api/rooms":
-            return self._json(200, {"rooms": R.rooms.listing(), "last": R.last_room(), "default_workdir": PROJECT})
+            rows = R.rooms.listing()
+            for row in rows:
+                row["project"] = row.get("project") or projects.legacy_id(row["workdir"])
+            return self._json(200, {"rooms": rows, "projects": projects.listing(rows), "last": R.last_room(), "default_workdir": PROJECT})
         if path == "/api/trash":
             return self._json(200, {"trash": R.list_trash()})
         if path == "/api/claims":
@@ -168,6 +198,7 @@ class Handler(BaseHTTPRequestHandler):
             if (q.get("reload") or [""])[0] in ("1", "true", "yes"):
                 registry.load()      # 用户刚改了 data/agents.d：重读一遍，不用重启服务器
             return self._json(200, dict(registry.catalog(), default_dir=PROJECT, hosts=install.hosts_status(),
+                                        connections=connections.catalog(), members={s["id"]: members.broker.status(s["id"]) for s in registry.all_specs() if s["driver"] == "external" and s.get("kind") != "user"},
                                         mcp_url="http://127.0.0.1:%d/mcp" % PORT))
         if path in ("/api/state", "/api/messages"):   # 老页面（服务器换了新版、页面还没刷新）：按最近打开的那场回
             rid = R.last_room()
@@ -205,13 +236,40 @@ class Handler(BaseHTTPRequestHandler):
             return self._guard(path[len("/api/guard/"):])
         if path == "/api/post":
             return self._external_post()
+        if path.startswith("/api/external/member/"):
+            data = self._read_json()
+            if data is None:
+                return
+            key = self._bearer()
+            pid = access.identify(key)
+            if not pid:
+                return self._json(401, {"error": "接入密钥无效"})
+            try:
+                result = members.handle(pid, key, path.rsplit("/", 1)[1], data)
+                connections.seen(pid, key, "member", data.get("device"))
+                return self._json(200, result)
+            except members.MemberError as e:
+                return self._json(e.code, {"error": str(e)})
+        if path == "/api/external/hello":
+            data = self._read_json()
+            if data is None:
+                return
+            key = self._bearer()
+            pid = access.identify(key)
+            if not pid:
+                return self._json(401, {"error": "接入密钥无效或已撤销"})
+            connections.seen(pid, key, "web" if data.get("client") == "AI Bridge 网页" else "http", data.get("client"))
+            return self._json(200, {"ok": True, "contact": registry.public(registry.get(pid))})
         if path == "/api/agents/add":         # 页面上"手动添加"，不让人碰 json
             data = self._read_json()
             if data is None:
                 return
             if not self._from_browser():
                 return self._json(403, {"error": USER_ONLY_MSG})
-            ok, msg = registry.save_agent(data.get("spec") or {})
+            try:
+                ok, msg = registry.save_agent(data.get("spec") or {})
+            except OSError:
+                return self._json(500, {"error": "无法保存联系人，请检查应用数据目录的写入权限和剩余空间"})
             return self._json(200 if ok else 400, {"ok": ok, "error": msg, "agents": registry.catalog()["agents"]})
         if path == "/api/agents/remove":
             data = self._read_json()
@@ -219,7 +277,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if not self._from_browser():
                 return self._json(403, {"error": USER_ONLY_MSG})
+            pid = str(data.get("id") or "")
+            used = [r["title"] for r in R.rooms.listing() if pid in r.get("participants", [])]
+            if used:
+                return self._json(409, {"error": "请先从这些会话移除此联系人：" + "、".join(used)})
             ok, msg = registry.remove_agent(str(data.get("id") or ""))
+            if ok:
+                # Remove any credential even if the same ID is added again later.
+                with access.LOCK:
+                    from .common import LOG_DIR, read_json, write_json
+                    path = os.path.join(LOG_DIR, "contact_keys.json")
+                    keys = read_json(path) or {}
+                    keys.pop(pid, None)
+                    write_json(path, keys)
             return self._json(200 if ok else 409, {"ok": ok, "error": msg})
         if path == "/api/agents/install":     # 页面上的"一键接入"，不让人碰命令行
             data = self._read_json()
@@ -227,7 +297,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if not self._from_browser():
                 return self._json(403, {"error": USER_ONLY_MSG})
-            ok, msg = install.host_install(str(data.get("host") or ""))
+            token = str(data.get("token") or "")
+            if not token or access.identify(token) != str(data.get("contact") or data.get("host") or ""):
+                return self._json(400, {"error": "请先生成此联系人的接入密钥"})
+            ok, msg = install.host_install(str(data.get("host") or ""), token)
             return self._json(200 if ok else 409, {"ok": ok, "msg": msg, "hosts": install.hosts_status()})
         if not self._from_browser():
             return self._json(403, {"error": USER_ONLY_MSG})
@@ -242,15 +315,61 @@ class Handler(BaseHTTPRequestHandler):
         data = self._read_json()
         if data is None:
             return
+        if path == "/api/ui/session":
+            lifecycle = getattr(self.server, "owner_lifecycle", None)
+            if lifecycle is not None:
+                try:
+                    lifecycle.update(data.get("tab"), data.get("action"), data.get("instance"))
+                except ValueError as error:
+                    return self._json(400, {"error": str(error)})
+            return self._json(200, {"ok": True})
+        if path == "/api/server/exit":
+            self._json(200, {"ok": True})
+            threading.Thread(target=lambda: stop_application(self.server), daemon=True).start()
+            return
+        if path == "/api/server/stop":
+            # The launcher uses this only after confirming the same installation/data.
+            if any(row.get("running") or row.get("queued") for row in R.rooms.listing()):
+                return self._json(409, {"error": "仍有任务运行或排队，请等待结束后再更新"})
+            self._json(200, {"ok": True})
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
+        if path == "/api/contacts/key":
+            try:
+                token = access.credential(str(data.get("id") or ""), data.get("revoke") is True)
+                return self._json(200, {"ok": True, "token": token})
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
+        if path == "/api/contacts/check":
+            try:
+                return self._json(200, {"ok": True, "connection": connections.check(str(data.get("id") or ""))})
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
+        if path == "/api/contacts/status":
+            pid = str(data.get("id") or "")
+            return self._json(200, {"connection": connections.status(pid), "member": members.broker.status(pid)})
+        if path == "/api/projects/new":
+            try:
+                p = projects.create(data.get("name"), data.get("workdir"))
+                return self._json(200, {"ok": True, "project": p})
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
         if path == "/api/rooms/new":
             ann = str(data.get("announcement", ""))
             if len(ann.encode("utf-8")) > MAX_ANN:
                 return self._json(413, {"error": "too large (max 16KB)"})
-            wd = str(data.get("workdir") or "").strip().strip('"') or PROJECT
+            pid = str(data.get("project") or "")
+            project = next((p for p in projects.listing(R.rooms.listing()) if p["id"] == pid), None)
+            if pid and project is None:
+                return self._json(400, {"error": "项目不存在"})
+            member_ids = data.get("participants")
+            if member_ids is not None and (not isinstance(member_ids, list) or any(not isinstance(a, str) or a not in registry.enabled_ids() for a in member_ids)):
+                return self._json(400, {"error": "请选择已有且启用的联系人"})
+            wd = (project["workdir"] if project else str(data.get("workdir") or "").strip().strip('"')) or PROJECT
             wd = os.path.normpath(os.path.expandvars(os.path.expanduser(wd)))
             if not os.path.isabs(wd) or not os.path.isdir(wd):
                 return self._json(400, {"error": "工作文件夹不存在：" + wd})
-            r = R.rooms.create(str(data.get("title", "")), ann, wd)
+            r = R.rooms.create(str(data.get("title", "")), ann, wd, pid, member_ids)
             return self._json(200, {"ok": True, "id": r.id})
         if path == "/api/rooms/archive":
             ok, msg = R.set_archived(str(data.get("id", "")), bool(data.get("on")))
@@ -356,6 +475,26 @@ class Handler(BaseHTTPRequestHandler):
         if act == "participants":
             ok, msg = r.set_participants(data.get("participants"))
             return self._json(200 if ok else 409, {"ok": ok, "error": msg, "participants": list(r.ais)})
+        if act == "members":
+            try:
+                ok, msg = r.set_members(data.get("participants"), data.get("permissions"))
+            except OSError:
+                return self._json(500, {"error": "无法保存会话，请检查数据目录权限或文件是否被占用后重试"})
+            return self._json(200 if ok else 409, {"ok": ok, "error": msg})
+        if act == "invite":
+            pid = str(data.get("contact") or "")
+            value = data.get("permissions")
+            if not isinstance(value, dict):
+                return self._json(400, {"error": "请选择此联系人的会话权限"})
+            try:
+                with r.lock:
+                    ids = list(dict.fromkeys(list(r.ais) + [pid]))
+                    perms = {a: access.permissions(r, a) for a in r.ais}
+                    perms[pid] = value
+                    ok, msg = r.set_members(ids, perms)
+            except OSError:
+                return self._json(500, {"error": "无法保存会话，请检查数据目录权限或文件是否被占用后重试"})
+            return self._json(200 if ok else 409, {"ok": ok, "error": msg})
 
         if act == "compact":
             who = str(data.get("ai") or "")
@@ -372,26 +511,43 @@ class Handler(BaseHTTPRequestHandler):
         data = self._read_json()
         if data is None:
             return
-        speaker = str(data.get("speaker") or "").strip().lower()
+        speaker = access.identify(self._bearer())
         if not speaker:
-            return self._json(400, {"error": "speaker 必填（你以谁的身份发言）"})
-        rid = str(data.get("room") or "").strip() or R.last_room()
+            return self._json(401, {"error": "请使用联系人接入密钥"})
+        if data.get("speaker") and data["speaker"] != speaker:
+            return self._json(403, {"error": "密钥不能冒用其他联系人"})
+        rid = str(data.get("room") or "").strip()
         r = R.rooms.get(rid) if rid else None
         if r is None:
-            return self._json(409 if not rid else 404, {"error": "还没有会议，先开一个" if not rid else "没有这场会议：" + rid})
-        if speaker not in EXTERNAL_SPEAKERS and speaker not in r.ais:
-            # 谁都能进来：第一次带上 "join": true 就到这场会议报到
-            if not data.get("join"):
-                return self._json(400, {"error": "speaker %r 还没在这场会议里。第一次发言带上 \"join\": true 就行；"
-                                                 "已经接好的：%s" % (speaker, "、".join(EXTERNAL_SPEAKERS))})
-            ok, err = r.join_external(speaker, data.get("label"))
-            if not ok:
-                return self._json(400, {"error": err})
+            return self._json(409 if not rid else 404, {"error": "room 必填，请先列出受邀会话" if not rid else "没有这场会话：" + rid})
+        if not access.allowed(r, speaker, "read") or not access.allowed(r, speaker, "post"):
+            return self._json(403, {"error": "未加入此会话或没有发言权限"})
         text = str(data.get("text", "")).strip()
         if not text:
             return self._json(400, {"error": "empty"})
         r.handle_message(speaker, text, origin="external")
+        connections.seen(speaker, self._bearer(), "http")
         return self._json(200, {"ok": True, "speaker": speaker, "origin": "external", "room": r.id})
+
+    def _external_get(self, path, q):
+        pid = access.identify(self._bearer())
+        if not pid:
+            return self._json(401, {"error": "接入密钥无效或已撤销"})
+        if path == "/api/external/rooms":
+            connections.seen(pid, self._bearer(), "http")
+            return self._json(200, {"contact": registry.public(registry.get(pid)), "rooms": access.visible_rooms(pid)})
+        rid = (q.get("room") or [""])[0]
+        r = R.rooms.get(rid) if rid else None
+        if r is None or not access.allowed(r, pid):
+            return self._json(403, {"error": "没有此会话的读取权限"})
+        if path == "/api/external/messages":
+            connections.seen(pid, self._bearer(), "http")
+            result = r.messages_since(_int(q, "since"))
+            # External clients receive text and message metadata, never local file paths.
+            result["messages"] = [{k: m[k] for k in ("id", "time", "speaker", "text", "to_user") if k in m} for m in result["messages"] if not m.get("quiet")]
+            result["permissions"] = access.permissions(r, pid)
+            return self._json(200, result)
+        return self._json(404, {"error": "unknown endpoint"})
 
     def _mcp(self):
         origin = self.headers.get("Origin")
@@ -421,6 +577,8 @@ class Handler(BaseHTTPRequestHandler):
         if who is None:   # 钥匙对不上（会议室重启过之类）：不挡，免得 AI 白白卡住
             return self._json(200, agents.guard_allow(kind))
         r = R.rooms.get(who[0])
+        if r is not None and (not access.allowed(r, who[1], "work") or who[1] not in r.ais):
+            return self._json(200, {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "此成员没有干活权限"}})
         return self._json(200, agents.guard_decide(kind, r, who[1], data))
 
 
@@ -436,10 +594,36 @@ class ExclusiveServer(ThreadingHTTPServer):
     allow_reuse_address = os.name != "nt"   # Windows 的 SO_REUSEADDR 会允许重复绑定；别的系统上它只管 TIME_WAIT，留着
     daemon_threads = True
 
+    def __init__(self, *args, **kwargs):
+        # Keep one UI/backend generation together until restart. Previously an
+        # old process hot-served a new UI from disk and silently lost its APIs.
+        with open(INDEX, "rb") as f:
+            self.ui_index = f.read()
+        self.ui_assets = {}
+        for name in os.listdir(STATIC):
+            if name.endswith((".js", ".css", ".html", ".webmanifest")):
+                with open(os.path.join(STATIC, name), "rb") as f:
+                    self.ui_assets[name] = f.read()
+        super().__init__(*args, **kwargs)
+
     def server_bind(self):
         if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         super().server_bind()
+
+
+def stop_application(server):
+    """Stop only processes and jobs owned by this application."""
+    for room in R.rooms.all():
+        try:
+            with room.lock:
+                busy = bool(room.state["running"] or room.pending or not room.jobs.empty())
+            if busy:
+                room.stop_ais()
+            agents.stop_codex(room)
+        except Exception as error:
+            print("退出时停止会话失败:", error, file=sys.stderr)
+    server.shutdown()
 
 
 def main():
@@ -447,9 +631,23 @@ def main():
     try:
         srv = ExclusiveServer((HOST, PORT), Handler)
     except OSError:
-        # 2026-10-14：Windows 上默认的 SO_REUSEADDR 让第二个会议室也绑上了同一个端口，请求落到老进程上，新代码不生效还看不出来
-        print("端口 %d 已经被占了：多半已经有一个会议室在跑（可能是桌面快捷方式在后台开的）。直接打开 %s ，或者先关掉那个再开。" % (PORT, url))
-        return
+        from .server_runtime import reuse_or_stop, show_startup_error
+        action, message = reuse_or_stop(url)
+        if action == "reuse":
+            if os.environ.get("ROUNDTABLE_NO_BROWSER") != "1":
+                webbrowser.open(url)
+            return
+        if action != "stopped":
+            show_startup_error(message)
+            return
+        try:
+            srv = ExclusiveServer((HOST, PORT), Handler)
+        except OSError:
+            show_startup_error("旧后台尚未退出，请稍后重新打开 AI Bridge。")
+            return
+    if os.environ.get("ROUNDTABLE_NO_BROWSER") != "1":
+        from .owner_lifecycle import OwnerLifecycle
+        srv.owner_lifecycle = OwnerLifecycle(lambda: stop_application(srv))
     agents.start_reaper()
     print("会议室已启动：" + url)
     if os.environ.get("ROUNDTABLE_NO_BROWSER") != "1":
@@ -458,3 +656,5 @@ def main():
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        srv.server_close()

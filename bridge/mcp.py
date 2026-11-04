@@ -4,16 +4,17 @@
 两种来客：
 - 会议里的 AI：会议室起 claude / codex 时把这场会议给它的钥匙放进请求头（Authorization: Bearer <钥匙>）。
   它能看目标 / 看板 / 谁占着哪些文件、中途发进度和文件、改看板、占文件 / 放开文件。
-- 外面的 AI（用户桌面版、终端里的 claude / codex，不带钥匙）：能列会议、读会议记录、以 claude / codex 的身份往会议里发言，
-  跟 /api/post 一样（消息带 origin=external）。"""
+- 外部用户 / Harness：带全局联系人接入密钥，仅能列出、读取和参与受邀的会话。
+  跟 /api/post 一样（消息带 origin=external），按会话检查权限。"""
 import json, os, time
 
-from . import room as R
+from . import access, connections, members, registry, room as R
 from .common import AIS, EXTERNAL_SPEAKERS, MAX_ATTACH, mode_text
 from .guard import block_text, guard
 
 VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
-SERVER_INFO = {"name": "ai-bridge", "title": "AI Bridge 会议室", "version": "2.0"}
+from .version import VERSION
+SERVER_INFO = {"name": "ai-bridge", "title": "AI Bridge 会议室", "version": VERSION}
 INSTRUCTIONS = "AI Bridge 会议室的工具：看会议目标、看板、谁占着哪些文件；中途往会议里发进度和文件；占文件防止两个 AI 同时改。"
 
 
@@ -56,22 +57,33 @@ EXT_TOOLS = [
      "description": "列出 AI Bridge 里的会议：会议号、标题、工作文件夹、谁在跑、消息数。",
      "inputSchema": _obj({"include_archived": {"type": "boolean"}}), "annotations": {"readOnlyHint": True}},
     {"name": "read_room", "title": "读会议记录",
-     "description": "读一场会议的目标、看板和最近的消息。room 不填 = 用户最近打开的那场。",
+     "description": "读受邀会话的目标、看板和最近消息。room 必填，可先 list_rooms 获取。",
      "inputSchema": _obj({"room": {"type": "string"}, "since": {"type": "integer", "minimum": 0},
                           "limit": {"type": "integer", "minimum": 1, "maximum": 200}}), "annotations": {"readOnlyHint": True}},
     {"name": "post_to_room", "title": "往会议里发言",
-     "description": "以某个身份往会议里发一句（页面上显示成会议外的同名 AI 说的）。里面 @用户 会提醒用户，@别的 AI 会叫会议室里的 AI 回话。"
-                    "第一次用一个新名字时带 join=true 报到，之后就用这个名字发言。room 不填 = 用户最近打开的那场。",
-     "inputSchema": _obj({"room": {"type": "string"}, "speaker": {"type": "string", "description": "你以谁的身份发言，小写字母开头，比如 myharness"},
-                          "text": {"type": "string"}, "join": {"type": "boolean", "description": "第一次用时设 true"},
-                          "label": {"type": "string", "description": "界面上显示的名字（可不填）"}},
-                         ["speaker", "text"])},
+     "description": "以接入密钥绑定的联系人身份，在已受邀的会话中发言。服务端检查会话内的发言和唤起权限。",
+     "inputSchema": _obj({"room": {"type": "string"}, "speaker": {"type": "string", "description": "可省略；提供时必须与接入密钥身份相同"},
+                          "text": {"type": "string"}}, ["room", "text"])},
     {"name": "wait_for_message", "title": "等新消息",
      "description": "长轮询：一直等到这场会议有新消息、或者超时（最多 55 秒）。用来等 @自己 的话，然后 read_room 看内容再 post_to_room 回。"
                     "返回新消息和下次用的 since；超时返回空。",
      "inputSchema": _obj({"room": {"type": "string"}, "since": {"type": "integer", "minimum": 0},
                           "timeout": {"type": "integer", "minimum": 1, "maximum": 55}},
                          ["since"]), "annotations": {"readOnlyHint": True}},
+]
+
+
+EXT_TOOLS += [
+    {"name": "receive_task", "title": "接收本成员的任务", "description": "启用自动响应并领取任务。只返回用户已邀请本成员的会话任务。保持稳定的 worker ID；按任务中 member 的身份回复，不冒充本机的其他 AI。",
+     "inputSchema": _obj({"worker": {"type": "string"}, "device": {"type": "string"}, "workdir": {"type": "string"},
+                          "allow_work": {"type": "boolean"}, "timeout": {"type": "integer", "minimum": 0, "maximum": 20}}, ["worker"])},
+    {"name": "reply_task", "title": "回复成员任务", "description": "提交任务结果，会议室自动记录并处理回复中的 @。必须使用 receive_task 返回的 id 和 lease。重复提交同一结果不会重复发言。",
+     "inputSchema": _obj({"worker": {"type": "string"}, "task": {"type": "string"}, "lease": {"type": "string"},
+                          "ok": {"type": "boolean"}, "text": {"type": "string"}, "session": {"type": "string"}}, ["worker", "task", "lease", "ok", "text"])},
+    {"name": "member_heartbeat", "title": "成员心跳与取消检查", "description": "每 10 秒调用，保持自动响应连接并检查当前任务是否已取消。任务取消后停止工作，不再提交回复。",
+     "inputSchema": _obj({"worker": {"type": "string"}, "task": {"type": "string"}, "lease": {"type": "string"}}, ["worker"])},
+    {"name": "task_progress", "title": "汇报成员任务进度", "description": "当前任务中途汇报进度并续心跳，不触发其他成员。",
+     "inputSchema": _obj({"worker": {"type": "string"}, "task": {"type": "string"}, "lease": {"type": "string"}, "text": {"type": "string"}}, ["worker", "task", "lease", "text"])}
 ]
 
 
@@ -105,7 +117,20 @@ def call_room_tool(rid, ai, name, args):
     r = R.rooms.get(rid)
     if r is None:
         raise ToolError("这场会议已经不在了")
+    try:
+        access.require(r, ai)
+        needed = {"post": "post", "board": "board", "claim_files": "work", "release_files": "work"}.get(name)
+        if needed:
+            access.require(r, ai, needed)
+        if name == "post" and args.get("files"):
+            access.require(r, ai, "files")
+    except PermissionError as e:
+        raise ToolError(str(e))
     who = (r.id, ai)
+    if (registry.get(ai) or {}).get("driver") == "external" and name in ("claim_files", "release_files"):
+        raise ToolError("成员的文件护栏由执行设备管理，不能占用会议室宿主文件")
+    if (registry.get(ai) or {}).get("driver") == "external" and name == "post" and args.get("files"):
+        raise ToolError("跨设备附件尚未启用，不能读取会议室宿主的本机文件")
     if name == "room_info":
         st = r.api_state()
         lines = ["会议：%s（%s）" % (r.title(), "干活模式" if r.mode() == "work" else "讨论模式"),
@@ -141,7 +166,7 @@ def call_room_tool(rid, ai, name, args):
         paths = [r.send_path(str(p)) for p in args.get("paths") or [] if str(p).strip()]
         if not paths:
             raise ToolError("paths 不能为空")
-        if r.mode() != "work":
+        if r.member_mode(ai) != "work":
             raise ToolError("讨论模式下不能改文件，用不着占")
         res = guard.claim(who, paths, args.get("minutes"), str(args.get("reason") or ""), r.title())
         ok = [p for p, good, _ in res if good]
@@ -166,10 +191,26 @@ def call_room_tool(rid, ai, name, args):
     raise ToolError("没有这个工具：%s" % name)
 
 
-def call_ext_tool(name, args):
+def call_ext_tool(name, args, pid=None, key=""):
+    if not pid:
+        raise ToolError("请使用联系人接入密钥")
+    actions = {"receive_task": "receive", "reply_task": "reply", "member_heartbeat": "heartbeat", "task_progress": "progress"}
+    if name in actions:
+        try:
+            if name == "receive_task":
+                members.handle(pid, key, "connect", args)
+            return json.dumps(members.handle(pid, key, actions[name], args), ensure_ascii=False)
+        except members.MemberError as e:
+            raise ToolError(str(e))
+    if name != "list_rooms":
+        r = _room_for(args.get("room"))
+        if not args.get("room"):
+            raise ToolError("room 必填，请先 list_rooms")
+        if not access.allowed(r, pid):
+            raise ToolError("未加入此会话或没有读取权限")
     if name == "list_rooms":
         out = []
-        for x in R.rooms.listing():
+        for x in access.visible_rooms(pid):
             if x["archived"] and not args.get("include_archived"):
                 continue
             out.append("- %s：%s（%s%s，%d 条消息%s）" % (x["id"], x["title"], x["workdir"], "，已归档" if x["archived"] else "",
@@ -189,19 +230,17 @@ def call_ext_tool(name, args):
         return "会议：%s（%s）\n目标：\n%s\n\n看板：\n%s\n\n消息（共 %d 条，下次从 since=%d 读起）：\n%s" % (
             r.title(), r.id, r.goal_text(), r.board_text(), len(r.messages), len(r.messages), body)
     if name == "post_to_room":
-        sp = str(args.get("speaker") or "").strip().lower()
+        sp = pid
+        if args.get("speaker") and args["speaker"] != pid:
+            raise ToolError("密钥不能冒用其他联系人")
+        if not access.allowed(r, pid, "post"):
+            raise ToolError("没有发言权限")
         if not sp:
             raise ToolError("speaker 必填（你以谁的身份发言）")
         text = str(args.get("text") or "").strip()
         if not text:
             raise ToolError("text 不能为空")
         r = _room_for(args.get("room"))
-        if sp not in EXTERNAL_SPEAKERS and sp not in r.ais:
-            if not args.get("join"):
-                raise ToolError("speaker %r 还没在这场会议里；第一次带上 join=true" % sp)
-            ok, err = r.join_external(sp, args.get("label"))
-            if not ok:
-                raise ToolError(err)
         r.handle_message(sp, text, origin="external")
         return "发到「%s」了（以 %s 的身份）" % (r.title(), sp)
     if name == "wait_for_message":
@@ -213,6 +252,8 @@ def call_ext_tool(name, args):
             raise ToolError("since / timeout 要是整数")
         end = time.time() + wait
         while True:
+            if not access.allowed(r, pid):
+                raise ToolError("会话权限已撤销")
             with r.lock:
                 msgs = [m for m in r.messages[since:] if not m.get("quiet")]
             if msgs or time.time() >= end:
@@ -233,7 +274,7 @@ def _error(rid, code, msg):
     return {"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": msg}}
 
 
-def handle_one(msg, who):
+def handle_one(msg, who, key=""):
     """处理一条 JSON-RPC。who = (会议号, ai) 或 None（外面来的）。返回回应（通知 / 回应类的返回 None）。"""
     if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0":
         return _error(None, -32600, "invalid request")
@@ -250,7 +291,7 @@ def handle_one(msg, who):
     if meth == "ping":
         return _result(mid, {})
     if meth == "tools/list":
-        return _result(mid, {"tools": ROOM_TOOLS if who else EXT_TOOLS})
+        return _result(mid, {"tools": ROOM_TOOLS if isinstance(who, tuple) else EXT_TOOLS})
     if meth in ("resources/list", "resources/templates/list"):
         return _result(mid, {"resources": []} if meth == "resources/list" else {"resourceTemplates": []})
     if meth == "prompts/list":
@@ -260,10 +301,10 @@ def handle_one(msg, who):
         if not isinstance(args, dict):
             return _error(mid, -32602, "arguments 要是对象")
         try:
-            if who:
+            if isinstance(who, tuple):
                 text = call_room_tool(who[0], who[1], name, args)
             else:
-                text = call_ext_tool(name, args)
+                text = call_ext_tool(name, args, who, key)
             return _result(mid, _text(text))
         except ToolError as e:
             return _result(mid, _text(str(e), err=True))
@@ -278,13 +319,16 @@ def handle_http(body, key):
         data = json.loads(body.decode("utf-8") if isinstance(body, bytes) else body)
     except Exception:
         return 400, _error(None, -32700, "parse error")
-    who = None
-    if key:
-        who = R.who_by_key(key)
-        if who is None:
-            return 401, _error(None, -32001, "钥匙不对（会议室重启过？下一轮会换新的）")
+    who = R.who_by_key(key) or access.identify(key)
+    if who is None:
+        return 401, _error(None, -32001, "需要有效的联系人接入密钥")
+    if isinstance(who, str) and isinstance(data, (dict, list)):
+        first = data if isinstance(data, dict) else next((m for m in data if isinstance(m, dict)), {})
+        params = first.get("params") or {}
+        client = (params.get("clientInfo") or {}).get("name", "") if isinstance(params, dict) and isinstance(params.get("clientInfo") or {}, dict) else ""
+        connections.seen(who, key, "mcp", client)
     if isinstance(data, list):   # 老版本允许批量
-        out = [x for x in (handle_one(m, who) for m in data) if x is not None]
+        out = [x for x in (handle_one(m, who, key) for m in data) if x is not None]
         return (200, out) if out else (202, None)
-    resp = handle_one(data, who)
+    resp = handle_one(data, who, key)
     return (200, resp) if resp is not None else (202, None)
