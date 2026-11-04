@@ -6,10 +6,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="AI Bridge">
+<meta name="apple-mobile-web-app-title" content="合拍 Cojam">
 <meta name="color-scheme" content="light dark">
 <meta name="rt-token" content="__RT_TOKEN__">
-<meta name="theme-color" content="#1b1b1e">
+<meta name="theme-color" content="#6022e8">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/static/icon-192.png">
 <link rel="apple-touch-icon" href="/static/icon-192.png">
@@ -466,18 +466,25 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
   #tocList li{padding:11px 12px;font-size:14px}
 }
 </style>
+<link rel="stylesheet" href="/static/workspace.css">
+<link rel="stylesheet" href="/static/studio.css">
 </head>
 <body>
-<nav id="rooms"><div class="rh">会议<button type="button" id="rNew" title="开一场新会议（别的会议照常跑）">＋ 新会议</button></div><ul class="rl" id="roomList"></ul></nav>
+<div id="navShade"></div>
+<nav id="rooms" aria-label="联系人和项目"><div class="brand"><img src="/static/logo.svg" width="42" height="42" alt=""><span class="brand-word">cojam<small>合拍 · 让想法一起发生</small></span><button id="navClose" aria-label="关闭导航">×</button></div><label class="nav-search" for="navSearch"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="navSearch" type="search" placeholder="搜索项目或会话" autocomplete="off"><kbd aria-hidden="true">⌘ K</kbd></label>
+<section class="contacts-section"><div class="rh">联系人 <span id="contactCount"></span><button id="contactsManage" aria-label="管理联系人" title="管理联系人">⋯</button><button id="contactsAdd" aria-label="接入联系人">＋ 接入</button></div><ul id="contactList"></ul></section>
+<section class="projects-section"><div class="rh">我的项目<button id="projectAdd" aria-label="新建项目">＋</button></div><ul class="rl" id="roomList"></ul></section><button id="rNew" class="nav-new">＋ 新建会话<span aria-hidden="true">↗</span></button><div class="nav-foot"><img src="/static/logo.svg" width="26" height="26" alt=""><span>本机会议室<small>由这台设备托管</small></span><button type="button" id="quitApp" title="停止本机合拍服务">退出</button></div></nav>
 <header>
-  <div id="title">会议室</div><div id="wd"></div><span id="modeTag">干活模式</span>
+  <button id="navToggle" aria-label="打开联系人和项目">☰</button>
+  <div class="room-heading"><div class="room-overline"><div id="roomContext">会话空间</div><span class="room-type"><span aria-hidden="true">✳</span> 一起合拍</span></div><div id="title">会议室</div><div class="room-detail"><div id="roomMemberFaces" aria-hidden="true"></div><div id="roomSummary">人和 AI，在同一张桌上</div></div></div><div id="wd"></div><span id="modeTag">干活模式</span>
   <button type="button" id="menu" aria-label="菜单">&#9776;</button>
   <div id="bar">
-    <button type="button" id="bList">会议列表</button><button type="button" id="bNew">新会议</button><button type="button" id="bMode">讨论模式</button><button type="button" id="bAgents">参会者</button><button type="button" id="bWrap">落盘</button><button type="button" id="bSide">面板</button>
+    <button type="button" id="bList">会话管理</button><button type="button" id="bNew">新会话</button><button type="button" id="bMode">讨论模式</button><button type="button" id="bAgents">成员与权限</button><button type="button" id="bWrap">落盘</button><button type="button" id="bSide">面板</button>
     <div id="caps"></div>
   </div>
+  <div class="session-brief" id="sessionBrief" hidden><span class="brief-marker" aria-hidden="true">↗</span><div><span class="brief-label">这次的共同目标</span><p id="sessionBriefText"></p></div></div>
 </header>
-<div id="modal"><div id="mbox"></div></div>
+<div id="modal"><div id="mbox" role="dialog" aria-modal="true" aria-label="会话设置" tabindex="-1"></div></div>
 <div id="cmenu"></div>
 <div id="sideBg"></div>
 <aside id="side" aria-label="这场会议的面板">
@@ -518,10 +525,38 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
   <div class="quick" id="quick"></div>
   <div id="quote"><span class="qtx"></span><button type="button" id="quoteX" aria-label="取消引用">&times;</button></div>
   <div id="pend"></div>
-  <div class="row"><button id="clip" type="button" aria-label="添加附件">&#128206;</button><input type="file" id="file" multiple hidden><textarea id="ta" rows="1" placeholder="说点什么…"></textarea><button id="send" type="button">发送</button></div>
+  <div class="row"><button id="clip" type="button" aria-label="添加附件"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="m9 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l8-8"/><path d="m7 14 7-7"/></svg></button><input type="file" id="file" multiple hidden><textarea id="ta" rows="1" aria-label="会话消息" placeholder="有什么新想法？@ 一位成员，一起开工…"></textarea><button id="send" type="button">发送 <span aria-hidden="true">↑</span></button></div>
+  <div class="composer-note"><span>好想法，总是一起发生。</span><span>@ 指定成员</span></div>
 </footer>
+<script src="/static/workspace.js"></script>
+<script src="/static/connections.js"></script>
 <script>
-(function(){const m=document.querySelector('meta[name=rt-token]'),t=m?m.content:'';if(!t||t==='__RT_TOKEN__')return;const f=window.fetch;window.fetch=function(u,o){o=o||{};const h=new Headers(o.headers||{});h.set('X-RT-Token',t);o.headers=h;return f.call(this,u,o)}})();
+(function(){const m=document.querySelector('meta[name=rt-token]'),t=m?m.content:'';if(!t)return;const f=window.fetch;window.fetch=function(u,o){o=o||{};const h=new Headers(o.headers||{});h.set('X-RT-Token',t);o.headers=h;return f.call(this,u,o)}})();
+// Each owner tab registers separately. A short grace period permits reload and tab handoff.
+(function(){
+  const instance=crypto.randomUUID().replace(/-/g,''), endpoint='/api/ui/session';
+  let tab=instance;
+  try{
+    const navigation=performance.getEntriesByType('navigation')[0];
+    if(navigation&&navigation.type==='reload')tab=sessionStorage.getItem('cojam_owner_tab')||instance;
+    sessionStorage.setItem('cojam_owner_tab',tab);
+  }catch(e){}
+  let exiting=false;
+  const hasActiveJobs=()=>((typeof lastRun!=='undefined'&&(lastRun.running.length||lastRun.queued))||(typeof ROOMS!=='undefined'&&ROOMS.some(r=>(Array.isArray(r.running)?r.running.length:!!r.running)||r.queued)));
+  const report=action=>fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tab,action,instance}),keepalive:true}).catch(()=>{});
+  report('open');
+  const timer=setInterval(()=>{if(!exiting)report('ping')},30000);
+  addEventListener('pageshow',event=>{if(event.persisted&&!exiting)report('open')});
+  addEventListener('pagehide',()=>{if(!exiting)report('close')});
+  addEventListener('beforeunload',event=>{if(!exiting&&hasActiveJobs()){event.preventDefault();event.returnValue=''}});
+  document.getElementById('quitApp').onclick=async()=>{
+    if(hasActiveJobs()&&!confirm('还有任务正在运行或排队，退出会中断这些任务。确定退出合拍吗？'))return;
+    const [ok,j]=await post('/api/server/exit',{});
+    if(!ok){alert(j.error||'退出失败');return}
+    exiting=true;clearInterval(timer);
+    document.body.innerHTML='<main class="closed-screen"><img src="/static/logo.svg" width="60" height="60" alt=""><h1>合拍已退出</h1><p>本机服务已停止。需要时重新打开合拍即可。</p><button onclick="window.close()">关闭页面</button></main>';
+  };
+})();
 const feed=document.getElementById('feed'),ta=document.getElementById('ta'),st=document.getElementById('status');
 const touch=matchMedia('(pointer:coarse)').matches||('ontouchstart' in window);
 let since=0,curMeeting=undefined,S=null;
@@ -611,7 +646,7 @@ function add(m){
   d.className='msg '+cls+(m.to_user?' touser':'')+(m.step!=null?' step':'');
   if(cls==='ai'){d.style.setProperty('--c',agentColor(m.speaker));d.dataset.l=agentLetter(m.speaker)}
   const tag=m.to_user?'<span class="tag">→ 用户</span>':'';
-  const who=cls==='sys'?'':'<div class="who"><span class="nm">'+esc(m.speaker)+'</span><span class="tm">'+esc(m.time)+'</span>'+tag+'<button type="button" class="rp" title="引用回复">↩ 引用</button></div>';
+  const who=cls==='sys'?'':'<div class="who"><span class="nm">'+esc((agentMeta(m.speaker)||{}).label||m.speaker)+'</span><span class="tm">'+esc(m.time)+'</span>'+tag+'<button type="button" class="rp" title="引用回复">↩ 引用</button></div>';
   const q=m.reply_to?'<div class="qt" data-to="'+m.reply_to.id+'">'+esc(m.reply_to.speaker)+'：'+(m.reply_to.part?'“'+esc(m.reply_to.text)+'”':esc(m.reply_to.text))+'</div>':'';
   d.dataset.id=m.id;msgById[m.id]=m;
   const md=cls==='ai';
@@ -642,6 +677,7 @@ async function poll(){
   if(!RID||polling===RID)return;
   const rid=RID;polling=rid;
   try{
+    if(!S)await loadState();if(rid!==RID)return;
     const r=await fetch(api('messages')+'?since='+since,{cache:'no-store'});
     if(r.status===404){polling=null;return roomGone()}
     const j=await r.json();
@@ -823,8 +859,8 @@ function ctxTitle(x){
   return '上下文：'+fmtK(c.used)+(c.window?' / '+fmtK(c.window):'')+' tokens（'+c.time+' 那轮结束时）';
 }
 // ===== 参会者（不止 claude / codex）：颜色、首字母、胶囊 =====
-function agentMeta(id){return ((S&&S.agents)||[]).find(a=>a.id===id)||null}
-function isAgent(id){return !!(id&&id!=='你'&&(agentMeta(id)||((S&&S.participants)||[]).includes(id)))}
+function agentMeta(id){return ((S&&S.agents)||CONTACTS||[]).find(a=>a.id===id)||null}
+function isAgent(id){return !!(id&&id!=='你'&&id!=='系统')}
 function agentColor(id){const a=agentMeta(id);return (a&&a.color)||'#888'}
 function agentLetter(id){const a=agentMeta(id);return (a&&a.letter)||(id||'?').slice(0,1).toUpperCase()}
 
@@ -836,7 +872,7 @@ function drawCaps(){
     capsEl.dataset.k=key;capsEl.innerHTML='';
     ids.forEach(a=>{
       const b=document.createElement('button');b.type='button';b.className='cap';b.dataset.ai=a;
-      b.style.setProperty('--c',agentColor(a));b.onclick=()=>openAi(a);capsEl.appendChild(b);
+      b.style.setProperty('--c',agentColor(a));b.onclick=()=>((agentMeta(a)||{}).driver==='external'?openAgents():openAi(a));capsEl.appendChild(b);
     });
   }
   ids.forEach(a=>{
@@ -860,118 +896,24 @@ function drawQuick(){          // 输入框上面那排 @：跟着这场会议�
 }
 const AG_DRV={cli:'命令行程序',http:'网页服务',external:'在它自己的界面里',claude:'Claude Code 命令行',codex:'Codex 常驻服务'};
 let agCat=null;
-async function openAgents(){
-  try{const r=await fetch('/api/agents?reload=1',{cache:'no-store'});if(r.ok)agCat=await r.json()}catch(e){}
-  renderAgents();
-}
-function renderAgents(){
-  const cat=agCat||{agents:(S&&S.agents)||[],hosts:[]};
-  const list=cat.agents||[],cur=new Set((S&&S.participants)||[]);
-  const hosts={};(cat.hosts||[]).forEach(h=>hosts[h.id]=h);
-  const row=a=>{
-    const h=hosts[a.id]||{};
-    const bits=[a.enabled?'这台电脑上有':'没装'];
-    if(a.driver==='external')bits.push('会外，要它自己来看');
-    if(a.verified===false)bits.push('没实测');
-    let act='';
-    if(h.present&&!h.installed)act+='<button type="button" class="agBtn" data-install="'+esc(a.id)+'" title="让这个工具里的 AI 也能看到这场会议">接上</button>';
-    else if(h.installed)act+='<span class="agOk">已接好</span>';
-    if(a.user)act+='<button type="button" class="agBtn del" data-remove="'+esc(a.id)+'">删除</button>';
-    return '<li class="'+(a.enabled?'':'lk')+'">'
-      +'<input type="checkbox" data-id="'+esc(a.id)+'"'+(cur.has(a.id)?' checked':'')+(a.enabled?'':' disabled')+'>'
-      +'<span class="tn"><b><i class="dot" style="background:'+esc(a.color||'#888')+'"></i>'+esc(a.label)+'</b>'
-      +' <small>@'+esc(a.id)+' · '+esc(AG_DRV[a.driver]||a.driver)+'</small>'
-      +'<small>'+bits.map(esc).join(' · ')+'</small></span>'
-      +'<span class="agAct">'+act+'</span></li>';
-  };
-  const errs=cat.errors||[],url=cat.mcp_url||'';
-  showModal('<h3>AI 成员</h3>'
-    +'<div class="hint">勾上的才会在这场会议里。没装的灰着（这台电脑上找不到它的命令）。</div>'
-    +'<ul class="tl" id="agList">'+list.map(row).join('')+'</ul>'
-    +(errs.length?'<h4>这些配置读不了</h4><ul class="tl">'+errs.map(e=>'<li><span class="tn">'+esc(e)+'</span></li>').join('')+'</ul>':'')
-    +'<h4>加一个新的</h4>'
-    +'<div class="hint">是命令行程序（比如 gemini、opencode）？填命令就行。<br>'
-    +'它在别的电脑 / 别的软件里？把这个地址填进它的 MCP 配置：<br>'
-    +'<code id="agUrl">'+esc(url)+'</code> '
-    +'<button type="button" class="agBtn" id="agCopyUrl">复制地址</button> '
-    +'<button type="button" class="agBtn" id="agCopyJson">复制配置 JSON</button></div>'
-    +'<div class="btns"><button type="button" id="agAddBtn">＋ 手动添加</button>'
-    +'<button type="button" id="agClose">关闭</button><button type="button" class="pri" id="agSave">保存</button></div>'
-    +'<div id="agForm" style="display:none">'
-    +'<div class="agF">'
-    +'<label>名字</label><input id="fId" placeholder="小写字母，比如 gemini（@ 它时用这个）">'
-    +'<label>类型</label><select id="fDrv"><option value="cli">命令行程序</option>'
-    +'<option value="http">网页服务（我自己的 harness）</option><option value="external">在我自己的界面里发言</option></select>'
-    +'<label>命令 / 地址</label><input id="fCmd" placeholder="gemini 或 http://127.0.0.1:9100/bridge">'
-    +'<label>参数</label><input id="fArgs" placeholder="-p {prompt}" value="-p {prompt}">'
-    +'<label>它的输出</label><select id="fParse"><option value="text">打出来就是回复</option>'
-    +'<option value="json">一段 JSON，回复在里面某个字段</option></select>'
-    +'<label>回复在哪个字段</label><input id="fText" placeholder="response">'
-    +'</div><div class="btns"><button type="button" class="pri" id="agDoAdd">加进来</button></div></div>');
-  const gel=(id)=>document.getElementById(id);
-  gel('agClose').onclick=hideModal;
-  gel('agAddBtn').onclick=()=>{const f=gel('agForm');f.style.display=f.style.display==='none'?'block':'none'};
-  gel('agCopyUrl').onclick=()=>{copyText(url);gel('agCopyUrl').textContent='已复制'};
-  gel('agCopyJson').onclick=()=>{copyText(JSON.stringify({mcpServers:{'ai-bridge':{url:url}}},null,2));gel('agCopyJson').textContent='已复制'};
-  gel('agSave').onclick=async()=>{
-    const ids=[...document.querySelectorAll('#agList input[data-id]')].filter(i=>i.checked).map(i=>i.dataset.id);
-    if(!ids.length){alert('至少要留一个 AI');return}
-    const [ok,j]=await post(api('participants'),{participants:ids});
-    if(!ok){alert(j.error||'失败');return}
-    hideModal();await loadState();poll();
-  };
-  document.querySelectorAll('[data-install]').forEach(b=>b.onclick=async()=>{
-    b.disabled=true;b.textContent='正在接…';
-    const [ok,j]=await post('/api/agents/install',{host:b.dataset.install});
-    alert(ok?j.msg:(j.error||j.msg||'没接上'));
-    await openAgents();
-  });
-  document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=async()=>{
-    if(!confirm('删掉 '+b.dataset.remove+'？只是把这个 AI 移除，会议记录不动。'))return;
-    const [ok,j]=await post('/api/agents/remove',{id:b.dataset.remove});
-    if(!ok){alert(j.error||'失败');return}
-    await openAgents();
-  });
-  gel('agDoAdd').onclick=async()=>{
-    const id=gel('fId').value.trim().toLowerCase(),drv=gel('fDrv').value,cmd=gel('fCmd').value.trim();
-    if(!id){alert('先给它起个名字');return}
-    if(!cmd){alert('填一下命令或地址');return}
-    const spec={id:id,label:id,driver:drv,verified:false};
-    if(drv==='cli'){
-      const argtxt=(gel('fArgs').value.trim()||'-p {prompt}').replace(/\s+/g,' ');
-      spec.bin=[cmd];
-      spec.prompt=argtxt.indexOf('{prompt}')>=0?'arg':'stdin';
-      spec.args={new:argtxt.split(' ')};
-      if(gel('fParse').value==='json'){spec.parse={type:'json',text:gel('fText').value.trim()||'response'};spec.context='full'}
-      else {spec.parse={type:'text'};spec.context='full'}
-    }else if(drv==='http'){
-      spec.endpoint=cmd;
-    }
-    const [ok,j]=await post('/api/agents/add',{spec:spec});
-    if(!ok){alert(j.error||'加不进去');return}
-    if(typeof RID!=='undefined'&&RID){        // 顺手加进这场会议，不用再勾一次
-      const cur=[...new Set([...((S&&S.participants)||[]),id])];
-      await post(api('participants'),{participants:cur});
-      await loadState();
-    }
-    agCat=null;await openAgents();
-  };
-}
 function capText(a){
   // 三段：名字 / 模型（手机上隐藏）/ 状态；电脑边栏里模型和状态各占一行
   const x=S&&S.ais&&S.ais[a];
+  const member=S&&S.members&&S.members[a],meta=agentMeta(a)||{};
   let s,cls='cap';
   if(x&&x.handed_off){s='在终端';cls+=' term'}
   else if(S&&(S.running||[]).includes(a)){s='在想';cls+=' think'}
   else if(S&&(S.running||[]).includes('compact:'+a)){s='压缩中';cls+=' think'}
   else if(x&&x.compacting){s='等着压缩'}
   else if(x&&x.busy){s='排队'}
-  else{s='空闲';cls+=' off'}
-  const h='<span class="cn">'+a+'</span><span class="cm">'+esc((x&&x.model&&x.model.label)||'默认 · 默认')+'</span><span class="cs">'+s+'</span>'+ctxHtml(x);
+  else{s=meta.kind==='user'?'用户':member&&member.transport==='member'?(member.automatic?'自动响应就绪':'等待连接'):'空闲';cls+=' off'}
+  const h='<span class="cn">'+esc((agentMeta(a)||{}).label||a)+'</span><span class="cm">'+esc((x&&x.model&&x.model.label)||'默认 · 默认')+'</span><span class="cs">'+s+'</span>'+ctxHtml(x);
   return [h,cls];
 }
 function drawState(){
+  drawRoomIdentity();
   const has=S&&S.meeting;
+  document.getElementById('bAgents').disabled=!has;document.getElementById('ta').disabled=!has;document.getElementById('send').disabled=!has;
   const wd=has?(S.workdir||''):'',other=has&&wd&&wd!==S.default_workdir;
   const wdName=wd.replace(/[\\/]+$/,'').split(/[\\/]/).pop();
   titleEl.innerHTML=has?esc(S.title)+(other?' <span class="wdn">· '+esc(wdName)+'</span>':''):'（还没有会议）';
@@ -1016,28 +958,13 @@ async function loadState(){
   if(!RID)return;const rid=RID;
   try{const r=await fetch(api('state'),{cache:'no-store'});if(r.status===404)return roomGone();const j=await r.json();if(rid!==RID)return;S=j;drawState()}catch(e){}
 }
-function showModal(html){mbox.innerHTML=html;modal.classList.add('show')}
-function hideModal(){modal.classList.remove('show')}
+let modalReturnFocus=null;
+function showModal(html){if(!modal.classList.contains('show'))modalReturnFocus=document.activeElement;mbox.innerHTML=html;modal.classList.add('show');mbox.setAttribute('aria-label',(mbox.querySelector('h3')||mbox.querySelector('.eyebrow')||{textContent:'会话设置'}).textContent);mbox.focus({preventScroll:true});if(typeof connectionModalChanged==='function')connectionModalChanged()}
+function hideModal(){const shown=modal.classList.contains('show');modal.classList.remove('show');if(typeof stopConnectionWizard==='function')stopConnectionWizard();if(shown&&modalReturnFocus&&modalReturnFocus.isConnected)modalReturnFocus.focus({preventScroll:true})}
+document.addEventListener('keydown',e=>{if(!modal.classList.contains('show'))return;if(e.key==='Escape'){e.preventDefault();hideModal();return}if(e.key!=='Tab')return;const nodes=[...mbox.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]')].filter(n=>n.getClientRects().length);if(!nodes.length){e.preventDefault();mbox.focus();return}const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&(document.activeElement===first||document.activeElement===mbox)){e.preventDefault();last.focus()}else if(!e.shiftKey&&(document.activeElement===last||document.activeElement===mbox)){e.preventDefault();first.focus()}});
 modal.onclick=e=>{if(e.target===modal)hideModal()};
-async function post(url,obj){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(obj||{})});let j={};try{j=await r.json()}catch(e){}return [r.ok,j]}
-async function openNew(first){
-  let recent=[];
-  let defAll='';
-  try{const j=await (await fetch('/api/rooms',{cache:'no-store'})).json();recent=[...new Set(j.rooms.map(m=>m.workdir).filter(Boolean))];defAll=j.default_workdir||''}catch(e){}
-  const defWd=(S&&S.workdir)||recent[0]||defAll||'';
-  showModal('<h3>新会议</h3>'+(first?'<div class="hint">还没有会议，开一个吧。</div>':'<div class="hint">开着的会议照常跑，这个标签页切到新会议（想并排看就在新标签页里开）。</div>')+
-    '<input id="nTitle" placeholder="标题" maxlength="60"><textarea id="nAnn" placeholder="目标：这场会议要做成什么（可留空，之后再写）"></textarea>'+
-    (S&&!('default_workdir' in S)?'':'<input id="nWd" list="wdList" placeholder="工作文件夹，比如 D:\\别的项目" value="'+esc(defWd)+'"><datalist id="wdList">'+recent.map(w=>'<option value="'+esc(w)+'">').join('')+'</datalist>'+
-    '<div class="hint">会里的 AI 在这个文件夹里看文件、干活。填完整路径（在资源管理器地址栏复制）；开会后不能改，换文件夹就开新会议。</div>')+
-    '<div class="btns"><button type="button" id="nCancel">取消</button><button type="button" class="pri" id="nOk">开会</button></div>');
-  document.getElementById('nCancel').onclick=hideModal;
-  document.getElementById('nOk').onclick=async()=>{
-    const [ok,j]=await post('/api/rooms/new',{title:document.getElementById('nTitle').value,announcement:document.getElementById('nAnn').value,workdir:(document.getElementById('nWd')||{}).value||''});
-    if(!ok){alert(j.error||'失败');return}
-    hideModal();bar.classList.remove('show');switchRoom(j.id);pollRooms();
-  };
-  document.getElementById('nTitle').focus();
-}
+function apiError(status){return status===404?'后台缺少这个功能，可能仍在运行旧版本。请退出旧后台并重新打开合拍 Cojam。':status===403?'页面的连接凭证已失效，请刷新页面后重试。':status>=500?'后台处理失败，请查看应用日志并检查数据目录是否可写。':'请求失败（HTTP '+status+'）'}
+async function post(url,obj){let r;try{r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(obj||{})})}catch(e){return [false,{error:'无法连接合拍 Cojam 后台，请确认应用正在运行。'}]}let j;try{j=await r.json()}catch(e){return [false,{error:apiError(r.status)}]}if(!j||typeof j!=='object')return [false,{error:apiError(r.status)}];if(!r.ok)j.error=r.status===403?apiError(403):(j.error||apiError(r.status));return [r.ok,j]}
 async function openList(showTrash){
   const j=await (await fetch('/api/rooms',{cache:'no-store'})).json();
   const tj=await (await fetch('/api/trash',{cache:'no-store'})).json();
@@ -1395,34 +1322,11 @@ function roomBadge(m){
   if(m.count>seen)return ['','新 '+(m.count-seen)];
   return null;
 }
-function drawRooms(){
-  const live=ROOMS.filter(m=>!m.archived||m.id===RID);
-  const html=live.map(m=>{
-    const b=roomBadge(m),dot=b?(b[0]==='run'?'run':b[0]==='you'?'you':'new'):'';
-    return '<li class="'+(m.id===RID?'cur':'')+(m.archived?' arch':'')+'"><a href="?r='+encodeURIComponent(m.id)+'" data-id="'+esc(m.id)+'" title="'+esc(m.title+' · '+m.workdir)+'"><span class="dot '+dot+'"></span><span class="t">'+esc(m.title)+'</span>'+(b?'<span class="b '+b[0]+'">'+esc(b[1])+'</span>':'')+'</a></li>';
-  }).join('')||'<li class="hint" style="padding:6px 8px;color:var(--mut)">还没有会议</li>';
-  if(roomList.innerHTML!==html)roomList.innerHTML=html;
-  const wait=ROOMS.filter(m=>m.id!==RID&&!m.archived&&(roomBadge(m)||[])[0]==='you').length;
-  const lb=document.getElementById('bList');lb.textContent='会议列表'+(wait?' · '+wait+' 等你':'');
-  document.getElementById('menu').classList.toggle('attn',wait>0);
-  const base=S&&S.title?S.title+' · 会议室':'会议室';
-  document.title=(wait?'('+wait+') ':'')+base;
-}
 roomList.addEventListener('click',e=>{
   const a=e.target.closest('a[data-id]');if(!a)return;
   if(e.ctrlKey||e.metaKey||e.shiftKey||e.button)return;   // Ctrl 点 / 中键：新标签页里开
   e.preventDefault();switchRoom(a.dataset.id);
 });
-async function pollRooms(){
-  try{
-    const j=await (await fetch('/api/rooms',{cache:'no-store'})).json();ROOMS=j.rooms||[];
-    // 第一次见到的会议：把现在的消息数记成"看过了"，之后新来的才标（不然刚装好的手机上永远不提醒）
-    const m=seenMap();let ch=false;
-    ROOMS.forEach(r=>{if(m[r.id]==null){m[r.id]=r.count;ch=true}});
-    if(ch)try{localStorage.setItem('rt_seen',JSON.stringify(m))}catch(e){}
-    drawRooms();return j;
-  }catch(e){return null}
-}
 function resetRoomView(){
   since=0;curMeeting=undefined;S=null;feed.innerHTML='';
   for(const k in msgById)delete msgById[k];
@@ -1445,7 +1349,7 @@ addEventListener('popstate',()=>{const id=new URLSearchParams(location.search).g
 let goneShown=false;
 function roomGone(){
   if(goneShown)return;goneShown=true;
-  showModal('<h3>这场会议不在了</h3><div class="hint">它被删了（移进了回收站），或者会议号不对。</div><div class="btns"><button type="button" id="gList" class="pri">去会议列表</button></div>');
+  showModal('<h3>这场会议不在了</h3><div class="hint">它被删了（移进了回收站），或者会议号不对。</div><div class="btns"><button type="button" id="gList" class="pri">去会话管理</button></div>');
   document.getElementById('gList').onclick=()=>{goneShown=false;hideModal();RID=null;resetRoomView();pickRoom()};
 }
 async function pickRoom(){
@@ -1453,7 +1357,7 @@ async function pickRoom(){
   const rooms=(j&&j.rooms)||[];
   const id=(j&&j.last&&rooms.some(m=>m.id===j.last)&&j.last)||((rooms.find(m=>!m.archived)||rooms[0]||{}).id);
   if(id)switchRoom(id,true);
-  else if(!modal.classList.contains('show'))openNew(true);
+  else {drawState();feed.innerHTML='<div class="workspace-empty"><h2>开始一场新会话</h2><p>添加联系人，创建项目，再邀请成员一起协作。</p><button id="emptyNew">＋ 创建项目 / 会话</button></div>';document.getElementById('emptyNew').onclick=()=>openNew(true)}
 }
 document.getElementById('rNew').onclick=()=>openNew(false);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&RID&&since)markSeen(RID,since)});
@@ -1516,6 +1420,8 @@ async function loadTools(a,x){
 
 setInterval(()=>{if(RID)poll()},1500);
 setInterval(pollRooms,3000);
+refreshContacts().catch(e=>console.error(e));
+setInterval(()=>refreshContacts().catch(()=>{}),10000);
 if(RID)switchRoom(RID,true);else pickRoom();
 </script>
 </body>

@@ -5,7 +5,7 @@ claude：每轮起一个 claude -p --resume <会话>（stream-json 逐行读）�
 codex：每场会议一个常驻的 codex app-server（stdio 上收发 JSON-RPC），这场会议的设置在启动参数里；
        每轮 thread/resume（或新建）→ turn/start → 等 turn/completed → thread/unsubscribe。设置变了（换模式、换工具）就重起它。
 两边都接会议室自己的 MCP 服务 bridge（/mcp），用这场会议给它的钥匙证明身份。"""
-import glob, json, os, queue, re, shutil, subprocess, sys, tempfile, threading, time, uuid
+import glob, json, os, queue, re, shlex, shutil, subprocess, sys, tempfile, threading, time, uuid
 from datetime import datetime
 
 from . import registry
@@ -614,7 +614,7 @@ def compact_native(ai, sid, room=None):
     if ai == "codex":
         if CODEX_BACKEND == "exec":
             return False
-        srv = codex_for(room, room.mode() if room is not None else "discuss")
+        srv = codex_for(room, room.member_mode(ai) if room is not None else "discuss")
         try:
             return srv.compact(sid, room.workdir() if room is not None else PROJECT)
         except Exception:
@@ -697,7 +697,7 @@ def codex_launch(room, mode):
     if not exe:
         raise RuntimeError("找不到 codex 命令")
     cfg = room.meta["tools"]["codex"] if room is not None else default_tools("codex")
-    cmd = exe + ["-c", CODEX_SANDBOX_OVERRIDE, "-c", "notify=[]"]
+    cmd = exe + (["-c", CODEX_SANDBOX_OVERRIDE] if os.name == "nt" else []) + ["-c", "notify=[]"]
     for srv in codex_mcp_names():
         if not (mode == "work" and srv in cfg["mcp"]):
             cmd += ["-c", "mcp_servers.%s.enabled=false" % srv]   # 键名不能加引号（加了会被当成另一张表，codex 报 invalid transport）
@@ -731,6 +731,10 @@ def codex_hook_cmd():
         alt = os.path.join(os.path.dirname(py), "python.exe")
         py = alt if os.path.exists(alt) else py
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hook_codex.py")
+    if getattr(sys, "frozen", False):
+        return '& "%s" hook-codex' % py.replace("\\", "/")
+    if os.name != "nt":
+        return shlex.join([py, script])
     # Windows 上 codex 用 PowerShell 跑钩子命令：带引号的程序路径前面要加 &（2026-10-22 实测不加就"退出码 1"）
     q = '& "%s" "%s"' if os.name == "nt" else '"%s" "%s"'
     return q % (py.replace("\\", "/"), script.replace("\\", "/"))

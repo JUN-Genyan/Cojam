@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """路径、上限、规矩文本、小工具。别的模块都从这里拿，测试改环境变量要在 import 之前。"""
-import hashlib, json, os, re, subprocess, sys, threading, time
+import hashlib, json, os, re, subprocess, sys, tempfile, threading, time
 from datetime import datetime
 
 HOST = "127.0.0.1"
@@ -169,10 +169,24 @@ def now_str():
 
 
 def write_json(path, obj):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    # Windows readers / antivirus can briefly deny replacement. Use a unique
+    # temporary file so concurrent writers do not share a .tmp file, and retry
+    # only this transient error. The original JSON survives any failed write.
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp", dir=os.path.dirname(os.path.abspath(path)))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+        for attempt in range(10):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if attempt == 9:
+                    raise
+                time.sleep(.01 * (attempt + 1))
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
 def read_json(path, default=None):

@@ -1,17 +1,32 @@
 {
   "id": "/",
-  "name": "AI Bridge 会议室",
-  "short_name": "会议室",
-  "description": "你、Claude Code、Codex 三方会议室，能同时开好几场。",
+  "name": "合拍 Cojam",
+  "short_name": "合拍",
+  "description": "人和 Harness，一起把想法做出来。",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "lang": "zh-CN",
-  "background_color": "#151517",
-  "theme_color": "#1b1b1e",
+  "background_color": "#fcfbff",
+  "theme_color": "#6022e8",
   "icons": [
-    {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
-    {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
-    {"src": "/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }

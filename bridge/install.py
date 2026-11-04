@@ -10,11 +10,11 @@ r"""把会议室接进别人家的工具里（一键，不用改它们的代码�
 装的是"会议室自己的 MCP 服务"（HTTP，Streamable HTTP）：
     地址 http://127.0.0.1:<端口>/mcp
 接上之后，那边的 agent 就有了 list_rooms / read_room / post_to_room / wait_for_message 四个工具，
-能看会议、能以注册表里的 id 发言。
+使用联系人接入密钥，只能访问受邀会话。
 
 改别人的配置文件之前一律先备份成 <文件>.bak-<时间>；文件里有别的东西就合并，不覆盖。
 """
-import json, os, shutil, subprocess, sys, time
+import json, os, re, shutil, subprocess, sys, time
 
 from .common import PORT
 
@@ -96,6 +96,9 @@ def install_json(host):
         servers = {}
     bak = _backup(path)
     servers[SERVER_NAME] = {"url": URL}
+    token = host.get("token") or os.environ.get("AI_BRIDGE_TOKEN")
+    if token:
+        servers[SERVER_NAME]["headers"] = {"Authorization": "Bearer " + token}
     data["mcpServers"] = servers
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -107,7 +110,13 @@ def install_claude(host):
     exe = shutil.which("claude")
     if not exe:
         return False, "找不到 claude 命令。手动接的话：\n  claude mcp add --transport http %s %s" % (SERVER_NAME, URL)
-    r = subprocess.run([exe, "mcp", "add", "--transport", "http", SERVER_NAME, URL],
+    cmd = [exe, "mcp", "add", "--transport", "http", SERVER_NAME, URL]
+    token = host.get("token") or os.environ.get("AI_BRIDGE_TOKEN")
+    if token and installed(host):
+        return False, "Claude 已有 ai-bridge 配置，请在 Claude 的 MCP 设置中更新 Authorization 密钥；或移除该项后重新配置"
+    if token:
+        cmd += ["--header", "Authorization: Bearer " + token]
+    r = subprocess.run(cmd,
                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
     ok = r.returncode == 0
     tail = ((r.stdout or "") + (r.stderr or "")).strip().splitlines()
@@ -121,12 +130,33 @@ def install_toml(host):
     path = host["path"]
     os.makedirs(os.path.dirname(path), exist_ok=True)
     block = '\n[mcp_servers.%s]\nurl = "%s"\n' % (SERVER_NAME, URL)
+    token = host.get("token") or os.environ.get("AI_BRIDGE_TOKEN")
+    if token:
+        block += 'http_headers = { Authorization = %s }\n' % json.dumps("Bearer " + token)
     txt = ""
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
             txt = f.read()
     if "[mcp_servers.%s]" % SERVER_NAME in txt:
-        return True, "已经接过了（%s 里有 [mcp_servers.%s]）" % (path, SERVER_NAME)
+        if not token:
+            return True, "已经接过了（%s 里有 [mcp_servers.%s]）；请在联系人接入页复制含密钥的配置" % (path, SERVER_NAME)
+        if "[mcp_servers.%s." % SERVER_NAME in txt:
+            return False, "已有嵌套配置，请在工具中手动更新 Authorization 密钥"
+        bak = _backup(path)
+        pattern = r'(?ms)^\[mcp_servers\.ai-bridge\][^\n]*\n.*?(?=^\[|\Z)'
+        section = re.search(pattern, txt)
+        if not section:
+            return False, "无法识别已有的 ai-bridge 配置，请手动更新"
+        old = section.group(0)
+        header = re.search(r'(?m)^http_headers\s*=\s*(.*)$', old)
+        if header and not header.group(1).rstrip().endswith("}"):
+            return False, "已有多行认证配置，请手动更新 Authorization"
+        rest = re.sub(r'(?m)^(?:url|http_headers|bearer_token_env_var)\s*=.*\n?', '', old.split('\n', 1)[1])
+        replacement = block.lstrip() + rest + ('\n' if rest and not rest.endswith('\n') else '')
+        txt = txt[:section.start()] + replacement + txt[section.end():]
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(txt)
+        return True, "已更新接入密钥，原配置已备份：%s" % bak
     bak = _backup(path)
     with open(path, "a", encoding="utf-8") as f:
         if txt and not txt.endswith("\n"):
@@ -181,43 +211,28 @@ def present(host):
 
 
 def join(argv):
-    """把"别人怎么接"打出来：地址、能直接贴的配置、能直接跑的一行命令。"""
+    """Print authenticated external connection instructions without exposing credentials."""
     base = "http://127.0.0.1:%d" % PORT
     alive = False
     try:
         import urllib.request
-        with urllib.request.urlopen(base + "/api/agents", timeout=2) as r:
-            alive = r.status == 200
+        with urllib.request.urlopen(base + "/join", timeout=2) as response:
+            alive = response.status == 200
     except Exception:
-        alive = False
-    print("AI Bridge 会议室 %s：%s\n" % ("正在跑" if alive else "好像没开", base + "/"))
-    if not alive:
-        print("（先双击 AIBridge.exe 把会议室开起来，再来接。下面这些照抄就对了。）\n")
-
-    print("一、支持 MCP 的工具 —— 把这段贴进它的 MCP 配置")
-    print(json.dumps({"mcpServers": {SERVER_NAME: {"url": URL}}}, ensure_ascii=False, indent=2))
-    print("   Claude Code：claude mcp add --transport http %s %s" % (SERVER_NAME, URL))
-    print("   Codex：~/.codex/config.toml 里加")
-    print("          [mcp_servers.%s]" % SERVER_NAME)
-    print('          url = "%s"' % URL)
-    print("   Cursor / Windsurf / Cline / Roo / Continue / Antigravity：配置里加上面那段 JSON")
-    print("   点了 install 的：%s antigravity / cursor / claude / codex" % ME)
-
-    print("\n二、任何能发 HTTP 的程序 —— 不用装任何东西，第一次带 join 就进会")
-    print("   PowerShell：")
-    print("     Invoke-RestMethod -Method Post -ContentType application/json "
-          "-Body '{\"speaker\":\"myharness\",\"text\":\"大家好\",\"join\":true}' %s/api/post" % base)
-    print("   Python：")
-    print("     import requests; requests.post('%s/api/post', json={\"speaker\":\"myharness\",\"text\":\"大家好\",\"join\":true})" % base)
-    print("   speaker 随便起（小写字母开头、最长 24），第一次带 join:true，之后不用带。")
-
-    print("\n三、命令行 AI —— 写一份 json 让会议室每轮主动叫它")
-    print("   放到 data\\agents.d\\myharness.json：")
-    print(SAMPLE_CLI)
-    print("   改完在会议室的\"参会者\"里勾上，不用重启。字段说明见 docs\\PROVIDERS.md。")
-
-    print("\nMCP 工具：list_rooms / read_room / post_to_room / wait_for_message")
-    print("完整说明：docs\\PROVIDERS.md")
+        pass
+    print("AI Bridge %s: %s" % ("正在运行" if alive else "尚未启动", base))
+    print("1. 本机首页：参与人 ＋ → 添加联系人 → 接入 → 生成接入密钥。")
+    print("2. 在会话的成员与权限中邀请该联系人并设置权限。")
+    print("3. 其他用户打开 %s/join 并输入密钥。" % base)
+    print("4. Harness 使用下面的 MCP 配置（将占位符替换为密钥）：")
+    print(json.dumps({"mcpServers": {SERVER_NAME: {"url": URL,
+          "headers": {"Authorization": "Bearer <联系人接入密钥>"}}}}, ensure_ascii=False, indent=2))
+    print("HTTP: Authorization: Bearer <联系人接入密钥>")
+    print("GET  %s/api/external/rooms" % base)
+    print('POST %s/api/post {"room":"受邀会话 ID","text":"消息"}' % base)
+    print("身份由密钥决定，不能自行加入会话或冒用其他联系人。")
+    print("CLI 安装前可先设置 AI_BRIDGE_TOKEN 环境变量；或在接入页一键配置。")
+    print("完整说明：docs/CONTACTS.md；示例客户端：examples/contact_client.py")
     return 0 if alive else 1
 
 
@@ -227,14 +242,14 @@ def hosts_status():
             for h in HOSTS]
 
 
-def host_install(hid):
+def host_install(hid, token=None):
     """界面点一下就走这里：不让人碰命令行。返回 (ok, 说明)。"""
     host = next((h for h in HOSTS if h["id"] == hid), None)
     if not host:
         return False, "不认识这个工具：%s" % hid
     if not present(host):
         return False, "这台机器上没装 %s" % host["label"]
-    ok, detail = INSTALLERS[host["kind"]](host)
+    ok, detail = INSTALLERS[host["kind"]](dict(host, token=token))
     if not ok:
         return False, detail
     return True, "%s：接好了。\n%s\n%s" % (host["label"], host["restart"], detail)

@@ -12,9 +12,5 @@
 - mcp        会议室自己的 MCP 服务（给会议里的 AI 和外面的 AI 用）
 - web        HTTP 接口和启动
 """
-from . import registry as _registry
-
-try:      # 先把注册表读进来：common.AIS 会被原地改成当前启用的列表
-    _registry.load()
-except Exception:   # 配置坏了也不该让整个会议室起不来（reg.start 里会再试一次，界面上能看到错）
-    pass
+# Importing the package must not choose a data directory. Portable member
+# connectors select their own private runtime before importing server modules.

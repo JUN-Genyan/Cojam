@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 os.environ["ROUNDTABLE_LOG_DIR"] = tempfile.mkdtemp(prefix="rt_multi_")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from bridge import room as R, web, common
+from bridge import room as R, web, common, access
 
 WD = tempfile.mkdtemp(prefix="rt_multi_wd_")
 gate = {}      # 会议号 -> Event：放行它的 AI
@@ -26,10 +26,12 @@ PORT = srv.server_address[1]
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 
 
-def call(method, path, obj=None, auth=True):
+def call(method, path, obj=None, auth=True, key=None):
     h = {"Content-Type": "application/json"}
     if auth:
         h["X-RT-Token"] = web.RT_TOKEN
+    if key:
+        h["Authorization"] = "Bearer " + key
     req = urllib.request.Request("http://127.0.0.1:%d%s" % (PORT, path), method=method,
                                  data=json.dumps(obj).encode() if obj is not None else None, headers=h)
     try:
@@ -150,14 +152,15 @@ class MultiRoom(unittest.TestCase):
         a = R.rooms.create("外部甲", "", WD)
         b = R.rooms.create("外部乙", "", WD)
         R.set_last(a.id)
+        key = access.credential("codex")
         s, j = call("POST", "/api/post", {"speaker": "claude", "text": "不带会议号"}, auth=False)
-        self.assertEqual((s, j["room"]), (200, a.id))
-        s, j = call("POST", "/api/post", {"speaker": "codex", "text": "带会议号", "room": b.id}, auth=False)
+        self.assertEqual(s, 401)
+        s, j = call("POST", "/api/post", {"speaker": "codex", "text": "带会议号", "room": b.id}, auth=False, key=key)
         self.assertEqual((s, j["room"]), (200, b.id))
         self.assertEqual(b.messages[-1]["text"], "带会议号")
         self.assertEqual(b.messages[-1].get("origin"), "external")
-        self.assertEqual(call("POST", "/api/post", {"speaker": "codex", "text": "x", "room": "没有"}, auth=False)[0], 404)
-        self.assertEqual(call("POST", "/api/post", {"speaker": "你", "text": "冒充用户"}, auth=False)[0], 400)
+        self.assertEqual(call("POST", "/api/post", {"speaker": "codex", "text": "x", "room": "没有"}, auth=False, key=key)[0], 404)
+        self.assertEqual(call("POST", "/api/post", {"speaker": "你", "text": "冒充用户"}, auth=False, key=key)[0], 403)
 
     def test_stop_only_this_room(self):
         a = R.rooms.create("停甲", "", WD)

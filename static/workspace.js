@@ -1,0 +1,62 @@
+// Contacts belong to the application. Membership and permissions belong to a conversation.
+let PROJECTS=[],CONTACTS=[],contactMode='global';
+function uiIcon(name){const paths={folder:'M3 7V5a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7Z',message:'M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z',members:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',panel:'M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1ZM15 3v18',arrow:'M5 12h14M13 6l6 6-6 6',terminal:'m5 7 4 5-4 5M13 17h6',device:'M4 3h16v13H4ZM8 21h8M12 16v5',link:'m10 13 4-4M8 15l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M13 9l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0',user:'M20 21v-2a6 6 0 0 0-6-6h-4a6 6 0 0 0-6 6v2M16 5a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z'};return '<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="'+(paths[name]||paths.message)+'"/></svg>'}
+const PERM_LABELS={read:'读取会话',post:'发言',trigger:'唤起其他 AI',board:'编辑看板',files:'分享本机文件',work:'允许干活'};
+function contactPicker(ids){return CONTACTS.filter(a=>a.enabled).map(a=>'<label class="contact-pick"><input type="checkbox" data-contact="'+esc(a.id)+'"'+(ids.includes(a.id)?' checked':'')+'>'+esc(a.label)+' <small>'+esc(a.kind==='user'?'用户':AG_DRV[a.driver])+'</small></label>').join('')||'<p class="hint">先在左侧添加联系人，也可以先创建空会话。</p>'}
+async function refreshContacts(){const r=await fetch('/api/agents?reload=1');if(!r.ok)throw Error('读取联系人失败');agCat=await r.json();CONTACTS=agCat.agents||[];drawContacts()}
+function drawContacts(){const box=document.getElementById('contactList');const contacts=CONTACTS.filter(a=>a.enabled||a.user||a.builtin);box.innerHTML=contacts.map(a=>'<li><button data-contact-open="'+esc(a.id)+'"><span class="avatar" style="--c:'+esc(a.color)+'">'+esc(a.letter)+'</span><span>'+esc(a.label)+'<small>'+esc(a.kind==='user'?'用户':a.driver==='external'?'外部 Harness':AG_DRV[a.driver])+' · '+esc((((agCat.members||{})[a.id]||{}).automatic?'自动响应已连接':((agCat.connections||{})[a.id]||{}).label)||'未验证')+(a.enabled?'':' · 未找到程序')+'</small></span></button></li>').join('');document.getElementById('contactCount').textContent=contacts.length}
+function drawRoomIdentity(){
+  const selected=ROOMS.find(m=>m.id===RID),project=PROJECTS.find(p=>p.id===(selected&&selected.project));
+  document.getElementById('roomContext').textContent=project?project.name:'会话空间';
+  document.getElementById('roomSummary').textContent=S&&S.participants?S.participants.length+' 位受邀成员 · 独立会话与权限':'人和 AI，在同一张桌上';
+  document.getElementById('roomMemberFaces').innerHTML=((S&&S.participants)||[]).slice(0,4).map(id=>{const a=CONTACTS.find(c=>c.id===id);return '<span style="--c:'+esc(a?a.color:'#787d83')+'">'+esc(a?a.letter:id.slice(0,1).toUpperCase())+'</span>'}).join('');
+  const brief=S&&S.announcement||'';document.getElementById('sessionBrief').hidden=!brief.trim();document.getElementById('sessionBriefText').textContent=brief;
+}
+function drawRooms(){
+  const live=ROOMS.filter(m=>!m.archived||m.id===RID),query=document.getElementById('navSearch').value.trim().toLocaleLowerCase();
+  drawRoomIdentity();
+  const row=m=>{const b=roomBadge(m);return '<li class="'+(m.id===RID?'cur':'')+'"><a href="?r='+encodeURIComponent(m.id)+'" data-id="'+esc(m.id)+'"'+(m.id===RID?' aria-current="page"':'')+'>'+uiIcon('message')+'<span class="dot '+(b?(b[0]||'new'):'')+'"></span><span class="t">'+esc(m.title)+'</span>'+(b?'<span class="b '+b[0]+'">'+esc(b[1])+'</span>':'')+'</a></li>'};
+  const html=PROJECTS.map(p=>{
+    const matchesProject=p.name.toLocaleLowerCase().includes(query);
+    const rooms=live.filter(m=>(m.project||legacyProject(m.workdir))===p.id&&(matchesProject||m.title.toLocaleLowerCase().includes(query)));
+    if(query&&!matchesProject&&!rooms.length)return '';
+    const expanded=!!query||!collapsedProjects.has(p.id);
+    return '<li class="project"><div class="project-head"><button data-project-toggle="'+esc(p.id)+'" aria-expanded="'+expanded+'">'+uiIcon('folder')+' <span>'+esc(p.name)+'</span><span class="project-count">'+rooms.length+'</span></button><button data-project-new="'+esc(p.id)+'" title="在此项目下新建会话" aria-label="新建会话">＋</button></div><ul class="rl project-rooms"'+(expanded?'':' hidden')+'>'+rooms.map(row).join('')+'<li><button class="new-conversation" data-project-new="'+esc(p.id)+'">＋ 新建会话</button></li></ul></li>';
+  }).join('')||'<li class="nav-empty">'+(query?'没有匹配的项目或会话':'创建项目，开始第一场会话。')+'</li>';
+  if(roomList.innerHTML!==html)roomList.innerHTML=html;
+  const wait=ROOMS.filter(m=>m.id!==RID&&!m.archived&&(roomBadge(m)||[])[0]==='you').length;
+  document.getElementById('bList').textContent='会话管理'+(wait?' · '+wait+' 等你':'');document.getElementById('menu').classList.toggle('attn',wait>0);document.title=(wait?'('+wait+') ':'')+(S&&S.title?S.title+' · 合拍 Cojam':'合拍 Cojam');
+}
+// The server supplies resolved project IDs, including migrated folder groups.
+function legacyProject(wd){return (PROJECTS.find(p=>p.workdir===wd)||{}).id||''}
+const collapsedProjects=new Set();
+async function pollRooms(){try{const r=await fetch('/api/rooms',{cache:'no-store'});if(!r.ok)throw Error('读取项目失败');const j=await r.json();ROOMS=j.rooms||[];PROJECTS=j.projects||[];const m=seenMap();ROOMS.forEach(r=>{if(m[r.id]==null)m[r.id]=r.count});try{localStorage.setItem('rt_seen',JSON.stringify(m))}catch(e){}drawRooms();return j}catch(e){return null}}
+async function openProject(){document.body.classList.remove('nav-open');showModal('<h3>新建项目</h3><p class="hint">项目中的会话共用工作文件夹，各自管理成员和权限。</p><label>项目名称<input id="pName" maxlength="60" placeholder="例如：我的应用"></label><label>工作文件夹<input id="pWd" placeholder="工作文件夹完整路径" value="'+esc((S&&S.workdir)||'')+'"></label><p id="pErr" role="alert"></p><div class="btns"><button id="pCancel">取消</button><button id="pSave" class="pri">创建项目</button></div>');document.getElementById('pCancel').onclick=hideModal;document.getElementById('pSave').onclick=async()=>{const [ok,j]=await post('/api/projects/new',{name:document.getElementById('pName').value,workdir:document.getElementById('pWd').value});if(!ok){document.getElementById('pErr').textContent=j.error||'创建失败';return}await pollRooms();hideModal();openNew(false,j.project.id)};document.getElementById('pName').focus()}
+async function openNew(first,projectId){
+  await pollRooms();await refreshContacts();if(!PROJECTS.length)return openProject();
+  const selected=projectId||(S&&(S.project||legacyProject(S.workdir)))||PROJECTS[0].id;
+  showModal('<h3>新建会话</h3><label>所属项目<select id="nProject">'+PROJECTS.map(p=>'<option value="'+esc(p.id)+'"'+(selected===p.id?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select></label><label>会话标题<input id="nTitle" maxlength="60" placeholder="这次想做什么？"></label><label>目标<textarea id="nAnn" placeholder="描述目标，可稍后修改"></textarea></label><h4>邀请联系人</h4><p class="hint">从全局联系人中选择。也可以先创建空会话，再添加成员。</p><div id="nContacts">'+contactPicker([])+'</div><div class="btns"><button id="nCancel">取消</button><button id="nOk" class="pri">创建会话</button></div>');
+  document.getElementById('nCancel').onclick=hideModal;document.getElementById('nOk').onclick=async()=>{const [ok,j]=await post('/api/rooms/new',{title:document.getElementById('nTitle').value,announcement:document.getElementById('nAnn').value,project:document.getElementById('nProject').value,participants:[...mbox.querySelectorAll('[data-contact]:checked')].map(e=>e.dataset.contact)});if(!ok)return alert(j.error||'创建失败');hideModal();document.body.classList.remove('nav-open');switchRoom(j.id);pollRooms()};document.getElementById('nTitle').focus();
+}
+async function openAgents(){if(!RID)return;contactMode='members';const rid=RID;await refreshContacts();if(rid!==RID)return;const ids=(S&&S.participants)||[],perms=(S&&S.permissions)||{};
+  showModal('<h3>会话成员与权限</h3><p class="hint">仅影响当前会话。同一联系人在其他会话中的权限独立配置。干活权限还需会话切到干活模式；CLI / 外部 Harness 必须自行遵守只读约定。</p><div id="memberRows">'+CONTACTS.filter(a=>a.enabled||ids.includes(a.id)).map(a=>'<section class="member-row" data-member="'+esc(a.id)+'"><label class="contact-pick"><input type="checkbox" data-member-check'+(ids.includes(a.id)?' checked':'')+'>'+esc(a.label)+' <small>@'+esc(a.id)+'</small></label><div class="perm-grid">'+Object.entries(PERM_LABELS).map(([key,label])=>'<label><input type="checkbox" data-perm="'+key+'"'+((perms[a.id]||{read:true,post:true,trigger:true})[key]?' checked':'')+'>'+label+'</label>').join('')+'</div></section>').join('')+'</div><div class="btns"><button id="mClose">取消</button><button id="mSave" class="pri">保存成员和权限</button></div>');
+  const sync=row=>row.querySelectorAll('[data-perm]').forEach(i=>i.disabled=!row.querySelector('[data-member-check]').checked);mbox.querySelectorAll('[data-member]').forEach(row=>{sync(row);row.querySelector('[data-member-check]').onchange=()=>sync(row)});
+  document.getElementById('mClose').onclick=hideModal;document.getElementById('mSave').onclick=async()=>{const participants=[],permissions={};mbox.querySelectorAll('[data-member]').forEach(row=>{if(!row.querySelector('[data-member-check]').checked)return;const id=row.dataset.member;participants.push(id);permissions[id]={};row.querySelectorAll('[data-perm]').forEach(i=>permissions[id][i.dataset.perm]=i.checked)});const [ok,j]=await post('/api/r/'+encodeURIComponent(rid)+'/members',{participants,permissions});if(!ok)return alert(j.error||'保存失败');hideModal();await loadState()};
+}
+async function openContacts(){document.body.classList.remove('nav-open');contactMode='global';await refreshContacts();showModal('<h3>全局联系人</h3><p class="hint">添加后可在任意会话中邀请，权限在各个会话内配置。</p><ul class="contact-manage">'+CONTACTS.map(a=>'<li><span><b>'+esc(a.label)+'</b><small>@'+esc(a.id)+' · '+esc(a.kind==='user'?'用户':AG_DRV[a.driver])+' · '+esc((((agCat.members||{})[a.id]||{}).automatic?'自动响应已连接':((agCat.connections||{})[a.id]||{}).label)||'未验证')+(a.enabled?'':' · 未找到程序')+'</small></span><button data-key="'+esc(a.id)+'">接入</button>'+(a.user?'<button data-delete="'+esc(a.id)+'">删除</button>':'')+'</li>').join('')+'</ul>'+((agCat.errors||[]).length?'<p class="hint">'+agCat.errors.map(esc).join('<br>')+'</p>':'')+'<div class="btns"><button id="cClose">关闭</button><button id="cAdd" class="pri">＋ 接入联系人</button></div>');document.getElementById('cClose').onclick=hideModal;document.getElementById('cAdd').onclick=addContact;
+  mbox.querySelectorAll('[data-key]').forEach(b=>b.onclick=()=>openConnection(b.dataset.key));mbox.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{if(!confirm('删除联系人 '+b.dataset.delete+'？接入密钥将失效，会话记录会保留。'))return;const [ok,j]=await post('/api/agents/remove',{id:b.dataset.delete});if(!ok)return alert(j.error);await openContacts();await loadState()});
+}
+document.getElementById('contactsAdd').onclick=()=>startConnectionWizard();
+document.getElementById('contactsManage').onclick=openContacts;
+document.getElementById('contactList').onclick=e=>{const b=e.target.closest('[data-contact-open]');if(b)openConnection(b.dataset.contactOpen)};
+document.getElementById('projectAdd').onclick=openProject;
+document.getElementById('navToggle').onclick=()=>document.body.classList.toggle('nav-open');
+document.getElementById('navClose').onclick=()=>document.body.classList.remove('nav-open');
+document.getElementById('navShade').onclick=()=>document.body.classList.remove('nav-open');
+document.getElementById('roomList').addEventListener('click',e=>{const add=e.target.closest('[data-project-new]'),toggle=e.target.closest('[data-project-toggle]');if(add)openNew(false,add.dataset.projectNew);if(toggle){const id=toggle.dataset.projectToggle;collapsedProjects.has(id)?collapsedProjects.delete(id):collapsedProjects.add(id);drawRooms()}if(e.target.closest('a[data-id]'))document.body.classList.remove('nav-open')});
+
+const navSearch=document.getElementById('navSearch');
+navSearch.addEventListener('input',drawRooms);
+navSearch.addEventListener('keydown',e=>{if(e.key==='Escape'){navSearch.value='';drawRooms();navSearch.blur()}});
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'&&!document.getElementById('modal').classList.contains('show')){e.preventDefault();document.body.classList.add('nav-open');navSearch.focus();navSearch.select()}});
+if(!/Mac|iPhone|iPad/.test(navigator.platform))document.querySelector('.nav-search kbd').textContent='Ctrl K';

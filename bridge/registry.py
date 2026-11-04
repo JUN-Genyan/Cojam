@@ -18,7 +18,7 @@ r"""参与者注册表：会议室里能有哪些 AI、每一个怎么叫。
 """
 import glob, json, os, re, shutil, threading
 
-from .common import LOG_DIR, resolve_cmd
+from .common import LOG_DIR, resolve_cmd, write_json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRESET_DIR = os.path.join(HERE, "presets")
@@ -94,6 +94,8 @@ def _norm(raw, idx=0):
     driver = str(raw.get("driver") or "cli").strip().lower()
     if driver not in DRIVER_CAPS:
         raise ValueError("driver 只能是 claude / codex / cli / http / external，给的是 %r" % driver)
+    if raw.get("kind") == "user" and driver != "external":
+        raise ValueError("用户联系人应使用 external 接入方式")
 
     caps = dict(DRIVER_CAPS[driver])
     rc = raw.get("caps")
@@ -124,6 +126,7 @@ def _norm(raw, idx=0):
         "letter": (str(raw.get("letter") or pid[:1]).strip() or "?")[:2].upper(),
         "color": str(raw.get("color") or COLORS[idx % len(COLORS)]),
         "driver": driver,
+        "kind": "user" if raw.get("kind") == "user" else "agent",
         "bin": _as_list(raw.get("bin")),
         "detect": _as_list(raw.get("detect")),
         "args": arg,
@@ -282,6 +285,7 @@ def public(spec):
     if not spec:
         return None
     return {"id": spec["id"], "label": spec["label"], "letter": spec["letter"], "color": spec["color"], "driver": spec["driver"],
+            "kind": spec["kind"],
             "enabled": spec["enabled"], "caps": dict(spec["caps"]), "models": list(spec["models"]),
             "efforts": list(spec["efforts"]), "default": list(spec["default"]),
             "source": spec["source"], "builtin": spec["builtin"],
@@ -306,9 +310,7 @@ def save_agent(raw):
         return False, "%s 是内置的，不能改" % spec["id"]
     d = os.path.join(LOG_DIR, "agents.d")
     os.makedirs(d, exist_ok=True)
-    with open(os.path.join(d, spec["id"] + ".json"), "w", encoding="utf-8") as f:
-        json.dump(raw, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+    write_json(os.path.join(d, spec["id"] + ".json"), raw)
     load()
     if spec["id"] not in SPECS:
         return False, "存是存了，但没读出来"
