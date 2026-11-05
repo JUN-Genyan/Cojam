@@ -31,4 +31,48 @@ class OwnerLifecycleTest(unittest.TestCase):
         with self.assertRaises(ValueError):self.life.update('bad','open')
         self.life.update(self.a,'open');self.life.update(self.b,'close');self.assertFalse(self.stopped.wait(.15))
         self.life.update(self.a,'close');self.assertTrue(self.stopped.wait(1))
+class LifecycleSwitch(unittest.TestCase):
+    def test_matrix(self):
+        from bridge.web import owner_lifecycle_enabled
+        self.assertTrue(owner_lifecycle_enabled({}))
+        self.assertTrue(owner_lifecycle_enabled({'ROUNDTABLE_OWNER_LIFECYCLE':'1'}))
+        self.assertFalse(owner_lifecycle_enabled({'ROUNDTABLE_NO_BROWSER':'1'}))
+        self.assertTrue(owner_lifecycle_enabled({'ROUNDTABLE_NO_BROWSER':'1','ROUNDTABLE_OWNER_LIFECYCLE':'1'}))
+
+class LifecycleHeadless(unittest.TestCase):
+    def test_headless_backend_exits_after_last_tab(self):
+        import json,os,re,socket,subprocess,tempfile,urllib.request
+        root=Path(__file__).resolve().parents[1]
+        with socket.socket() as sock:
+            sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            env=dict(os.environ,ROUNDTABLE_PORT=str(port),ROUNDTABLE_NO_BROWSER='1',
+                     ROUNDTABLE_OWNER_LIFECYCLE='1',ROUNDTABLE_LOG_DIR=tmp,PYTHONIOENCODING='utf-8')
+            proc=subprocess.Popen([sys.executable,str(root/'roundtable.py')],cwd=root,env=env,
+                                  stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            try:
+                base='http://127.0.0.1:%d'%port
+                opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                info=None
+                for _ in range(100):
+                    try:
+                        with opener.open(base+'/api/server/info',timeout=.2) as response:
+                            info=json.loads(response.read())
+                        break
+                    except OSError:time.sleep(.05)
+                self.assertIsNotNone(info,'backend did not start')
+                with opener.open(base+'/',timeout=2) as response:
+                    token=re.search(r'name="rt-token" content="([^"]+)"',response.read().decode('utf-8')).group(1)
+                body={'tab':'t'*32,'instance':'i'*32}
+                for action in ('open','close'):
+                    request=urllib.request.Request(base+'/api/ui/session',
+                        data=json.dumps(dict(body,action=action)).encode(),
+                        headers={'Content-Type':'application/json','X-RT-Token':token})
+                    with opener.open(request,timeout=2) as response:
+                        self.assertEqual(response.status,200)
+                self.assertEqual(proc.wait(timeout=15),0)
+            finally:
+                if proc.poll() is None:
+                    proc.terminate();proc.wait(timeout=5)
+
 if __name__=='__main__':unittest.main()

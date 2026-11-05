@@ -644,6 +644,11 @@ def start_lan_listener(port=None):
     return srv, srv.lan_url
 
 
+def owner_lifecycle_enabled(env=None):
+    env = os.environ if env is None else env
+    return env.get("ROUNDTABLE_NO_BROWSER") != "1" or env.get("ROUNDTABLE_OWNER_LIFECYCLE") == "1"
+
+
 def main():
     url = "http://%s:%d/" % (HOST, PORT)
     try:
@@ -665,7 +670,7 @@ def main():
             return
     lan_srv, lan_url = start_lan_listener()
     srv.lan_url = lan_url
-    if os.environ.get("ROUNDTABLE_NO_BROWSER") != "1":
+    if owner_lifecycle_enabled():
         from .owner_lifecycle import OwnerLifecycle
         srv.owner_lifecycle = OwnerLifecycle(lambda: stop_application(srv))
         if lan_srv:
