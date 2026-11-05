@@ -1,0 +1,6 @@
+qrcodejs 1.0.0
+https://github.com/davidshimjs/qrcodejs
+Copyright (c) 2012 davidshimjs
+MIT License
+
+Vendored as qrcode.min.js so invitation QR codes never leave this device.

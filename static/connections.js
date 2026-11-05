@@ -9,6 +9,17 @@ async function checkConnectionBackend() {
   } catch (e) { throw Error('当前仍在运行旧版后台，无法配置接入。请退出旧后台并重新打开合拍 Cojam；只刷新网页不会更新后台。'); }
   if (info.app !== 'AI Bridge' || info.version !== '2.5.1' || info.api_revision !== 1)
     throw Error('界面与后台版本不一致。请重新打开最新的合拍 Cojam，再刷新此页面。');
+  return info;
+}
+function connectionDefaultBase(type, info, origin) {
+  return ['user', 'external'].includes(type) && info && info.lan_url ? info.lan_url : origin;
+}
+function connectionBaseWarning(base) {
+  try {
+    const host = new URL(base).hostname.replace(/^\[|\]$/g, '');
+    if (['127.0.0.1', 'localhost', '::1'].includes(host)) return '这是本机地址，只有这台电脑能打开；手机和别的设备连不上。';
+  } catch (e) { return '地址格式不对，请填写完整地址，例如 http://192.168.1.5:8766。'; }
+  return '';
 }
 const CONNECTION_TYPES = {
   local: ['本机 Agent', '检测这台电脑上的 Claude、Codex 或自定义 CLI，直接调用，不需要接入密钥。', uiIcon('terminal')],
@@ -31,7 +42,7 @@ async function startConnectionWizard(id, type) {
     form: {}, status: null, busy: false, permissions: {read: true, post: true, trigger: true, board: false, files: false, work: false}};
   connectionWizard = w;
   try {
-    await checkConnectionBackend();
+    const info = await checkConnectionBackend();
     await refreshContacts();
     if (connectionWizard !== w) return;
     const contact = CONTACTS.find(a => a.id === id);
@@ -40,6 +51,8 @@ async function startConnectionWizard(id, type) {
       w.status = (agCat.connections || {})[id] || null;
       w.localChoice = id; w.saved = true; w.step = 2;
     } else if (type) w.step = 2;
+    w.info = info;
+    w.base = connectionDefaultBase(w.type, info, location.origin);
     renderConnectionWizard();
   } catch (e) { stopConnectionWizard(); showModal('<h3>接入暂不可用</h3><p role="alert">' + esc(e.message || '无法读取联系人') + '</p><div class="btns"><button onclick="location.reload()">刷新页面</button><button onclick="hideModal()">关闭</button></div>'); }
 }
@@ -58,7 +71,7 @@ function renderConnectionWizard() {
   clearInterval(w.timer);
   if (w.step === 1) {
     wizardFrame(w, '<h3>谁来一起合拍？</h3><p class="hint">邀请朋友，连接 Harness。无论来自哪台设备，都在同一场会话里协作。</p><div class="connection-choices">' + Object.entries(CONNECTION_TYPES).map(([id, t]) => '<button class="connection-choice" data-connection-type="' + id + '"><span class="connection-symbol">' + t[2] + '</span><span><b>' + t[0] + '</b><small>' + t[1] + '</small></span><span>›</span></button>').join('') + '</div>');
-    mbox.querySelectorAll('[data-connection-type]').forEach(b => b.onclick = () => { w.type = b.dataset.connectionType; w.step = 2; renderConnectionWizard(); });
+    mbox.querySelectorAll('[data-connection-type]').forEach(b => b.onclick = () => { w.type = b.dataset.connectionType; w.base = connectionDefaultBase(w.type, w.info, location.origin); w.step = 2; renderConnectionWizard(); });
   } else if (w.step === 2) renderConnectionSetup(w);
   else if (w.step === 3) renderConnectionAssignment(w);
   else renderConnectionComplete(w);
@@ -80,7 +93,7 @@ function renderConnectionSetup(w) {
       content += '<p class="hint">测试会向服务发送一条只需简短回复的验证消息，可能消耗少量模型额度，不授予工具或文件权限。</p><button id="connCheck" class="pri">测试连接与回复</button><details class="connection-advanced"><summary>查看服务需要实现的协议</summary><p>接收 POST JSON，其中包含 prompt、speaker、mode、permissions。返回 <code>{"text":"连接成功"}</code>。</p></details>';
     } else {
       if (w.type === 'external') content += '<label>参与方式<select id="connMemberMode"><option value="auto"'+(w.memberMode !== 'manual'?' selected':'')+'>自动接收任务并回复（推荐）</option><option value="manual"'+(w.memberMode === 'manual'?' selected':'')+'>通过 MCP 手动参与</option></select></label><div id="connManual"'+(w.memberMode === 'manual'?'':' hidden')+'><label>对方使用的软件<select id="connHost"><option value="custom">自定义 / 其他 MCP 客户端</option>' + ((agCat && agCat.hosts) || []).map(h => '<option value="' + esc(h.id) + '"' + (w.host === h.id ? ' selected' : '') + '>' + esc(h.label) + '</option>').join('') + '</select></label></div>';
-      content += '<details class="connection-advanced" open><summary>接入地址（跨设备时必须修改）</summary><label>对方能访问的应用地址<input id="connBase" value="' + esc(w.base) + '"></label><p class="hint">127.0.0.1 只适用于这台电脑。跨设备请填写对方可访问的 Tailscale Serve 或 HTTPS 地址，并先在对方浏览器打开确认可以访问。此处不会自动组网。</p></details><button id="connGenerate" class="pri">' + (w.type === 'user' ? '生成网页邀请' : '生成连接配置') + '</button>' + (w.status && w.status.has_key ? '<button id="connRevoke">撤销现有密钥 / 邀请</button><p class="hint">已有密钥不会再次显示明文；重新生成会使旧密钥和旧邀请失效。</p>' : '') + '<div id="connCredentials"></div>';
+      content += '<details class="connection-advanced" open><summary>接入地址（手机 / 其他设备用）</summary><label>对方能访问的应用地址<input id="connBase" value="' + esc(w.base) + '"></label><p class="hint" id="connBaseHint"></p></details><button id="connGenerate" class="pri">' + (w.type === 'user' ? '生成网页邀请' : '生成连接配置') + '</button>' + (w.status && w.status.has_key ? '<button id="connRevoke">撤销现有密钥 / 邀请</button><p class="hint">已有密钥不会再次显示明文；重新生成会使旧密钥和旧邀请失效。</p>' : '') + '<div id="connCredentials"></div>';
     }
   }
   content += '<div id="connEvidence" class="connection-evidence" aria-live="polite"></div><div class="btns connection-actions"><button id="connBack">更换接入方式</button><button id="connLater">稍后验证，先分配会话</button><button id="connNext" class="pri" disabled>下一步：会话与权限</button></div>';
@@ -100,6 +113,21 @@ function renderConnectionSetup(w) {
       w.saved = !!w.id; w.status = (agCat.connections || {})[w.id] || null; w.form = {}; renderConnectionWizard();
     };
     if (w.localChoice !== '__custom__') { w.id = w.localChoice; w.saved = true; w.status = (agCat.connections || {})[w.id] || w.status; }
+  }
+  const baseInput = document.getElementById('connBase');
+  if (baseInput) {
+    const hint = document.getElementById('connBaseHint');
+    const showBaseHint = () => {
+      const issue = connectionBaseWarning(w.base);
+      hint.textContent = issue || '默认是这台电脑的局域网地址。手机和电脑要连同一个 WiFi；跨网络请填 Tailscale Serve 或其他 HTTPS 地址。';
+      hint.classList.toggle('warn', !!issue);
+    };
+    showBaseHint();
+    baseInput.oninput = () => {
+      w.base = baseInput.value.trim().replace(/\/+$/, '');
+      showBaseHint();
+      if (w.token) renderConnectionCredentials(w);
+    };
   }
   const check = document.getElementById('connCheck'); if (check) check.onclick = () => checkConnection(w);
   const generate = document.getElementById('connGenerate'); if (generate) generate.onclick = () => generateConnection(w);
@@ -194,6 +222,13 @@ async function generateConnection(w) {
   finally { if (wizardCurrent(w)) setConnectionBusy(w, false); }
 }
 function connectionInvitation(w) { return w.base + '/join#key=' + encodeURIComponent(w.token); }
+function renderConnectionQr(w) {
+  const box = document.getElementById('connQr');
+  if (!box || typeof QRCode !== 'function') return;
+  try {
+    new QRCode(box, {text: connectionInvitation(w), width: 168, height: 168, correctLevel: QRCode.CorrectLevel.M});
+  } catch (e) { box.textContent = '二维码没生成出来，请直接用上面的链接。'; }
+}
 function connectionConfiguration(w) {
   if (w.host === 'codex') return '[mcp_servers.ai-bridge]\nurl = ' + JSON.stringify(w.base + '/mcp') + '\nhttp_headers = { Authorization = ' + JSON.stringify('Bearer ' + w.token) + ' }';
   return JSON.stringify({mcpServers: {'ai-bridge': {url: w.base + '/mcp', headers: {Authorization: 'Bearer ' + w.token}}}}, null, 2);
@@ -201,9 +236,11 @@ function connectionConfiguration(w) {
 function renderConnectionCredentials(w) {
   const box = document.getElementById('connCredentials'); if (!box || !w.token) return;
   if (w.type === 'user') {
-    box.innerHTML = '<h4>把邀请链接发给对方</h4><p class="hint">链接含此联系人的密钥，请只发给受邀的人。对方打开后自动连接；不需要安装本应用。</p><input id="connInvitation" readonly aria-label="邀请链接"><button id="connCopyInvitation">复制邀请链接</button><p class="hint">对方连接成功后点下一步，分配它可以参与的会话。也可以先分配，稍后再邀请。</p>';
+    const issue = connectionBaseWarning(w.base);
+    box.innerHTML = '<h4>把邀请链接发给对方</h4><p class="hint">链接含此联系人的密钥，请只发给受邀的人。对方打开后自动连接；不需要安装本应用。</p><input id="connInvitation" readonly aria-label="邀请链接"><button id="connCopyInvitation">复制邀请链接</button>' + (issue ? '<p class="hint connection-base-warning">' + esc(issue) + ' 先改上面的接入地址，二维码和链接才能用。</p>' : '<div id="connQr" class="connection-qr" aria-label="邀请二维码"></div>') + '<p class="hint">手机和电脑要连同一个 WiFi；对方连接成功后点下一步，分配它可以参与的会话。也可以先分配，稍后再邀请。</p>';
     document.getElementById('connInvitation').value = connectionInvitation(w);
     document.getElementById('connCopyInvitation').onclick = async e => { await copyText(connectionInvitation(w)); e.target.textContent = '邀请已复制'; };
+    renderConnectionQr(w);
   } else if (w.memberMode !== 'manual') {
     box.innerHTML = '<ol class="connection-instructions"><li>在 Harness 所在设备打开「合拍 Cojam 成员连接端」（支持 Windows / macOS 的 Python 版本）。</li><li>导入下面的连接配置，选择该设备上的 Harness 和工作文件夹，点击「连接并开启自动响应」。</li><li>这里显示「自动响应已连接」后，继续选择会话与权限。成员随后会自动收取任务、回复和互相 @。</li></ol><p><a href="/static/member-connector.zip" download="Cojam-Member.zip">下载成员连接端（Windows / macOS 便携源码包）</a></p><button id="connDownloadMember" class="pri">下载此成员的连接配置</button><button id="connCopyMember">复制连接配置</button><p class="hint">配置含成员密钥，请仅交给该成员。首次使用连接端需下载便携连接端包；macOS 版本需要 Python 3.11+ 和 Tk。网络可继续使用 Tailscale，不需要开放本地执行端端口。</p>';
     const profile = JSON.stringify({protocol:1, server:w.base, key:w.token, member:w.id},null,2);

@@ -15,7 +15,7 @@ if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) {
 }
 
 $args = @(
-    "--noconfirm", "--clean", "--onefile",
+    "--noconfirm", "--clean", "--onefile", "--windowed",
     "--name", "Cojam",
     "--icon", "roundtable.ico",
     "--add-data", "index.html;.",

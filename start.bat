@@ -1,4 +1,8 @@
 @echo off
-chcp 65001 >nul
-python "%~dp0roundtable.py"
-pause
+set PYTHONIOENCODING=utf-8
+where pythonw >nul 2>nul
+if errorlevel 1 (
+  start "" python "%~dp0roundtable.py"
+) else (
+  start "" pythonw "%~dp0roundtable.py"
+)

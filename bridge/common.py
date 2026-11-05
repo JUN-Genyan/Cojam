@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """路径、上限、规矩文本、小工具。别的模块都从这里拿，测试改环境变量要在 import 之前。"""
-import hashlib, json, os, re, subprocess, sys, tempfile, threading, time
+import hashlib, ipaddress, json, os, re, socket, subprocess, sys, tempfile, threading, time
 from datetime import datetime
 
 HOST = "127.0.0.1"
@@ -161,6 +161,44 @@ def timeout_text(ai, why, mode):
     if why == "idle":
         return "%s 超时了：%d 分钟没有任何动静，像是卡住了，已经停掉" % (ai, idle // 60)
     return "%s 超时了：这一轮超过 %d 分钟，已经停掉" % (ai, total // 60)
+
+
+# ===== 局域网 =====
+def _lan_usable(ip):
+    try:
+        addr = ipaddress.IPv4Address(ip)
+    except ValueError:
+        return False
+    if not addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast or addr.is_unspecified:
+        return False
+    return addr not in ipaddress.IPv4Network("100.64.0.0/10")   # Tailscale / 运营商级 NAT 地址，别的设备走不通
+
+
+def pick_lan_ip(candidates):
+    """按给出的顺序取第一个能用的私有 IPv4；公网、回环、链路本地、Tailscale 都跳过。"""
+    for ip in candidates:
+        if ip and _lan_usable(ip):
+            return ip
+    return None
+
+
+def lan_ipv4():
+    """这台电脑在局域网里的 IPv4；没有就 None。绝不返回公网地址。"""
+    candidates = []
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.connect(("8.8.8.8", 80))   # 只看默认路由选哪块网卡，不发包
+            candidates.append(probe.getsockname()[0])
+        finally:
+            probe.close()
+    except OSError:
+        pass
+    try:
+        candidates += [row[4][0] for row in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)]
+    except OSError:
+        pass
+    return pick_lan_ip(candidates)
 
 
 # ===== 小工具 =====

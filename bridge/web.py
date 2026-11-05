@@ -8,7 +8,7 @@ import hmac, json, mimetypes, os, re, secrets, socket, sys, threading, webbrowse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote
 
-from . import access, agents, connections, install, mcp, members, projects, registry, room as R
+from . import access, agents, common, connections, install, mcp, members, projects, registry, room as R
 from .common import (AIS, EXTERNAL_SPEAKERS, HERE, HOST, MAX_ANN, MAX_BODY, MAX_UPLOAD, MEET_DIR, PORT, PROJECT,
                      in_dir, kind_of)
 from .guard import USER, guard
@@ -150,7 +150,8 @@ class Handler(BaseHTTPRequestHandler):
         path, _, qs = self.path.partition("?")
         q = parse_qs(qs)
         if path == "/api/server/info":
-            return self._json(200, {"app": "AI Bridge", "version": VERSION, "api_revision": API_REVISION})
+            return self._json(200, {"app": "AI Bridge", "version": VERSION, "api_revision": API_REVISION,
+                                    "lan_url": getattr(self.server, "lan_url", None)})
         if path == "/join":
             return self._static("join.html", "text/html; charset=utf-8")
         if path in ("/", "/index.html"):
@@ -626,6 +627,23 @@ def stop_application(server):
     server.shutdown()
 
 
+def start_lan_listener(port=None):
+    """在同一份 Handler 上再开一个只绑局域网地址的口子。没有局域网或端口被占就 (None, None)。
+    管理员接口仍然只认本机页面注入的令牌，所以这个口子对外只到“加入会话”为止。"""
+    ip = common.lan_ipv4()
+    if not ip:
+        return None, None
+    port = int(os.environ.get("ROUNDTABLE_LAN_PORT", "8766")) if port is None else port
+    try:
+        srv = ExclusiveServer((ip, port), Handler)
+    except OSError as error:
+        print("局域网入口没开成（%s:%s）：%s" % (ip, port, error), file=sys.stderr)
+        return None, None
+    srv.lan_url = "http://%s:%d" % (ip, srv.server_address[1])
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, srv.lan_url
+
+
 def main():
     url = "http://%s:%d/" % (HOST, PORT)
     try:
@@ -645,11 +663,17 @@ def main():
         except OSError:
             show_startup_error("旧后台尚未退出，请稍后重新打开 AI Bridge。")
             return
+    lan_srv, lan_url = start_lan_listener()
+    srv.lan_url = lan_url
     if os.environ.get("ROUNDTABLE_NO_BROWSER") != "1":
         from .owner_lifecycle import OwnerLifecycle
         srv.owner_lifecycle = OwnerLifecycle(lambda: stop_application(srv))
+        if lan_srv:
+            lan_srv.owner_lifecycle = srv.owner_lifecycle
     agents.start_reaper()
     print("会议室已启动：" + url)
+    if lan_url:
+        print("同一局域网（同一个 WiFi）可扫码或打开：" + lan_url)
     if os.environ.get("ROUNDTABLE_NO_BROWSER") != "1":
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try:
@@ -658,3 +682,6 @@ def main():
         pass
     finally:
         srv.server_close()
+        if lan_srv:
+            lan_srv.shutdown()
+            lan_srv.server_close()

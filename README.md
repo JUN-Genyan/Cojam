@@ -20,8 +20,8 @@
 
 ## 怎么开
 
-- **下载版**：解压 `Cojam-2.5.1-win64.zip`，双击 `Cojam.exe`（不用装 Python）。自己打：`build_exe.ps1`。
-- 源码版：双击 `start.bat`（带黑窗口，关掉就停），或者双击 `open.pyw`（后台开，不弹窗，没开就开、开了就直接打开网页）。地址 http://127.0.0.1:8765 。也可以 `python roundtable.py` 或 `python -m bridge`。
+- **下载版**：解压 `Cojam-2.5.1-win64.zip`，双击 `Cojam.exe`（不用装 Python，不开终端窗口）。自己打：`build_exe.ps1`。
+- 源码版：双击 `start.bat` 或 `open.pyw`（都在后台开，不弹终端窗口；没开就开、开了就直接打开网页）。要看日志或前台运行：`python roundtable.py`（或 `python -m bridge`）。地址 http://127.0.0.1:8765 。
 - 接别的工具（Antigravity / Cursor / Claude Code / Codex）一条命令：`Cojam.exe install antigravity`（源码版 `python roundtable.py install ...`）。见"接更多 AI"。
 - 第一次打开，从左侧创建项目和联系人，再在项目下新建会话。
 - 会议记录、附件都存在本文件夹的 `data\`（不进 git）。
@@ -91,7 +91,7 @@
 你、Claude Code、Codex 三方在一个网页里开会。分两种模式：讨论模式（默认，AI 只能看不能改）和干活模式（AI 能改项目文件，带存档点，可撤回）。
 以会议为单位：一场会议 = 标题 + 目标 + claude 一个固定会话 + codex 一个固定会话 + 聊天记录 + 附件。几场会议可以同时开、同时跑。
 
-- 开：双击 `start.bat`，会自动打开 http://127.0.0.1:8765 。关掉黑窗就是关服务。（后台常驻可以用 `pythonw roundtable.py`，设环境变量 `ROUNDTABLE_NO_BROWSER=1` 就不弹浏览器。）
+- 开：双击 `start.bat` 或 `open.pyw`，会在后台打开 http://127.0.0.1:8765 ，不弹终端窗口。关掉最后一个本机合拍页面几秒后服务自动退出。运行日志在 `data\cojam.log`；要前台运行看实时输出用 `python roundtable.py`，设环境变量 `ROUNDTABLE_NO_BROWSER=1` 就不弹浏览器。
 - 开会：第一次打开没有会议，会弹窗让你填标题、目标和工作文件夹。"新会议"建一场新的、这个标签页切过去，别的会议照常跑。详见下面"几场会议同时开"。
 - 归档：列表里每场有"归档 / 取消归档"，只是标记（`meeting.json` 的 `status` = `archived`），内容和 AI 会话都保留；归档的排到列表底部、灰显。老数据的 `status: closed` 读作已归档。
 - 每场会议各自的模型和 effort：点顶部 claude / codex 胶囊，里面可改"模型"（下拉预置 + 可手填）和 effort（第一项"默认"）。存在 `meeting.json` 的 `models`，空值 = 用会议室默认。胶囊上显示实际生效值，如 `claude-opus-5-5 · medium`。
@@ -126,7 +126,10 @@
   - codex：经 App Server `thread/resume` → `thread/compact/start` → 等 `turn/completed`（看到 `contextCompaction` 条目算压成）→ `thread/unsubscribe`。2026-10-14 实测（codex-cli 0.162.1）：上下文 30k → 24k，压完记忆还在。没压成就直说，不换会话；它快装不下时也会自己自动压（阈值 `-c model_auto_compact_token_limit=<字数>`）。`ROUNDTABLE_CODEX=exec` 时不支持手动压。
 - codex 的模型列表读 `~/.codex/models_cache.json`（codex 自己缓存的清单，只列 visibility=list 的），effort 选项按当前模型取。在终端里的 AI 会被跳过。
 - 电脑上 Enter 发送、Shift+Enter 换行；手机上 Enter 换行，点按钮发送。手机上顶部那排按钮收在 ☰ 菜单里。
-- 手机（iPhone）：电脑和手机都装 Tailscale，在电脑上运行 `tailscale serve --bg 8765`，再用 `tailscale serve status` 看到的 https 地址在手机 Safari 打开，可"添加到主屏幕"。
+- 手机 / 平板 / 另一台电脑：
+  - **同一个 WiFi**：不用装任何东西。应用启动时会在这台电脑的局域网地址上再开一个入口（默认 `8766`，可用 `ROUNDTABLE_LAN_PORT` 改）。「添加联系人 → 其他用户」里的接入地址默认就是它，生成邀请后直接显示二维码；手机扫码打开就能加入。Windows 第一次可能弹防火墙提示，勾选“专用网络”允许即可。
+  - **不在同一个局域网**：需要一条双方都能访问的 HTTPS 地址。可以电脑和手机都装 Tailscale 并登录同一个 tailnet，在电脑上运行 `tailscale serve --bg 8765`，把 `tailscale serve status` 显示的 https 地址填进“接入地址”；手机 Safari 打开后可“添加到主屏幕”。
+  - 局域网入口是 HTTP，适合家里或自己信任的 WiFi；公共 WiFi 可能开了设备隔离，手机连不上时先换回自己的热点试试。
 - 存储：`data\`（可用 `ROUNDTABLE_LOG_DIR` 改）
   - `current.txt`：最近打开的会话，供本机界面恢复使用。外部程序必须明确指定会话。
   - `meetings\<YYYY-MM-DD_HHMM>_<标题>\`：`meeting.json`（标题、目标 `announcement`、两个会话 id、每个 AI 的 last_seen / announcement_seen / handed_off、模型、工具开关 `tools`、状态 open/archived）、`log.md`（给人看）、`log.jsonl`（程序读，重启恢复用）、`files\`（附件）。

@@ -13,7 +13,40 @@ import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
+def _attach_console():
+    """GUI 程序从终端启动时接回父控制台，命令行子命令才有输出。"""
+    try:
+        import ctypes
+        if not ctypes.windll.kernel32.AttachConsole(-1):
+            return False
+        sys.stdout = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+        sys.stderr = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+        return True
+    except (AttributeError, OSError):
+        return False
+
+
+def ensure_stdio():
+    """没控制台时（双击打包好的应用）：先接父控制台，接不上就把输出写进 data/cojam.log。"""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    if _attach_console():
+        return
+    if getattr(sys, "frozen", False):
+        base = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    log_dir = os.environ.get("ROUNDTABLE_LOG_DIR") or os.path.join(base, "data")
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        stream = open(os.path.join(log_dir, "cojam.log"), "a", encoding="utf-8", buffering=1)
+    except OSError:
+        stream = open(os.devnull, "w", encoding="utf-8")
+    sys.stdout = sys.stderr = stream
+
+
 def main():
+    ensure_stdio()
     args = sys.argv[1:]
     cmd = args[0].lower() if args else ""
     if cmd == "member":
