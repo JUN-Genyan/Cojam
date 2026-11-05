@@ -58,6 +58,84 @@ assert.match(context.connectionBaseWarning('not a url'), /格式/);
         self.assertNotIn('qrserver', html + Path(root, 'static', 'connections.js').read_text(encoding='utf-8'))
 
 
+class DesktopOwnerTab(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
+    def test_owner_tab_validation_and_shared_instance(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const html = fs.readFileSync('index.html', 'utf8');
+const valid = 'A'.repeat(32);
+const idMatch = html.match(/function ownerTabId\(search\)\{[\s\S]*?\n\}/);
+assert.ok(idMatch, 'ownerTabId missing');
+const idContext = vm.createContext({URLSearchParams});
+vm.runInContext(idMatch[0], idContext);
+assert.equal(idContext.ownerTabId('?owner_tab=' + valid), valid);
+assert.equal(idContext.ownerTabId('?owner_tab=short'), '');
+assert.equal(idContext.ownerTabId('?owner_tab=' + 'B'.repeat(81)), '');
+assert.equal(idContext.ownerTabId('?owner_tab=' + encodeURIComponent('bad/id')), '');
+assert.equal(idContext.ownerTabId(''), '');
+
+function runOwner(search, reloaded, stored) {
+  const marker = '// Each owner tab registers separately.';
+  const begin = html.indexOf('(function(){', html.indexOf(marker));
+  const end = html.indexOf('})();', begin) + 5;
+  const source = html.slice(begin, end);
+  const calls = [], listeners = [], storedWrites = [];
+  const context = vm.createContext({
+    URLSearchParams,
+    crypto: {randomUUID: () => '11111111-2222-3333-4444-555555555555'},
+    performance: {getEntriesByType: () => [{type: reloaded ? 'reload' : 'navigate'}]},
+    sessionStorage: {getItem: () => stored, setItem: (key, value) => storedWrites.push([key, value])},
+    fetch: (url, options) => { calls.push({url, body: JSON.parse(options.body)}); return Promise.resolve(); },
+    setInterval: () => 1,
+    addEventListener: (type, handler) => listeners.push({type, handler}),
+    document: {getElementById: () => ({onclick: null})},
+    location: {search},
+    confirm: () => false, alert: () => {}
+  });
+  vm.runInContext(idMatch[0], context);
+  vm.runInContext(source, context);
+  return {calls, listeners, storedWrites};
+}
+
+let result = runOwner('?owner_tab=' + valid, false, null);
+assert.equal(result.calls[0].body.tab, valid);
+assert.equal(result.calls[0].body.instance, valid);
+assert.equal(result.storedWrites.length, 0);
+assert.equal(result.listeners.some(item => item.type === 'beforeunload'), false);
+assert.equal(result.listeners.some(item => item.type === 'pagehide'), true);
+
+result = runOwner('', true, 'stored-tab-value');
+assert.equal(result.calls[0].body.tab, 'stored-tab-value');
+assert.equal(result.calls[0].body.instance, '11111111222233334444555555555555');
+assert.deepEqual(result.storedWrites, [['cojam_owner_tab', 'stored-tab-value']]);
+assert.equal(result.listeners.some(item => item.type === 'beforeunload'), true);
+
+result = runOwner('?owner_tab=short');
+assert.equal(result.calls[0].body.tab, '11111111222233334444555555555555');
+assert.equal(result.storedWrites.length, 1);
+
+const roomMatch = html.match(/function switchRoom\(id,replace\)\{[\s\S]*?\n\}/);
+assert.ok(roomMatch, 'switchRoom missing');
+let pushed = null;
+const roomContext = vm.createContext({
+  RID: null, resetRoomView: () => {}, post: () => {}, api: () => '', drawRooms: () => {},
+  poll: () => Promise.resolve(), feed: {scrollTop: 0, scrollHeight: 0}, queueJump: () => {},
+  location: {search: '?owner_tab=' + valid},
+  history: {replaceState: (state, title, url) => { pushed = url; },
+            pushState: (state, title, url) => { pushed = url; }},
+  encodeURIComponent, URLSearchParams
+});
+vm.runInContext(roomMatch[0], roomContext);
+roomContext.switchRoom('room-1', true);
+assert.ok(pushed.includes('owner_tab=' + valid), pushed);
+assert.ok(pushed.includes('r=room-1'), pushed);
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 class BrowserErrors(unittest.TestCase):
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
     def test_legacy_backend_and_http_errors_are_actionable(self):

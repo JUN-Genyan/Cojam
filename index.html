@@ -534,13 +534,22 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
 <script>
 (function(){const m=document.querySelector('meta[name=rt-token]'),t=m?m.content:'';if(!t)return;const f=window.fetch;window.fetch=function(u,o){o=o||{};const h=new Headers(o.headers||{});h.set('X-RT-Token',t);o.headers=h;return f.call(this,u,o)}})();
 // Each owner tab registers separately. A short grace period permits reload and tab handoff.
-(function(){
-  const instance=crypto.randomUUID().replace(/-/g,''), endpoint='/api/ui/session';
-  let tab=instance;
+function ownerTabId(search){
   try{
-    const navigation=performance.getEntriesByType('navigation')[0];
-    if(navigation&&navigation.type==='reload')tab=sessionStorage.getItem('cojam_owner_tab')||instance;
-    sessionStorage.setItem('cojam_owner_tab',tab);
+    const id=new URLSearchParams(search).get('owner_tab')||'';
+    return /^[A-Za-z0-9_-]{16,80}$/.test(id)?id:'';
+  }catch(e){return ''}
+}
+(function(){
+  const desktop=ownerTabId(location.search);
+  const instance=desktop||crypto.randomUUID().replace(/-/g,''), endpoint='/api/ui/session';
+  let tab=desktop||instance;
+  try{
+    if(!desktop){
+      const navigation=performance.getEntriesByType('navigation')[0];
+      if(navigation&&navigation.type==='reload')tab=sessionStorage.getItem('cojam_owner_tab')||instance;
+      sessionStorage.setItem('cojam_owner_tab',tab);
+    }
   }catch(e){}
   let exiting=false;
   const hasActiveJobs=()=>((typeof lastRun!=='undefined'&&(lastRun.running.length||lastRun.queued))||(typeof ROOMS!=='undefined'&&ROOMS.some(r=>(Array.isArray(r.running)?r.running.length:!!r.running)||r.queued)));
@@ -549,7 +558,7 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
   const timer=setInterval(()=>{if(!exiting)report('ping')},30000);
   addEventListener('pageshow',event=>{if(event.persisted&&!exiting)report('open')});
   addEventListener('pagehide',()=>{if(!exiting)report('close')});
-  addEventListener('beforeunload',event=>{if(!exiting&&hasActiveJobs()){event.preventDefault();event.returnValue=''}});
+  if(!desktop)addEventListener('beforeunload',event=>{if(!exiting&&hasActiveJobs()){event.preventDefault();event.returnValue=''}});
   document.getElementById('quitApp').onclick=async()=>{
     if(hasActiveJobs()&&!confirm('还有任务正在运行或排队，退出会中断这些任务。确定退出合拍吗？'))return;
     const [ok,j]=await post('/api/server/exit',{});
@@ -1340,7 +1349,9 @@ function resetRoomView(){
 function switchRoom(id,replace){
   if(!id)return;
   if(id!==RID){RID=id;resetRoomView()}
-  const u='?r='+encodeURIComponent(id);
+  const params=new URLSearchParams(location.search);
+  params.set('r',id);
+  const u='?'+params.toString();
   if(location.search!==u)(replace?history.replaceState:history.pushState).call(history,{r:id},'',u);
   post(api('open'),{});
   drawRooms();
