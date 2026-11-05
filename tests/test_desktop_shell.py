@@ -12,11 +12,12 @@ import time
 import unittest
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from desktop_shell import backend
+from desktop_shell import main as shell_main
 
 
 class State:
@@ -200,6 +201,173 @@ class ShellTest(unittest.TestCase):
             with patch.dict(os.environ, {}, clear=True):
                 self.assertEqual(backend.log_path("C:/core"),
                                  os.path.join("C:/core", "data", "cojam.log"))
+
+
+class FakeEvent:
+    def __init__(self):
+        self.items = []
+
+    def __iadd__(self, handler):
+        self.items.append(handler)
+        return self
+
+
+class FakeEvents:
+    def __init__(self):
+        self.closing = FakeEvent()
+
+
+class FakeWindow:
+    def __init__(self):
+        self.events = FakeEvents()
+
+
+class FakeWebview:
+    def __init__(self):
+        self.settings = {"OPEN_EXTERNAL_LINKS_IN_BROWSER": False}
+        self.created = None
+        self.started = False
+
+    def create_window(self, title, url, **kwargs):
+        self.created = dict(title=title, url=url, **kwargs)
+        self.window = FakeWindow()
+        return self.window
+
+    def start(self, **kwargs):
+        self.started = kwargs
+
+
+class WindowAndFlow(unittest.TestCase):
+    def test_open_window_uses_native_window_settings(self):
+        fake = FakeWebview()
+        handler = Mock()
+        shell_main.open_window("http://127.0.0.1:8765/?owner_tab=" + "a" * 32, handler, module=fake)
+        self.assertEqual(fake.created["title"], "合拍 Cojam")
+        self.assertEqual(fake.created["url"], "http://127.0.0.1:8765/?owner_tab=" + "a" * 32)
+        self.assertEqual((fake.created["width"], fake.created["height"]), (1280, 860))
+        self.assertEqual(fake.created["min_size"], (960, 640))
+        self.assertEqual(fake.window.events.closing.items, [handler])
+        self.assertTrue(fake.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"])
+        self.assertEqual(fake.started, {})
+
+    def test_confirm_close_skips_when_idle(self):
+        with patch.object(shell_main.backend, "busy", return_value=False), \
+                patch.object(shell_main, "show_confirm") as ask:
+            self.assertTrue(shell_main.confirm_close("http://base", "token"))
+        ask.assert_not_called()
+
+    def test_confirm_close_asks_when_busy(self):
+        with patch.object(shell_main.backend, "busy", return_value=True), \
+                patch.object(shell_main, "show_confirm", return_value=False) as ask:
+            self.assertFalse(shell_main.confirm_close("http://base", "token"))
+        ask.assert_called_once()
+        with patch.object(shell_main.backend, "busy", return_value=True), \
+                patch.object(shell_main, "show_confirm", return_value=True):
+            self.assertTrue(shell_main.confirm_close("http://base", "token"))
+
+    def test_missing_core(self):
+        with patch.object(shell_main.backend, "find_core", return_value=None), \
+                patch.object(shell_main.backend, "probe") as probe, \
+                patch.object(shell_main, "show_error") as error:
+            self.assertEqual(shell_main.main(), 2)
+        probe.assert_not_called()
+        self.assertIn("同一个文件夹", error.call_args.args[0])
+
+    def test_foreign_or_timeout_port_is_rejected(self):
+        for state in ("foreign", "timeout"):
+            with self.subTest(state=state), \
+                    patch.object(shell_main.backend, "find_core", return_value=(["core"], "C:/core")), \
+                    patch.object(shell_main.backend, "probe", return_value=(state, None)), \
+                    patch.object(shell_main.backend, "spawn_core") as spawn, \
+                    patch.object(shell_main, "show_error") as error:
+                self.assertEqual(shell_main.main(), 2)
+                spawn.assert_not_called()
+                self.assertIn("占用", error.call_args.args[0])
+
+    def test_free_port_starts_core_and_opens_window(self):
+        base = shell_main.base_url()
+        heartbeat = Mock()
+        with patch.object(shell_main.backend, "find_core", return_value=(["core.exe"], "C:/core")), \
+                patch.object(shell_main.backend, "probe", return_value=("free", None)), \
+                patch.object(shell_main.backend, "spawn_core", return_value=Mock()) as spawn, \
+                patch.object(shell_main.backend, "wait_ready", return_value={"app": "AI Bridge"}), \
+                patch.object(shell_main.backend, "fetch_token", return_value="token"), \
+                patch.object(shell_main.backend, "new_tab_id", return_value="T" * 32), \
+                patch.object(shell_main.backend, "TabHeartbeat", return_value=heartbeat) as beat_class, \
+                patch.object(shell_main, "open_window") as window, \
+                patch.object(shell_main, "show_error") as error:
+            self.assertEqual(shell_main.main(), 0)
+        spawn.assert_called_once_with(["core.exe"], "C:/core")
+        self.assertEqual(beat_class.call_args.args, (base, "token", "T" * 32))
+        heartbeat.start.assert_called_once()
+        self.assertEqual(window.call_args.args[0], base + "/?owner_tab=" + "T" * 32)
+        self.assertEqual(heartbeat.stop.call_count, 1)
+        error.assert_not_called()
+
+    def test_existing_backend_is_reused(self):
+        with patch.object(shell_main.backend, "find_core", return_value=(["core.exe"], "C:/core")), \
+                patch.object(shell_main.backend, "probe", return_value=("cojam", {"app": "AI Bridge"})), \
+                patch.object(shell_main.backend, "spawn_core") as spawn, \
+                patch.object(shell_main.backend, "fetch_token", return_value="token"), \
+                patch.object(shell_main.backend, "TabHeartbeat", return_value=Mock()), \
+                patch.object(shell_main, "open_window"), \
+                patch.object(shell_main, "show_error") as error:
+            self.assertEqual(shell_main.main(), 0)
+        spawn.assert_not_called()
+        error.assert_not_called()
+
+    def test_backend_start_failure_stops_spawned_process(self):
+        proc = Mock()
+        with patch.object(shell_main.backend, "find_core", return_value=(["core.exe"], "C:/core")), \
+                patch.object(shell_main.backend, "probe", return_value=("free", None)), \
+                patch.object(shell_main.backend, "spawn_core", return_value=proc), \
+                patch.object(shell_main.backend, "wait_ready", return_value=None), \
+                patch.object(shell_main.backend, "stop_process") as stop, \
+                patch.object(shell_main.backend, "log_path", return_value="C:/core/data/cojam.log"), \
+                patch.object(shell_main, "show_error") as error:
+            self.assertEqual(shell_main.main(), 2)
+        stop.assert_called_once_with(proc)
+        self.assertIn("C:/core/data/cojam.log", error.call_args.args[0])
+
+    def test_token_failure_stops_spawned_process(self):
+        proc = Mock()
+        with patch.object(shell_main.backend, "find_core", return_value=(["core.exe"], "C:/core")), \
+                patch.object(shell_main.backend, "probe", return_value=("free", None)), \
+                patch.object(shell_main.backend, "spawn_core", return_value=proc), \
+                patch.object(shell_main.backend, "wait_ready", return_value={"app": "AI Bridge"}), \
+                patch.object(shell_main.backend, "fetch_token", side_effect=RuntimeError("old")), \
+                patch.object(shell_main.backend, "stop_process") as stop, \
+                patch.object(shell_main, "show_error") as error:
+            self.assertEqual(shell_main.main(), 2)
+        stop.assert_called_once_with(proc)
+        self.assertIn("版本不兼容", error.call_args.args[0])
+
+    def test_window_failure_falls_back_to_browser(self):
+        heartbeat = Mock()
+        with patch.object(shell_main.backend, "find_core", return_value=(["core.exe"], "C:/core")), \
+                patch.object(shell_main.backend, "probe", return_value=("cojam", {"app": "AI Bridge"})), \
+                patch.object(shell_main.backend, "fetch_token", return_value="token"), \
+                patch.object(shell_main.backend, "TabHeartbeat", return_value=heartbeat), \
+                patch.object(shell_main, "open_window", side_effect=ImportError("no webview")), \
+                patch.object(shell_main.webbrowser, "open", return_value=True) as browser, \
+                patch.object(shell_main, "show_error") as error:
+            self.assertEqual(shell_main.main(), 0)
+        browser.assert_called_once()
+        heartbeat.stop.assert_not_called()
+        self.assertIn("已改用浏览器", error.call_args.args[0])
+
+    def test_window_and_browser_failure_unregisters_tab(self):
+        heartbeat = Mock()
+        with patch.object(shell_main.backend, "find_core", return_value=(["core.exe"], "C:/core")), \
+                patch.object(shell_main.backend, "probe", return_value=("cojam", {"app": "AI Bridge"})), \
+                patch.object(shell_main.backend, "fetch_token", return_value="token"), \
+                patch.object(shell_main.backend, "TabHeartbeat", return_value=heartbeat), \
+                patch.object(shell_main, "open_window", side_effect=RuntimeError("boom")), \
+                patch.object(shell_main.webbrowser, "open", return_value=False), \
+                patch.object(shell_main, "show_error") as error:
+            self.assertEqual(shell_main.main(), 2)
+        heartbeat.stop.assert_called_once()
+        self.assertIn("浏览器", error.call_args.args[0])
 
 
 class FindCore(unittest.TestCase):
