@@ -66,5 +66,27 @@ class Packaging(unittest.TestCase):
         self.assertNotIn("pause", starter)
 
 
+class DesktopPackaging(unittest.TestCase):
+    def test_optional_dependency_and_build_script(self):
+        import tomllib
+        config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertEqual(config["project"]["dependencies"], [])
+        self.assertIn("pywebview>=5.3", config["project"]["optional-dependencies"]["desktop"])
+        build = (ROOT / "build_desktop.ps1").read_text(encoding="utf-8-sig")
+        for token in ("--onefile", "--windowed", "--collect-all", "webview",
+                      "desktop_launcher.py", "roundtable.ico"):
+            self.assertIn(token, build)
+
+    def test_release_includes_desktop_zip_and_readme(self):
+        readme = (ROOT / "packaging" / "desktop-readme.txt").read_text(encoding="utf-8")
+        for token in ("Cojam.exe", "CojamCore.exe", "同一个文件夹", "WebView2", "浏览器"):
+            self.assertIn(token, readme)
+        release = (ROOT / "packaging" / "build_release.py").read_text(encoding="utf-8")
+        for token in ("Cojam-Desktop-", "CojamCore.exe", "desktop-readme.txt"):
+            self.assertIn(token, release)
+        member = (ROOT / "packaging" / "connect-member.bat").read_text(encoding="utf-8-sig")
+        self.assertLess(member.index("CojamCore.exe"), member.index("Cojam.exe"))
+
+
 if __name__ == "__main__":
     unittest.main()

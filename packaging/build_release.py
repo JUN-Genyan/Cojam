@@ -31,3 +31,21 @@ with zipfile.ZipFile(target) as archive:
     assert archive.testzip() is None
 print(target)
 print(connector)
+desktop_exe = DIST/'CojamDesktop.exe'
+if desktop_exe.is_file():
+    core_exe = DIST/'Cojam.exe'
+    if not core_exe.is_file():
+        raise RuntimeError('桌面版需要先构建 dist/Cojam.exe')
+    desktop = DIST/('Cojam-Desktop-%s-win64.zip' % VERSION)
+    with zipfile.ZipFile(desktop, 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.write(desktop_exe, 'Cojam.exe')
+        archive.write(core_exe, 'CojamCore.exe')
+        archive.write(ROOT/'packaging'/'desktop-readme.txt', 'README.txt')
+        archive.write(ROOT/'LICENSE', 'LICENSE')
+        archive.write(ROOT/'packaging'/'connect-member.bat', '连接其他会议室.bat')
+        for source, name in [('docs/CONTACTS.md','CONTACTS.md'), ('docs/MEMBERS.md','MEMBERS.md'),
+                             ('docs/PROVIDERS.md','PROVIDERS.md'), ('examples/contact_client.py','contact_client.py')]:
+            archive.write(ROOT/source, name)
+    with zipfile.ZipFile(desktop) as archive:
+        assert archive.testzip() is None
+    print(desktop)

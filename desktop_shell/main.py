@@ -59,7 +59,7 @@ def main():
     base = base_url()
     core = backend.find_core()
     if core is None:
-        show_error("找不到 Cojam.exe。请把 CojamDesktop.exe 和 Cojam.exe 放在同一个文件夹里。")
+        show_error("找不到 CojamCore.exe。请把 Cojam.exe 和 CojamCore.exe 放在同一个文件夹里。")
         return 2
     state, info = backend.probe(base)
     if state in ("foreign", "timeout"):

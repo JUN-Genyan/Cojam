@@ -25,6 +25,60 @@ assert.equal(context.invitationKey(''), '');
         result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
+    def test_join_page_script_runs_and_autoconnects_from_hash(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const html = fs.readFileSync('static/join.html', 'utf8');
+const source = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const key = 'VOTx5vAXUUhog34gr3_xomX_RhsF4KLFcpklNsDCVrA';
+const elements = {};
+function node(id) {
+  if (!elements[id]) elements[id] = {
+    id, value: '', textContent: '', disabled: false, onclick: null, onsubmit: null,
+    children: [], replaceChildren() { this.children = []; },
+    append(child) { this.children.push(child); },
+    classList: { toggle() {} }, scrollTop: 0, scrollHeight: 0
+  };
+  return elements[id];
+}
+const calls = [], historyCalls = [];
+const context = vm.createContext({
+  URL, URLSearchParams,
+  document: { getElementById: node, createElement: () => node('created-' + Math.random()) },
+  location: { hash: '#key=' + key, pathname: '/join', search: '' },
+  history: { replaceState: (state, title, url) => historyCalls.push(url) },
+  setInterval: () => 0,
+  fetch: async (url, options) => {
+    calls.push({ url, auth: (options.headers || {}).Authorization, body: options.body });
+    if (url === '/api/external/hello') return { ok: true, json: async () => ({ contact: { label: '测试联系人', kind: 'user' } }) };
+    if (url === '/api/external/rooms') return { ok: true, json: async () => ({
+      contact: { label: '测试联系人', kind: 'user' }, rooms: [{ id: 'room-1', title: '测试会议' }]
+    }) };
+    if (url.startsWith('/api/external/messages')) return { ok: true, json: async () => ({ messages: [], next: 0, permissions: { post: false } }) };
+    throw Error('unexpected ' + url);
+  }
+});
+vm.runInContext(source, context);
+setTimeout(() => {
+  try {
+    assert.equal(calls[0].url, '/api/external/hello');
+    assert.equal(calls[0].auth, 'Bearer ' + key);
+    assert.equal(historyCalls.length, 1);
+    assert.equal(historyCalls[0], '/join');
+    assert.equal(node('key').value, '');
+    assert.match(node('identity').textContent, /测试联系人/);
+    assert.equal(node('list').children.length, 1);
+    assert.equal(node('title').textContent, '测试会议');
+    assert.ok(calls.some(call => call.url.startsWith('/api/external/messages?room=room-1')),
+              'a single invited room should open automatically');
+  } catch (error) { console.error(error); process.exitCode = 1; }
+}, 20);
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
 
 class LanInvite(unittest.TestCase):
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')

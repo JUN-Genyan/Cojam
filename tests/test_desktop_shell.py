@@ -386,6 +386,20 @@ class FindCore(unittest.TestCase):
             found = backend.find_core(frozen=True, executable=str(Path(tmp) / "CojamDesktop.exe"))
             self.assertEqual(found, ([str(core)], tmp))
 
+    def test_packaged_mode_prefers_core_exe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shell = Path(tmp) / "Cojam.exe"
+            core = Path(tmp) / "CojamCore.exe"
+            shell.write_bytes(b"shell")
+            core.write_bytes(b"core")
+            found = backend.find_core(frozen=True, executable=str(shell))
+            self.assertEqual(found, ([str(core)], tmp))
+
+    def test_packaged_mode_does_not_spawn_itself(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "Cojam.exe").write_bytes(b"shell")
+            self.assertIsNone(backend.find_core(frozen=True, executable=str(Path(tmp) / "Cojam.exe")))
+
     def test_packaged_mode_without_core(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertIsNone(backend.find_core(frozen=True, executable=str(Path(tmp) / "CojamDesktop.exe")))

@@ -15,6 +15,7 @@ import urllib.request
 
 APP_NAME = "AI Bridge"
 TAB_RE = re.compile(r"^[A-Za-z0-9_-]{16,80}$")
+CORE_NAMES = ("CojamCore.exe", "Cojam.exe") if os.name == "nt" else ("CojamCore", "Cojam")
 
 
 def find_core(frozen=None, executable=None):
@@ -22,8 +23,11 @@ def find_core(frozen=None, executable=None):
     executable = sys.executable if executable is None else executable
     exe_dir = Path(executable).resolve().parent
     if frozen:
-        core = exe_dir / "Cojam.exe"
-        return ([str(core)], str(exe_dir)) if core.is_file() else None
+        for name in CORE_NAMES:
+            core = exe_dir / name
+            if core.is_file() and core.resolve() != Path(executable).resolve():
+                return [str(core)], str(exe_dir)
+        return None
     repo = Path(__file__).resolve().parents[1]
     script = repo / "roundtable.py"
     if not script.is_file():
