@@ -80,6 +80,102 @@ setTimeout(() => {
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+class GuestIdentity(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
+    def test_helpers_and_page_redeem_flow(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const html = fs.readFileSync('static/join.html', 'utf8');
+const match = html.match(/function invitationValue\(value\) \{[\s\S]*?\n\}/);
+assert.ok(match, 'invitationValue missing');
+const helpers = vm.createContext({URL, URLSearchParams});
+vm.runInContext(match[0], helpers);
+assert.equal(helpers.invitationValue('http://192.168.1.5:8766/join#invite=inv_abc.def'), 'inv_abc.def');
+assert.equal(helpers.invitationValue('  inv_abc.def  '), 'inv_abc.def');
+assert.equal(helpers.invitationValue('http://192.168.1.5:8766/join#key=keyvalue'), '');
+
+const source = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const elements = {};
+function node(id) {
+  if (!elements[id]) elements[id] = {
+    id, value: '', textContent: '', hidden: false, disabled: false, onclick: null, onsubmit: null,
+    children: [], replaceChildren() { this.children = []; }, append(c) { this.children.push(c); },
+    classList: { toggle() {}, add() {}, remove() {} }, scrollTop: 0, scrollHeight: 0, focus() {}
+  };
+  return elements[id];
+}
+const calls = [], historyCalls = [], saved = {};
+const store = {getItem: k => (k in saved ? saved[k] : null), setItem: (k, v) => { saved[k] = String(v); },
+               removeItem: k => { delete saved[k]; }};
+const context = vm.createContext({
+  URL, URLSearchParams,
+  document: { getElementById: node, createElement: () => node('created-' + Math.random()) },
+  location: { hash: '#invite=inv_abc.def', pathname: '/join', search: '' },
+  history: { replaceState: (state, title, url) => historyCalls.push(url) },
+  localStorage: store,
+  setInterval: () => 0,
+  navigator: { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Safari/604.1' },
+  crypto: { getRandomValues: array => { array.fill(7); return array; } },
+  fetch: async (url, options) => {
+    calls.push({ url, auth: (options.headers || {}).Authorization, body: options.body ? JSON.parse(options.body) : null });
+    if (url === '/api/guest/redeem') return { ok: true, json: async () => ({
+      ok: true, token: 'guest-secret', contact: { id: 'guest-11111111', label: '访客' },
+      room: 'room-1', rooms: [{ id: 'room-1', title: '测试会话' }], created: true
+    }) };
+    if (url === '/api/external/hello') return { ok: true, json: async () => ({ contact: { label: '访客', kind: 'user' } }) };
+    if (url === '/api/external/rooms') return { ok: true, json: async () => ({
+      contact: { label: '访客', kind: 'user' }, rooms: [{ id: 'room-1', title: '测试会话' }]
+    }) };
+    if (url.startsWith('/api/external/messages')) return { ok: true, json: async () => ({ messages: [], next: 0, permissions: { post: true } }) };
+    throw Error('unexpected ' + url);
+  }
+});
+node('namePrompt').hidden = true;
+vm.runInContext(source, context);
+setTimeout(() => {
+  try {
+    assert.equal(node('namePrompt').hidden, false, 'name prompt should be shown before redeeming');
+    assert.equal(calls.length, 0, 'redeem must wait for the name');
+    node('nameConfirm').onclick();
+    setTimeout(() => {
+      try {
+        assert.ok(calls.some(c => c.url === '/api/guest/redeem'));
+        const redeem = calls.find(c => c.url === '/api/guest/redeem');
+        assert.equal(redeem.body.invite, 'inv_abc.def');
+        assert.match(redeem.body.device_key, /^[0-9a-f]{64}$/);
+        assert.equal(saved.cojam_guest_token, 'guest-secret');
+        assert.equal(historyCalls[0], '/join');
+        assert.ok(calls.some(c => c.url === '/api/external/rooms'));
+      } catch (error) { console.error(error); process.exitCode = 1; }
+    }, 20);
+  } catch (error) { console.error(error); process.exitCode = 1; }
+}, 20);
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class GuestWizard(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
+    def test_invite_url_and_status_labels(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const js = fs.readFileSync('static/connections.js', 'utf8');
+const context = vm.createContext({uiIcon: () => '', URL, Date});
+vm.runInContext(js, context);
+assert.equal(context.connectionGuestUrl('http://192.168.1.9:8766/', 'inv_abc.def'),
+             'http://192.168.1.9:8766/join#invite=inv_abc.def');
+assert.equal(context.connectionInviteStatus({revoked: true}), '已撤销');
+assert.equal(context.connectionInviteStatus({expires: 1}), '已过期');
+assert.equal(context.connectionInviteStatus({expires: 9999999999, guest_count: 2}), '已加入 2 位游客');
+assert.equal(context.connectionInviteStatus({expires: 9999999999, guest_count: 0}), '等待加入');
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 class LanInvite(unittest.TestCase):
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
     def test_lan_base_and_loopback_warning(self):
@@ -94,6 +190,12 @@ assert.equal(context.connectionDefaultBase('user', {lan_url: lan}, origin), lan)
 assert.equal(context.connectionDefaultBase('external', {lan_url: lan}, origin), lan);
 assert.equal(context.connectionDefaultBase('http', {lan_url: lan}, origin), origin);
 assert.equal(context.connectionDefaultBase('user', {}, origin), origin);
+assert.equal(context.connectionDefaultBase('mydevice',
+  {tailscale_url: 'http://100.64.0.5:8767', lan_url: lan}, origin),
+  'http://100.64.0.5:8767');
+assert.equal(context.connectionDefaultBase('mydevice', {lan_url: lan}, origin), lan);
+assert.equal(context.connectionDefaultBase('mydevice', {}, origin), origin);
+assert.ok(vm.runInContext('CONNECTION_TYPES.mydevice', context));
 assert.match(context.connectionBaseWarning('http://127.0.0.1:8765'), /只有这台电脑/);
 assert.match(context.connectionBaseWarning('http://localhost:8765'), /只有这台电脑/);
 assert.match(context.connectionBaseWarning('http://[::1]:8765'), /只有这台电脑/);
@@ -148,7 +250,10 @@ function runOwner(search, reloaded, stored) {
     location: {search},
     confirm: () => false, alert: () => {}
   });
+  const instanceMatch = html.match(/function ownerInstance\(\)\{[\s\S]*?\n\}/);
+  assert.ok(instanceMatch, 'ownerInstance missing');
   vm.runInContext(idMatch[0], context);
+  vm.runInContext(instanceMatch[0], context);
   vm.runInContext(source, context);
   return {calls, listeners, storedWrites};
 }
@@ -190,6 +295,64 @@ assert.ok(pushed.includes('r=room-1'), pushed);
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+class InsecureContext(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
+    def test_owner_tab_registers_without_random_uuid(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const html = fs.readFileSync('index.html', 'utf8');
+const marker = '// Each owner tab registers separately.';
+const begin = html.indexOf('(function(){', html.indexOf(marker));
+const end = html.indexOf('})();', begin) + 5;
+const source = html.slice(begin, end);
+const calls = [], storedWrites = [];
+const context = vm.createContext({
+  URLSearchParams,
+  crypto: {},
+  performance: {getEntriesByType: () => [{type: 'navigate'}]},
+  sessionStorage: {getItem: () => null, setItem: (key, value) => storedWrites.push([key, value])},
+  fetch: (url, options) => { calls.push({url, body: JSON.parse(options.body)}); return Promise.resolve(); },
+  setInterval: () => 1,
+  addEventListener: () => {},
+  document: {getElementById: () => ({onclick: null})},
+  location: {search: ''}, confirm: () => false, alert: () => {}
+});
+const idMatch = html.match(/function ownerTabId\(search\)\{[\s\S]*?\n\}/);
+assert.ok(idMatch, 'ownerTabId missing');
+const instanceMatch = html.match(/function ownerInstance\(\)\{[\s\S]*?\n\}/);
+assert.ok(instanceMatch, 'ownerInstance missing');
+vm.runInContext(idMatch[0], context);
+vm.runInContext(instanceMatch[0], context);
+vm.runInContext(source, context);
+assert.equal(calls.length, 1);
+const id = calls[0].body.instance;
+assert.match(id, /^[A-Za-z0-9_-]{16,80}$/);
+assert.equal(calls[0].body.tab, id);
+assert.deepEqual(storedWrites, [['cojam_owner_tab', id]]);
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class DeviceWizard(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
+    def test_device_code_url_and_name(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const js = fs.readFileSync('static/connections.js', 'utf8');
+const context = vm.createContext({uiIcon: () => '', URL});
+vm.runInContext(js, context);
+assert.equal(context.connectionDeviceName('  '), '我的设备');
+assert.equal(context.connectionDeviceName('  我的 iPhone  '), '我的 iPhone');
+assert.equal(context.connectionDeviceUrl('http://192.168.1.9:8766', 'code_abc.def'),
+             'http://192.168.1.9:8766/enroll#code=code_abc.def');
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 class BrowserErrors(unittest.TestCase):
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
     def test_legacy_backend_and_http_errors_are_actionable(self):
@@ -213,11 +376,14 @@ vm.runInContext(js.match(/async function checkConnectionBackend\(\) \{[\s\S]*?\n
  context.fetch = async () => {throw Error('connection refused')};
  result = await context.post('/api/agents/add', {});
  assert.equal(result[0], false); assert.match(result[1].error, /无法连接/);
- context.fetch = async () => ({ok:true,json:async()=>({app:'AI Bridge',version:'old',api_revision:1})});
- await assert.rejects(context.checkConnectionBackend(), /版本不一致/);
  const version = fs.readFileSync('pyproject.toml','utf8').match(/^version = "([^"]+)"/m)[1];
- context.fetch = async () => ({ok:true,json:async()=>({app:'AI Bridge',version,api_revision:1})});
+ const revision = Number(fs.readFileSync('bridge/version.py','utf8').match(/^API_REVISION = (\d+)/m)[1]);
+ context.fetch = async () => ({ok:true,json:async()=>({app:'AI Bridge',version:'old',api_revision:revision})});
+ await assert.rejects(context.checkConnectionBackend(), /版本不一致/);
+ context.fetch = async () => ({ok:true,json:async()=>({app:'AI Bridge',version,api_revision:revision})});
  await context.checkConnectionBackend();
+ context.fetch = async () => ({ok:true,json:async()=>({app:'AI Bridge',version,api_revision:revision+1})});
+ await assert.rejects(context.checkConnectionBackend(), /版本不一致/);
 })().catch(error=>{console.error(error);process.exitCode=1});
 '''
         result = subprocess.run(['node','-e',script],cwd=root,capture_output=True,text=True,timeout=15)

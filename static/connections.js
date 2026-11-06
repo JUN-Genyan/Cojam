@@ -7,11 +7,12 @@ async function checkConnectionBackend() {
     if (!response.ok) throw Error();
     info = await response.json();
   } catch (e) { throw Error('当前仍在运行旧版后台，无法配置接入。请退出旧后台并重新打开合拍 Cojam；只刷新网页不会更新后台。'); }
-  if (info.app !== 'AI Bridge' || info.version !== '2.5.2' || info.api_revision !== 1)
+  if (info.app !== 'AI Bridge' || info.version !== '2.6.0' || info.api_revision !== 2)
     throw Error('界面与后台版本不一致。请重新打开最新的合拍 Cojam，再刷新此页面。');
   return info;
 }
 function connectionDefaultBase(type, info, origin) {
+  if (type === 'mydevice') return (info && info.tailscale_url) || (info && info.lan_url) || origin;
   return ['user', 'external'].includes(type) && info && info.lan_url ? info.lan_url : origin;
 }
 function connectionBaseWarning(base) {
@@ -22,10 +23,11 @@ function connectionBaseWarning(base) {
   return '';
 }
 const CONNECTION_TYPES = {
+  mydevice: ['我的设备', '手机、平板或另一台电脑获得完整界面，并以「我」的身份参与。', uiIcon('device')],
   local: ['本机 Agent', '检测这台电脑上的 Claude、Codex 或自定义 CLI，直接调用，不需要接入密钥。', uiIcon('terminal')],
   external: ['其他设备上的 Harness', '作为同一个会议室的成员，自动接收任务、回复，并互相 @。', uiIcon('device')],
   http: ['HTTP 服务', '填写你自己的 Harness 服务地址，由本应用主动调用并测试回复。', uiIcon('link')],
-  user: ['其他用户', '生成网页邀请，对方打开并连接后，选择允许参与的会话。', uiIcon('user')]
+  user: ['其他用户', '生成邀请票；对方打开链接领取身份，只进指定会话。同一设备之后仍是同一个人。', uiIcon('user')]
 };
 function stopConnectionWizard() {
   if (connectionWizard) { clearInterval(connectionWizard.timer); connectionWizard.token = ''; }
@@ -34,6 +36,97 @@ function stopConnectionWizard() {
 function connectionModalChanged() {
   const box = document.getElementById('connectionWizard');
   if (connectionWizard && (!box || box.dataset.flow !== String(connectionWizard.seq))) stopConnectionWizard();
+}
+async function connectionGet(url) {
+  const response = await fetch(url);
+  let data = {};
+  try { data = await response.json(); } catch (e) {}
+  return [response.ok, data];
+}
+async function renderDeviceSetup(w) {
+  const select = document.getElementById('connDeviceBase');
+  const hint = document.getElementById('connDeviceBaseHint');
+  const options = [];
+  if (w.info && w.info.tailscale_url) options.push([w.info.tailscale_url, 'Tailscale（完整界面）']);
+  if (w.info && w.info.lan_url) options.push([w.info.lan_url, '局域网']);
+  options.push([location.origin, '当前地址']);
+  select.innerHTML = options.map(([value, label]) => '<option value="' + esc(value) + '">' + esc(label) + '</option>').join('');
+  select.value = w.base;
+  const showHint = () => {
+    const issue = connectionBaseWarning(w.base);
+    hint.textContent = issue || '用要接入的设备扫描二维码或打开链接。只发给可信设备。';
+    hint.classList.toggle('warn', !!issue);
+  };
+  select.onchange = () => { w.base = select.value; showHint(); };
+  showHint();
+  document.getElementById('connDeviceCreate').onclick = () => generateDeviceCode(w);
+  try {
+    const [ok, data] = await connectionGet('/api/devices');
+    if (!ok) throw Error(data.error || '读取设备失败');
+    w.account = data.account;
+    w.devices = data.devices || [];
+    renderDeviceList(w);
+  } catch (error) {
+    document.getElementById('connDeviceList').textContent = error.message;
+  }
+}
+function renderDeviceList(w) {
+  const box = document.getElementById('connDeviceList');
+  if (!box) return;
+  box.innerHTML = (w.devices || []).map(device =>
+    '<div class="connection-device"><span><b>' + esc(device.label) + '</b><small>'
+    + (device.online ? '在线' : '最近在线 ' + new Date((device.last_seen || device.created) * 1000).toLocaleString())
+    + ' · @' + esc(device.id) + '</small></span>'
+    + (device.current ? '<small>当前设备</small>' : '<button data-device-revoke="' + esc(device.id) + '">撤销</button>')
+    + '</div>').join('') || '<p class="hint">还没有接入其他设备。</p>';
+  box.querySelectorAll('[data-device-revoke]').forEach(button => {
+    button.onclick = () => revokeDevice(w, button.dataset.deviceRevoke);
+  });
+}
+async function revokeDevice(w, id) {
+  if (!confirm('撤销后，这台设备下次请求就会失去完整界面。继续？')) return;
+  const [ok, data] = await post('/api/devices/revoke', {id});
+  if (!ok) return wizardError(data.error || '撤销失败');
+  const [listOk, listing] = await connectionGet('/api/devices');
+  if (listOk) { w.devices = listing.devices || []; renderDeviceList(w); }
+}
+async function generateDeviceCode(w) {
+  if (w.busy) return;
+  wizardError('');
+  const nameInput = document.getElementById('connDeviceName');
+  const baseSelect = document.getElementById('connDeviceBase');
+  if (nameInput) w.form.deviceName = nameInput.value;
+  if (baseSelect) w.base = baseSelect.value;
+  setConnectionBusy(w, true);
+  try {
+    const [ok, data] = await post('/api/devices/code', {
+      label: connectionDeviceName(w.form.deviceName), base: w.base
+    });
+    if (!ok) throw Error(data.error || '生成失败');
+    const issue = connectionBaseWarning(w.base);
+    const box = document.getElementById('connDeviceResult');
+    box.innerHTML = '<div class="connection-evidence success"><b>✓ 接入码已生成</b>'
+      + '<p>10 分钟内有效，只能使用一次。用要接入的设备扫描二维码或打开链接。</p></div>'
+      + (issue ? '<p class="hint connection-base-warning">' + esc(issue) + ' 先换一个设备能打开的地址。</p>'
+               : '<div id="connQr" class="connection-qr" aria-label="设备接入二维码"></div>')
+      + '<input id="connDeviceUrl" readonly aria-label="设备接入链接"><button id="connDeviceCopy">复制接入链接</button>';
+    document.getElementById('connDeviceUrl').value = data.url || '';
+    document.getElementById('connDeviceCopy').onclick = async event => {
+      await copyText(data.url || ''); event.target.textContent = '已复制';
+    };
+    if (!issue) renderConnectionQrUrl('connQr', data.url || connectionDeviceUrl(w.base, data.code));
+  } catch (error) {
+    wizardError(error.message);
+  } finally {
+    if (wizardCurrent(w)) setConnectionBusy(w, false);
+  }
+}
+function renderConnectionQrUrl(id, text) {
+  const box = document.getElementById(id);
+  if (!box || typeof QRCode !== 'function') return;
+  try {
+    new QRCode(box, {text, width: 168, height: 168, correctLevel: QRCode.CorrectLevel.M});
+  } catch (error) { box.textContent = '二维码没生成出来，请直接用链接。'; }
 }
 async function startConnectionWizard(id, type) {
   stopConnectionWizard();
@@ -78,11 +171,29 @@ function renderConnectionWizard() {
 }
 function connectionNameFields(w) {
   if (w.saved) return '<div class="connection-identity"><b>' + esc((connectionContact(w) || {}).label || w.id) + '</b><small>@' + esc(w.id) + '</small></div>';
-  return '<label>联系人名称<input id="connName" maxlength="40" placeholder="' + (w.type === 'user' ? '例如：小林' : '例如：我的 Harness') + '" value="' + esc(w.form.label || '') + '"></label><details class="connection-advanced"><summary>高级：自定义联系人 ID</summary><input id="connId" maxlength="24" placeholder="留空自动生成，小写英文和数字" value="' + esc(w.form.id || '') + '"></details>';
+  return '<label>联系人名称<input id="connName" maxlength="40" placeholder="例如：我的 Harness" value="' + esc(w.form.label || '') + '"></label><details class="connection-advanced"><summary>高级：自定义联系人 ID</summary><input id="connId" maxlength="24" placeholder="留空自动生成，小写英文和数字" value="' + esc(w.form.id || '') + '"></details>';
 }
 function renderConnectionSetup(w) {
   let content = '<h3>' + CONNECTION_TYPES[w.type][0] + '</h3>';
-  if (w.type === 'local') {
+  if (w.type === 'mydevice') {
+    content += '<p class="hint">接入码 10 分钟内有效，只能使用一次。设备拿到长期凭证后，重启应用也不用重新接入。</p>'
+      + '<label>设备名称<input id="connDeviceName" maxlength="40" placeholder="例如：我的 iPhone" value="' + esc(w.form.deviceName || '') + '"></label>'
+      + '<label>接入地址<select id="connDeviceBase"></select></label>'
+      + '<p class="hint" id="connDeviceBaseHint"></p>'
+      + '<button id="connDeviceCreate" class="pri">生成设备接入码</button>'
+      + '<div id="connDeviceResult"></div>'
+      + '<h4>已接入的设备</h4><div id="connDeviceList">正在读取…</div>';
+  } else if (w.type === 'user') {
+    w.target = w.target || ((ROOMS.find(r => !r.archived) || {}).id || '__new__');
+    w.permissions = w.permissions || {read:true,post:true,trigger:true,board:false,files:false,work:false};
+    content += '<p class="hint">邀请票不会预先创建联系人。对方打开链接后领取身份，只加入你选择的会话。</p>'
+      + '<label>会话<select id="connGuestRoom">' + ROOMS.filter(r => !r.archived).map(r => '<option value="' + esc(r.id) + '"' + (w.target === r.id ? ' selected' : '') + '>' + esc(r.title) + '</option>').join('') + '<option value="__new__"' + (w.target === '__new__' ? ' selected' : '') + '>＋ 新建会话</option></select></label>'
+      + '<div id="connGuestNew"' + (w.target === '__new__' ? '' : ' hidden') + '><label>新会话标题<input id="connGuestTitle" maxlength="60" placeholder="例如：与朋友协作"></label></div>'
+      + '<h4>此会话内的权限</h4><div id="connPermissions" class="perm-grid">' + renderPermissionChoices(w) + '</div>'
+      + '<details class="connection-advanced" open><summary>邀请地址（对方能打开的地址）</summary><label>接入地址<input id="connBase" value="' + esc(w.base) + '"></label><p class="hint" id="connBaseHint"></p></details>'
+      + '<button id="connGuestGenerate" class="pri">生成邀请</button><div id="connGuestResult"></div>'
+      + '<h4>邀请与游客</h4><div id="connInviteList">正在读取…</div>';
+  } else if (w.type === 'local') {
     const local = CONTACTS.filter(a => ['cli', 'claude', 'codex'].includes(a.driver));
     w.localChoice = w.localChoice || (local.find(a => a.enabled) || {}).id || '__custom__';
     content += '<p class="hint">应用直接运行本机程序，不需要 MCP 地址或接入密钥。请先安装并登录你要使用的 Agent。</p><label>选择程序<select id="connLocal">' + local.map(a => '<option value="' + esc(a.id) + '"' + (w.localChoice === a.id ? ' selected' : '') + '>' + esc(a.label) + (a.enabled ? ' · 已检测到' : ' · 未找到程序') + '</option>').join('') + '<option value="__custom__"' + (w.localChoice === '__custom__' ? ' selected' : '') + '>自定义 CLI 程序…</option></select></label><div id="connCustom"' + (w.localChoice === '__custom__' ? '' : ' hidden') + '>' + connectionNameFields(w.localChoice === '__custom__' ? w : {...w, saved: false}) + '<label>命令或可执行文件路径<input id="connCommand" placeholder="my-agent 或完整程序路径" value="' + esc(w.form.command || '') + '"></label><label>调用参数（JSON 数组）<textarea id="connArgs">' + esc(w.form.args || '["-p", "{prompt}"]') + '</textarea></label></div><button id="connCheck" class="pri">检测并验证程序</button><p class="hint">仅运行 --version，不调用模型；登录和额度在首次回复时确认。</p>';
@@ -93,14 +204,23 @@ function renderConnectionSetup(w) {
       content += '<p class="hint">测试会向服务发送一条只需简短回复的验证消息，可能消耗少量模型额度，不授予工具或文件权限。</p><button id="connCheck" class="pri">测试连接与回复</button><details class="connection-advanced"><summary>查看服务需要实现的协议</summary><p>接收 POST JSON，其中包含 prompt、speaker、mode、permissions。返回 <code>{"text":"连接成功"}</code>。</p></details>';
     } else {
       if (w.type === 'external') content += '<label>参与方式<select id="connMemberMode"><option value="auto"'+(w.memberMode !== 'manual'?' selected':'')+'>自动接收任务并回复（推荐）</option><option value="manual"'+(w.memberMode === 'manual'?' selected':'')+'>通过 MCP 手动参与</option></select></label><div id="connManual"'+(w.memberMode === 'manual'?'':' hidden')+'><label>对方使用的软件<select id="connHost"><option value="custom">自定义 / 其他 MCP 客户端</option>' + ((agCat && agCat.hosts) || []).map(h => '<option value="' + esc(h.id) + '"' + (w.host === h.id ? ' selected' : '') + '>' + esc(h.label) + '</option>').join('') + '</select></label></div>';
-      content += '<details class="connection-advanced" open><summary>接入地址（手机 / 其他设备用）</summary><label>对方能访问的应用地址<input id="connBase" value="' + esc(w.base) + '"></label><p class="hint" id="connBaseHint"></p></details><button id="connGenerate" class="pri">' + (w.type === 'user' ? '生成网页邀请' : '生成连接配置') + '</button>' + (w.status && w.status.has_key ? '<button id="connRevoke">撤销现有密钥 / 邀请</button><p class="hint">已有密钥不会再次显示明文；重新生成会使旧密钥和旧邀请失效。</p>' : '') + '<div id="connCredentials"></div>';
+      content += '<details class="connection-advanced" open><summary>接入地址（手机 / 其他设备用）</summary><label>对方能访问的应用地址<input id="connBase" value="' + esc(w.base) + '"></label><p class="hint" id="connBaseHint"></p></details><button id="connGenerate" class="pri">生成连接配置</button>' + (w.status && w.status.has_key ? '<button id="connRevoke">撤销现有密钥 / 邀请</button><p class="hint">已有密钥不会再次显示明文；重新生成会使旧密钥和旧邀请失效。</p>' : '') + '<div id="connCredentials"></div>';
     }
   }
-  content += '<div id="connEvidence" class="connection-evidence" aria-live="polite"></div><div class="btns connection-actions"><button id="connBack">更换接入方式</button><button id="connLater">稍后验证，先分配会话</button><button id="connNext" class="pri" disabled>下一步：会话与权限</button></div>';
+  if (w.type === 'mydevice') {
+    content += '<div class="btns connection-actions"><button id="connBack">更换接入方式</button><button id="connNext" class="pri">完成</button></div>';
+  } else if (w.type === 'user') {
+    content += '<div class="btns connection-actions"><button id="connBack">更换接入方式</button><button id="connNext" class="pri">完成</button></div>';
+  } else {
+    content += '<div id="connEvidence" class="connection-evidence" aria-live="polite"></div><div class="btns connection-actions"><button id="connBack">更换接入方式</button><button id="connLater">稍后验证，先分配会话</button><button id="connNext" class="pri" disabled>下一步：会话与权限</button></div>';
+  }
   wizardFrame(w, content);
   document.getElementById('connBack').onclick = () => startConnectionWizard();
-  document.getElementById('connLater').onclick = () => advanceConnection(w);
+  if (document.getElementById('connLater')) document.getElementById('connLater').onclick = () => advanceConnection(w);
   document.getElementById('connNext').onclick = () => advanceConnection(w);
+  if (w.type === 'mydevice') {
+    renderDeviceSetup(w);
+  }
   if (w.type === 'local') {
     const selected = connectionContact(w) || CONTACTS.find(a => a.id === w.localChoice);
     const help = document.createElement('p');
@@ -114,8 +234,11 @@ function renderConnectionSetup(w) {
     };
     if (w.localChoice !== '__custom__') { w.id = w.localChoice; w.saved = true; w.status = (agCat.connections || {})[w.id] || w.status; }
   }
+  if (w.type === 'user') {
+    renderGuestSetup(w);
+  }
   const baseInput = document.getElementById('connBase');
-  if (baseInput) {
+  if (baseInput && w.type !== 'user') {
     const hint = document.getElementById('connBaseHint');
     const showBaseHint = () => {
       const issue = connectionBaseWarning(w.base);
@@ -142,11 +265,11 @@ function renderConnectionSetup(w) {
   const memberMode = document.getElementById('connMemberMode'); if (memberMode) memberMode.onchange = () => { w.memberMode = memberMode.value; document.getElementById('connManual').hidden = w.memberMode !== 'manual'; if (w.token) renderConnectionCredentials(w); };
   if (w.token) renderConnectionCredentials(w);
   updateConnectionEvidence(w);
-  if (['external', 'user'].includes(w.type) && w.id) w.timer = setInterval(() => pollConnectionEvidence(w), 2000);
+  if (w.type === 'external' && w.id) w.timer = setInterval(() => pollConnectionEvidence(w), 2000);
 }
 function captureConnectionForm(w) {
   const value = id => { const e = document.getElementById(id); return e ? e.value.trim() : undefined; };
-  for (const [field, id] of Object.entries({label:'connName', id:'connId', command:'connCommand', args:'connArgs', endpoint:'connEndpoint', serviceKey:'connServiceKey'})) {
+  for (const [field, id] of Object.entries({label:'connName', id:'connId', command:'connCommand', args:'connArgs', endpoint:'connEndpoint', serviceKey:'connServiceKey', deviceName:'connDeviceName'})) {
     const v = value(id); if (v !== undefined) w.form[field] = v;
   }
   if (document.getElementById('connBase')) w.base = value('connBase').replace(/\/+$/, '');
@@ -197,7 +320,8 @@ function updateConnectionEvidence(w) {
   const good = ['ready','connected'].includes(status.state) && !(w.type === 'external' && w.memberMode !== 'manual' && !(member && member.automatic));
   box.className = 'connection-evidence ' + (good ? 'success' : status.state === 'failed' ? 'failure' : 'pending');
   box.innerHTML = '<b>' + (good ? '✓ ' : '○ ') + esc(status.label) + '</b><p>' + esc(status.detail || (status.state === 'connected' ? '已收到对方的认证连接' + (status.client ? ' · ' + status.client : '') : ['external','user'].includes(w.type) ? '配置或复制邀请后仍需对方实际打开连接。此处会自动更新，无需手动确认。' : '验证结果会显示在这里。')) + '</p>';
-  const next = document.getElementById('connNext'); if (next) next.disabled = w.busy || !good;
+  const next = document.getElementById('connNext');
+  if (next) next.disabled = w.busy || (!['user', 'mydevice'].includes(w.type) && !good);
 }
 async function pollConnectionEvidence(w) {
   if (!wizardCurrent(w) || w.step !== 2) { clearInterval(w.timer); return; }
@@ -221,27 +345,132 @@ async function generateConnection(w) {
   } catch (e) { if (wizardCurrent(w)) wizardError(e.message || '生成失败'); }
   finally { if (wizardCurrent(w)) setConnectionBusy(w, false); }
 }
-function connectionInvitation(w) { return w.base + '/join#key=' + encodeURIComponent(w.token); }
-function renderConnectionQr(w) {
-  const box = document.getElementById('connQr');
-  if (!box || typeof QRCode !== 'function') return;
-  try {
-    new QRCode(box, {text: connectionInvitation(w), width: 168, height: 168, correctLevel: QRCode.CorrectLevel.M});
-  } catch (e) { box.textContent = '二维码没生成出来，请直接用上面的链接。'; }
+function connectionGuestUrl(base, token) {
+  return base.replace(/\/+$/, '') + '/join#invite=' + encodeURIComponent(token);
 }
+function connectionInviteStatus(invite) {
+  if (!invite || invite.revoked) return '已撤销';
+  if (!invite.expires || invite.expires * 1000 < Date.now()) return '已过期';
+  if (invite.guest_count) return '已加入 ' + invite.guest_count + ' 位游客';
+  return '等待加入';
+}
+async function renderGuestSetup(w) {
+  const select = document.getElementById('connGuestRoom');
+  const newBox = document.getElementById('connGuestNew');
+  if (select) select.onchange = () => {
+    w.target = select.value;
+    newBox.hidden = w.target !== '__new__';
+  };
+  const baseInput = document.getElementById('connBase');
+  const hint = document.getElementById('connBaseHint');
+  const showHint = () => {
+    const issue = connectionBaseWarning(w.base);
+    hint.textContent = issue || '游客的手机/电脑要能打开这个地址。跨网络需要你提供双方可达的地址。';
+    hint.classList.toggle('warn', !!issue);
+  };
+  if (baseInput) {
+    showHint();
+    baseInput.oninput = () => { w.base = baseInput.value.trim().replace(/\/+$/, ''); showHint(); };
+  }
+  const generate = document.getElementById('connGuestGenerate');
+  if (generate) generate.onclick = () => generateGuestInvite(w);
+  if (w.inviteUrl) renderGuestInviteResult(w);
+  await loadGuestInvites(w);
+  if (wizardCurrent(w) && w.step === 2) w.timer = setInterval(() => pollGuestInvites(w), 3000);
+}
+async function loadGuestInvites(w) {
+  try {
+    const [ok, data] = await connectionGet('/api/invites');
+    if (!ok) throw Error(data.error || '读取邀请失败');
+    w.invites = data.invites || [];
+    renderGuestInviteList(w);
+  } catch (error) {
+    const box = document.getElementById('connInviteList');
+    if (box) box.textContent = error.message;
+  }
+}
+function renderGuestInviteResult(w) {
+  const box = document.getElementById('connGuestResult');
+  if (!box) return;
+  const issue = connectionBaseWarning(w.base);
+  box.innerHTML = (issue ? '<p class="hint connection-base-warning">' + esc(issue) + ' 先换一个对方能打开的地址。</p>' : '')
+    + '<input id="connGuestUrl" readonly aria-label="邀请链接"><button id="connGuestCopy">复制邀请链接</button>'
+    + (issue ? '' : '<div id="connGuestQr" class="connection-qr" aria-label="邀请二维码"></div>');
+  document.getElementById('connGuestUrl').value = w.inviteUrl;
+  document.getElementById('connGuestCopy').onclick = async event => { await copyText(w.inviteUrl); event.target.textContent = '已复制'; };
+  if (!issue) renderConnectionQrUrl('connGuestQr', w.inviteUrl);
+}
+function renderGuestInviteList(w) {
+  const box = document.getElementById('connInviteList');
+  if (!box) return;
+  box.innerHTML = (w.invites || []).map(invite => {
+    const room = ROOMS.find(r => r.id === invite.room);
+    return '<div class="connection-invite"><span><b>' + esc((room || {}).title || invite.room) + '</b><small>'
+      + esc(connectionInviteStatus(invite)) + ' · 创建于 ' + new Date((invite.created || 0) * 1000).toLocaleString()
+      + ' · 有效至 ' + new Date((invite.expires || 0) * 1000).toLocaleString() + '</small>'
+      + (invite.guests || []).map(guest => '<small class="connection-guest">' + esc(guest.label) + ' · ' + esc(guest.device || '设备未知') + (guest.online ? ' · 在线' : '') + ' <button data-guest-remove="' + esc(guest.id) + '">移除</button></small>').join('')
+      + '</span>' + (invite.revoked ? '' : '<button data-invite-revoke="' + esc(invite.id) + '">撤销邀请</button>') + '</div>';
+  }).join('') || '<p class="hint">还没有邀请。生成后会出现在这里。</p>';
+  box.querySelectorAll('[data-invite-revoke]').forEach(button => {
+    button.onclick = () => revokeGuestInvite(w, button.dataset.inviteRevoke);
+  });
+  box.querySelectorAll('[data-guest-remove]').forEach(button => {
+    button.onclick = () => removeGuest(w, button.dataset.guestRemove);
+  });
+}
+async function pollGuestInvites(w) {
+  if (!wizardCurrent(w) || w.step !== 2) { clearInterval(w.timer); return; }
+  await loadGuestInvites(w);
+}
+async function generateGuestInvite(w) {
+  if (w.busy) return;
+  wizardError('');
+  w.permissions = Object.fromEntries([...mbox.querySelectorAll('[data-connection-permission]')].map(i => [i.dataset.connectionPermission, i.checked]));
+  const title = document.getElementById('connGuestTitle');
+  setConnectionBusy(w, true);
+  try {
+    if (w.target === '__new__') {
+      const [ok, created] = await post('/api/rooms/new', {
+        project: (PROJECTS[0] || {}).id || '', title: (title && title.value.trim()) || '与朋友协作', participants: []
+      });
+      if (!ok) throw Error(created.error || '会话创建失败');
+      w.target = created.id;
+      await pollRooms();
+    }
+    const [ok, data] = await post('/api/invites', {
+      room: w.target, permissions: w.permissions, label: '游客邀请', expires_days: 7, base: w.base
+    });
+    if (!ok) throw Error(data.error || '邀请生成失败');
+    w.inviteUrl = data.url || connectionGuestUrl(w.base, data.token);
+    w.step = 2;
+    renderConnectionWizard();
+  } catch (error) {
+    if (wizardCurrent(w)) wizardError(error.message);
+  } finally {
+    if (wizardCurrent(w)) setConnectionBusy(w, false);
+  }
+}
+async function revokeGuestInvite(w, id) {
+  if (!confirm('撤销后，这张邀请不能再兑换；已加入的游客不受影响。继续？')) return;
+  const [ok, data] = await post('/api/invites/revoke', {id});
+  if (!ok) return wizardError(data.error || '撤销失败');
+  await loadGuestInvites(w);
+}
+async function removeGuest(w, id) {
+  if (!confirm('移除后，这位游客会退出所有会话，密钥立即失效。继续？')) return;
+  const [ok, data] = await post('/api/guests/remove', {id});
+  if (!ok) return wizardError(data.error || '移除失败');
+  await loadGuestInvites(w);
+}
+function connectionDeviceName(value) { return (value || '').trim() || '我的设备'; }
+function connectionDeviceUrl(base, code) { return base.replace(/\/+$/, '') + '/enroll#code=' + encodeURIComponent(code); }
 function connectionConfiguration(w) {
   if (w.host === 'codex') return '[mcp_servers.ai-bridge]\nurl = ' + JSON.stringify(w.base + '/mcp') + '\nhttp_headers = { Authorization = ' + JSON.stringify('Bearer ' + w.token) + ' }';
   return JSON.stringify({mcpServers: {'ai-bridge': {url: w.base + '/mcp', headers: {Authorization: 'Bearer ' + w.token}}}}, null, 2);
 }
 function renderConnectionCredentials(w) {
   const box = document.getElementById('connCredentials'); if (!box || !w.token) return;
-  if (w.type === 'user') {
-    const issue = connectionBaseWarning(w.base);
-    box.innerHTML = '<h4>把邀请链接发给对方</h4><p class="hint">链接含此联系人的密钥，请只发给受邀的人。对方打开后自动连接；不需要安装本应用。</p><input id="connInvitation" readonly aria-label="邀请链接"><button id="connCopyInvitation">复制邀请链接</button>' + (issue ? '<p class="hint connection-base-warning">' + esc(issue) + ' 先改上面的接入地址，二维码和链接才能用。</p>' : '<div id="connQr" class="connection-qr" aria-label="邀请二维码"></div>') + '<p class="hint">手机和电脑要连同一个 WiFi；对方连接成功后点下一步，分配它可以参与的会话。也可以先分配，稍后再邀请。</p>';
-    document.getElementById('connInvitation').value = connectionInvitation(w);
-    document.getElementById('connCopyInvitation').onclick = async e => { await copyText(connectionInvitation(w)); e.target.textContent = '邀请已复制'; };
-    renderConnectionQr(w);
-  } else if (w.memberMode !== 'manual') {
+  if (w.memberMode !== 'manual') {
     box.innerHTML = '<ol class="connection-instructions"><li>在 Harness 所在设备打开「合拍 Cojam 成员连接端」（支持 Windows / macOS 的 Python 版本）。</li><li>导入下面的连接配置，选择该设备上的 Harness 和工作文件夹，点击「连接并开启自动响应」。</li><li>这里显示「自动响应已连接」后，继续选择会话与权限。成员随后会自动收取任务、回复和互相 @。</li></ol><p><a href="/static/member-connector.zip" download="Cojam-Member.zip">下载成员连接端（Windows / macOS 便携源码包）</a></p><button id="connDownloadMember" class="pri">下载此成员的连接配置</button><button id="connCopyMember">复制连接配置</button><p class="hint">配置含成员密钥，请仅交给该成员。首次使用连接端需下载便携连接端包；macOS 版本需要 Python 3.11+ 和 Tk。网络可继续使用 Tailscale，不需要开放本地执行端端口。</p>';
     const profile = JSON.stringify({protocol:1, server:w.base, key:w.token, member:w.id},null,2);
     document.getElementById('connCopyMember').onclick = () => copyText(profile);
@@ -262,6 +491,13 @@ function renderConnectionCredentials(w) {
   }
 }
 async function advanceConnection(w) {
+  if (w.type === 'user') { hideModal(); refreshContacts(); loadState(); return; }
+  if (w.type === 'mydevice') {
+    wizardError('');
+    w.step = 4;
+    renderConnectionWizard();
+    return;
+  }
   if (w.busy) return; wizardError(''); setConnectionBusy(w, true);
   try {
     await saveConnectionContact(w); await pollRooms(); if (!wizardCurrent(w)) return;
@@ -322,12 +558,19 @@ async function assignConnection(w) {
   finally { if (wizardCurrent(w)) setConnectionBusy(w, false); }
 }
 function renderConnectionComplete(w) {
+  if (w.type === 'mydevice') {
+    wizardFrame(w, '<div class="connection-complete"><span class="connection-symbol">✓</span><h3>我的设备</h3>'
+      + '<p class="hint">在要接入的设备上打开接入码链接。接入后，这台设备会获得完整界面，并以「我」的身份参与会话。</p>'
+      + ((w.devices || []).length ? '<p class="hint">已接入 ' + w.devices.length + ' 台设备。可随时在接入页撤销。</p>' : '')
+      + '</div><div class="btns"><button id="connDone">完成</button></div>');
+    document.getElementById('connDone').onclick = () => { hideModal(); refreshContacts(); loadState(); };
+    return;
+  }
   const contact = connectionContact(w) || {label:w.id}, room = ROOMS.find(r => r.id === w.target);
   const automatic = w.type === 'external' && ((w.member || (agCat.members||{})[w.id] || {}).automatic);
   const good = automatic || w.status && ['ready','connected'].includes(w.status.state);
   const connectionLabel = automatic ? '自动响应已连接：可与本机成员一样接收任务并回复' : w.type === 'external' ? '成员已保存。消息通道与自动响应状态可在联系人中查看。' : good ? w.status.label : '联系人已保存，尚未完成连接验证。可以稍后从联系人列表继续接入。';
-  wizardFrame(w, '<div class="connection-complete"><span class="connection-symbol">✓</span><h3>' + (w.assigned ? '已加入会话' : '联系人已添加') + '</h3><p><b>' + esc(contact.label) + '</b>' + (w.assigned ? ' · ' + esc((room || {}).title || '') : '') + '</p><p class="hint">' + esc(connectionLabel) + '</p>' + (w.assigned ? '<p class="hint">权限：' + Object.entries(PERM_LABELS).filter(([k]) => w.permissions[k]).map(([,label]) => esc(label)).join('、') + '</p>' : '') + (w.type === 'user' && w.token ? '<button id="connCopyFinalInvite">复制邀请链接</button>' : '') + '</div><div class="btns"><button id="connDone">完成</button>' + (w.assigned ? '<button id="connEnter" class="pri">进入会话</button>' : '') + '</div>');
+  wizardFrame(w, '<div class="connection-complete"><span class="connection-symbol">✓</span><h3>' + (w.assigned ? '已加入会话' : '联系人已添加') + '</h3><p><b>' + esc(contact.label) + '</b>' + (w.assigned ? ' · ' + esc((room || {}).title || '') : '') + '</p><p class="hint">' + esc(connectionLabel) + '</p>' + (w.assigned ? '<p class="hint">权限：' + Object.entries(PERM_LABELS).filter(([k]) => w.permissions[k]).map(([,label]) => esc(label)).join('、') + '</p>' : '') + '</div><div class="btns"><button id="connDone">完成</button>' + (w.assigned ? '<button id="connEnter" class="pri">进入会话</button>' : '') + '</div>');
   document.getElementById('connDone').onclick = () => { hideModal(); refreshContacts(); loadState(); };
   const enter = document.getElementById('connEnter'); if (enter) enter.onclick = () => { const rid = w.target; hideModal(); switchRoom(rid); };
-  const invite = document.getElementById('connCopyFinalInvite'); if (invite) invite.onclick = () => copyText(connectionInvitation(w));
 }

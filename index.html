@@ -540,9 +540,19 @@ function ownerTabId(search){
     return /^[A-Za-z0-9_-]{16,80}$/.test(id)?id:'';
   }catch(e){return ''}
 }
+// crypto.randomUUID 只在 HTTPS 或 localhost 可用；局域网/Tailscale 的 http 地址需要降级。
+function ownerInstance(){
+  try{
+    const id=crypto.randomUUID().replace(/-/g,'');
+    if(/^[A-Za-z0-9_-]{16,80}$/.test(id))return id;
+  }catch(e){}
+  const bytes=new Uint8Array(16);
+  try{crypto.getRandomValues(bytes)}catch(e){for(let i=0;i<16;i++)bytes[i]=Math.floor(Math.random()*256)}
+  return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+}
 (function(){
   const desktop=ownerTabId(location.search);
-  const instance=desktop||crypto.randomUUID().replace(/-/g,''), endpoint='/api/ui/session';
+  const instance=desktop||ownerInstance(), endpoint='/api/ui/session';
   let tab=desktop||instance;
   try{
     if(!desktop){

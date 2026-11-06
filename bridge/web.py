@@ -6,9 +6,9 @@
 外部程序用 /api/post 或 /mcp；钩子用 /api/guard/*（带钥匙）。"""
 import hmac, json, mimetypes, os, re, secrets, socket, sys, threading, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import access, agents, common, connections, install, mcp, members, projects, registry, room as R
+from . import access, agents, common, connections, devices, install, invites, mcp, members, projects, registry, room as R
 from .common import (AIS, EXTERNAL_SPEAKERS, HERE, HOST, MAX_ANN, MAX_BODY, MAX_UPLOAD, MEET_DIR, PORT, PROJECT,
                      in_dir, kind_of)
 from .guard import USER, guard
@@ -64,9 +64,68 @@ class Handler(BaseHTTPRequestHandler):
         return data
 
     def _from_browser(self):
-        """Local administrator capability. External contacts use separate bearer credentials."""
+        """管理员能力：进程内令牌，或请求头里的未撤销设备凭证。cookie 不在这里放行。"""
         tok = self.headers.get("X-RT-Token") or ""
-        return bool(tok) and hmac.compare_digest(tok.encode("utf-8"), RT_TOKEN.encode("utf-8"))
+        if not tok:
+            return False
+        if hmac.compare_digest(tok.encode("utf-8"), RT_TOKEN.encode("utf-8")):
+            self._device_id = ""
+            return True
+        device = devices.verify(tok)
+        if not device:
+            return False
+        self._device_id = device["id"]
+        return True
+
+    def _cookies(self):
+        out = {}
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            name, sep, value = part.strip().partition("=")
+            if sep and name:
+                out[name] = value
+        return out
+
+    def _owner_cookie(self):
+        return self._cookies().get("rt_owner") == RT_TOKEN
+
+    def _device_cookie(self):
+        token = self._cookies().get("cojam_device") or ""
+        return token if token and devices.verify(token) else ""
+
+    def _is_local_owner(self):
+        host = (self.headers.get("Host") or "").split(":")[0].lower()
+        forwarded = any(self.headers.get(h) for h in ("Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Real-IP"))
+        return (not forwarded and self.client_address[0] in ("127.0.0.1", "::1")
+                and host in ("localhost", "127.0.0.1"))
+
+    def _https(self):
+        return (self.headers.get("X-Forwarded-Proto") or "").lower() == "https"
+
+    def _device_cookie_header(self, token):
+        parts = ["cojam_device=" + token, "HttpOnly", "SameSite=Lax", "Path=/", "Max-Age=31536000"]
+        if self._https():
+            parts.append("Secure")
+        return "; ".join(parts)
+
+    @staticmethod
+    def _base_url(value):
+        try:
+            url = urlsplit(str(value or "").strip())
+        except ValueError:
+            return ""
+        if url.scheme not in ("http", "https") or not url.netloc:
+            return ""
+        if url.username or url.password or url.query or url.fragment or url.path not in ("", "/"):
+            return ""
+        return "%s://%s" % (url.scheme, url.netloc)
+
+    def _owner_page(self, token, extra=None):
+        html = getattr(self.server, "ui_index", None)
+        if html is None:
+            with open(INDEX, "rb") as f:
+                html = f.read()
+        html = html.replace(b"__RT_TOKEN__", token.encode("ascii"))
+        return self._send(200, html, "text/html; charset=utf-8", extra)
 
     def _bearer(self):
         a = self.headers.get("Authorization") or ""
@@ -77,7 +136,7 @@ class Handler(BaseHTTPRequestHandler):
     # ---------- 静态 ----------
     def _static(self, name, ctype):
         if name == "member-connector.zip":
-            if not self._from_browser() and "rt_owner=" + RT_TOKEN not in (self.headers.get("Cookie") or "").split("; "):
+            if not self._from_browser() and not self._owner_cookie() and not self._device_cookie():
                 return self._json(403, {"error": USER_ONLY_MSG})
             if not os.path.isfile(os.path.join(STATIC, name)) and not getattr(sys, "frozen", False):
                 from .member_package import build
@@ -151,20 +210,20 @@ class Handler(BaseHTTPRequestHandler):
         q = parse_qs(qs)
         if path == "/api/server/info":
             return self._json(200, {"app": "AI Bridge", "version": VERSION, "api_revision": API_REVISION,
-                                    "lan_url": getattr(self.server, "lan_url", None)})
+                                    "lan_url": getattr(self.server, "lan_url", None),
+                                    "tailscale_url": getattr(self.server, "tailscale_url", None),
+                                    "owner_devices_supported": True})
+        if path == "/enroll":
+            return self._static("enroll.html", "text/html; charset=utf-8")
         if path == "/join":
             return self._static("join.html", "text/html; charset=utf-8")
         if path in ("/", "/index.html"):
-            host = (self.headers.get("Host") or "").split(":")[0].lower()
-            forwarded = any(self.headers.get(h) for h in ("Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Real-IP"))
-            if forwarded or self.client_address[0] not in ("127.0.0.1", "::1") or host not in ("localhost", "127.0.0.1"):
-                return self._static("join.html", "text/html; charset=utf-8")
-            html = getattr(self.server, "ui_index", None)
-            if html is None:
-                with open(INDEX, "rb") as f:
-                    html = f.read()
-            html = html.replace(b"__RT_TOKEN__", RT_TOKEN.encode("ascii"))
-            return self._send(200, html, "text/html; charset=utf-8", {"Set-Cookie": "rt_owner=" + RT_TOKEN + "; HttpOnly; SameSite=Strict; Path=/"})
+            device_token = self._device_cookie()
+            if device_token:
+                return self._owner_page(device_token)
+            if self._is_local_owner():
+                return self._owner_page(RT_TOKEN, {"Set-Cookie": "rt_owner=" + RT_TOKEN + "; HttpOnly; SameSite=Strict; Path=/"})
+            return self._static("join.html", "text/html; charset=utf-8")
         if path == "/sw.js":
             return self._static("sw.js", "text/javascript; charset=utf-8")
         if path == "/manifest.webmanifest":
@@ -173,7 +232,7 @@ class Handler(BaseHTTPRequestHandler):
             name = path[len("/static/"):]
             return self._static(name, mimetypes.guess_type(name)[0] or "application/octet-stream")
         if path.startswith("/files/"):
-            if not self._from_browser() and not (self.headers.get("Cookie") or "").split("; ").count("rt_owner=" + RT_TOKEN):
+            if not self._from_browser() and not self._owner_cookie() and not self._device_cookie():
                 return self._json(403, {"error": USER_ONLY_MSG})
             return self._serve_file(path[len("/files/"):])
         if path == "/mcp":
@@ -193,6 +252,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"rooms": rows, "projects": projects.listing(rows), "last": R.last_room(), "default_workdir": PROJECT})
         if path == "/api/trash":
             return self._json(200, {"trash": R.list_trash()})
+        if path == "/api/devices":
+            return self._json(200, {"account": devices.account(),
+                                    "devices": devices.listing(getattr(self, "_device_id", ""))})
+        if path == "/api/invites":
+            return self._json(200, {"invites": invites.listing(), "guests": invites.guest_listing()})
         if path == "/api/claims":
             return self._json(200, {"claims": guard.listing()})
         if path == "/api/agents":
@@ -261,6 +325,31 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(401, {"error": "接入密钥无效或已撤销"})
             connections.seen(pid, key, "web" if data.get("client") == "AI Bridge 网页" else "http", data.get("client"))
             return self._json(200, {"ok": True, "contact": registry.public(registry.get(pid))})
+        if path == "/api/guest/redeem":
+            data = self._read_json()
+            if data is None:
+                return
+            try:
+                result = invites.redeem(str(data.get("invite") or ""),
+                                        str(data.get("token") or ""),
+                                        str(data.get("device_key") or ""),
+                                        str(data.get("name") or ""),
+                                        str(data.get("device") or ""))
+            except invites.InviteError as error:
+                return self._json(error.code, {"error": str(error)})
+            return self._json(200, {"ok": True, "token": result["token"],
+                                    "contact": result["contact"], "room": result["room"],
+                                    "rooms": result["rooms"], "created": result["created"]})
+        if path == "/api/devices/enroll":
+            data = self._read_json()
+            if data is None:
+                return
+            try:
+                result = devices.enroll(str(data.get("code") or ""), str(data.get("label") or ""))
+            except devices.DeviceError as error:
+                return self._json(error.code, {"error": str(error)})
+            return self._json(200, {"ok": True, "token": result["token"], "device": result["device"]},
+                              {"Set-Cookie": self._device_cookie_header(result["token"])})
         if path == "/api/agents/add":         # 页面上"手动添加"，不让人碰 json
             data = self._read_json()
             if data is None:
@@ -316,7 +405,35 @@ class Handler(BaseHTTPRequestHandler):
         data = self._read_json()
         if data is None:
             return
+        if path == "/api/invites":
+            room = str(data.get("room") or "")
+            r = R.rooms.get(room)
+            if r is None or common.is_archived(r.meta.get("status")):
+                return self._json(400, {"error": "会话不存在或已归档"})
+            try:
+                issued = invites.create(room, data.get("permissions"), str(data.get("label") or "游客邀请"),
+                                        data.get("expires_days") or 7)
+            except invites.InviteError as error:
+                return self._json(error.code, {"error": str(error)})
+            base = self._base_url(data.get("base")) or getattr(self.server, "lan_url", None) or ""
+            url = (base.rstrip("/") + "/join#invite=" + quote(issued["token"])) if base else ""
+            return self._json(200, {"ok": True, "token": issued["token"],
+                                    "invite": invites.public(issued), "url": url,
+                                    "expires": issued["expires"]})
+        if path == "/api/invites/revoke":
+            try:
+                invites.revoke(str(data.get("id") or ""))
+            except invites.InviteError as error:
+                return self._json(error.code, {"error": str(error)})
+            return self._json(200, {"ok": True})
+        if path == "/api/guests/remove":
+            try:
+                return self._json(200, invites.remove_guest(str(data.get("id") or "")))
+            except invites.InviteError as error:
+                return self._json(error.code, {"error": str(error)})
         if path == "/api/ui/session":
+            if getattr(self, "_device_id", ""):
+                return self._json(200, {"ok": True, "tracked": False})
             lifecycle = getattr(self.server, "owner_lifecycle", None)
             if lifecycle is not None:
                 try:
@@ -335,6 +452,17 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"ok": True})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
+        if path == "/api/devices/code":
+            base = self._base_url(data.get("base")) or getattr(self.server, "lan_url", None) or ""
+            result = devices.create_code(str(data.get("label") or ""))
+            return self._json(200, {"ok": True, "code": result["token"], "expires": result["expires"],
+                                    "url": (base.rstrip("/") + "/enroll#code=" + quote(result["token"])) if base else ""})
+        if path == "/api/devices/revoke":
+            try:
+                devices.revoke(str(data.get("id") or ""))
+            except devices.DeviceError as error:
+                return self._json(error.code, {"error": str(error)})
+            return self._json(200, {"ok": True})
         if path == "/api/contacts/key":
             try:
                 token = access.credential(str(data.get("id") or ""), data.get("revoke") is True)
@@ -644,6 +772,22 @@ def start_lan_listener(port=None):
     return srv, srv.lan_url
 
 
+def start_tailscale_listener(port=None):
+    """在 Tailscale 地址上再开一个入口；没有 Tailscale 或端口被占就跳过，不影响其他入口。"""
+    ip = common.tailscale_ipv4()
+    if not ip:
+        return None, None
+    port = int(os.environ.get("ROUNDTABLE_TAILSCALE_PORT", "8767")) if port is None else port
+    try:
+        srv = ExclusiveServer((ip, port), Handler)
+    except OSError as error:
+        print("Tailscale 入口没开成（%s:%s）：%s" % (ip, port, error), file=sys.stderr)
+        return None, None
+    srv.tailscale_url = "http://%s:%d" % (ip, srv.server_address[1])
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, srv.tailscale_url
+
+
 def owner_lifecycle_enabled(env=None):
     env = os.environ if env is None else env
     return env.get("ROUNDTABLE_NO_BROWSER") != "1" or env.get("ROUNDTABLE_OWNER_LIFECYCLE") == "1"
@@ -669,16 +813,23 @@ def main():
             show_startup_error("旧后台尚未退出，请稍后重新打开 AI Bridge。")
             return
     lan_srv, lan_url = start_lan_listener()
-    srv.lan_url = lan_url
+    ts_srv, tailscale_url = start_tailscale_listener()
+    for extra in (srv, lan_srv, ts_srv):
+        if extra is not None:
+            extra.lan_url = lan_url
+            extra.tailscale_url = tailscale_url
     if owner_lifecycle_enabled():
         from .owner_lifecycle import OwnerLifecycle
         srv.owner_lifecycle = OwnerLifecycle(lambda: stop_application(srv))
-        if lan_srv:
-            lan_srv.owner_lifecycle = srv.owner_lifecycle
+        for extra in (lan_srv, ts_srv):
+            if extra is not None:
+                extra.owner_lifecycle = srv.owner_lifecycle
     agents.start_reaper()
     print("会议室已启动：" + url)
     if lan_url:
         print("同一局域网（同一个 WiFi）可扫码或打开：" + lan_url)
+    if tailscale_url:
+        print("Tailscale 网络可打开：" + tailscale_url)
     if os.environ.get("ROUNDTABLE_NO_BROWSER") != "1":
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try:
@@ -687,6 +838,7 @@ def main():
         pass
     finally:
         srv.server_close()
-        if lan_srv:
-            lan_srv.shutdown()
-            lan_srv.server_close()
+        for extra in (lan_srv, ts_srv):
+            if extra is not None:
+                extra.shutdown()
+                extra.server_close()

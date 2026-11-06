@@ -314,6 +314,41 @@ def sanitize_name(name):
 NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
 
 
+# ===== Tailscale =====
+_TAILSCALE_NET = ipaddress.IPv4Network("100.64.0.0/10")
+
+
+def _tailscale_ip(candidates):
+    for ip in candidates:
+        try:
+            addr = ipaddress.IPv4Address(ip)
+        except ValueError:
+            continue
+        if addr in _TAILSCALE_NET:
+            return str(addr)
+    return None
+
+
+def tailscale_ipv4():
+    """这台电脑的 Tailscale IPv4；没装、没登录或命令失败都返回 None。"""
+    import shutil
+    exe = shutil.which("tailscale")
+    if not exe and os.name == "nt":
+        candidate = os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Tailscale", "tailscale.exe")
+        if os.path.isfile(candidate):
+            exe = candidate
+    if not exe:
+        return None
+    try:
+        result = subprocess.run([exe, "ip", "-4"], capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=2, **NO_WINDOW)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode:
+        return None
+    return _tailscale_ip((result.stdout or "").split())
+
+
 def resolve_cmd(name):
     """命令的真身，返回参数列表的开头（找不到返回 None）。
     Windows 上 npm 装的 claude / codex 是 .cmd 外壳：经它起会过一道 cmd.exe，参数里的 | & < > ^（钩子配置、会议名）会被当成命令符号，
