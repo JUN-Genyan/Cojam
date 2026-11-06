@@ -147,6 +147,15 @@ setTimeout(() => {
         assert.equal(saved.cojam_guest_token, 'guest-secret');
         assert.equal(historyCalls[0], '/join');
         assert.ok(calls.some(c => c.url === '/api/external/rooms'));
+        assert.equal(node('title').textContent, '测试会话');
+        assert.equal(node('text').disabled, false, 'invited guest can send messages');
+        node('key').value = 'http://192.168.1.5:8766/join#invite=inv_second.ticket';
+        node('connect').onclick();
+        setTimeout(() => {
+          try {
+            assert.ok(calls.some(c => c.url === '/api/guest/redeem' && c.body.invite === 'inv_second.ticket'));
+          } catch (error) { console.error(error); process.exitCode = 1; }
+        }, 20);
       } catch (error) { console.error(error); process.exitCode = 1; }
     }, 20);
   } catch (error) { console.error(error); process.exitCode = 1; }

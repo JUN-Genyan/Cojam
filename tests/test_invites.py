@@ -233,3 +233,7 @@ class InviteHTTP(unittest.TestCase):
         self.assertEqual(call("/api/guests/remove", {"id": pid}, owner=True)[0], 200)
         self.assertNotIn(pid, self.room.ais)
         self.assertIsNone(registry.get(pid))
+
+
+if __name__ == '__main__':
+    unittest.main()
