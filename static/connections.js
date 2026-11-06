@@ -7,7 +7,7 @@ async function checkConnectionBackend() {
     if (!response.ok) throw Error();
     info = await response.json();
   } catch (e) { throw Error('当前仍在运行旧版后台，无法配置接入。请退出旧后台并重新打开合拍 Cojam；只刷新网页不会更新后台。'); }
-  if (info.app !== 'AI Bridge' || info.version !== '2.6.1' || info.api_revision !== 2)
+  if (info.app !== 'AI Bridge' || info.version !== '2.6.2' || info.api_revision !== 2)
     throw Error('界面与后台版本不一致。请重新打开最新的合拍 Cojam，再刷新此页面。');
   return info;
 }
