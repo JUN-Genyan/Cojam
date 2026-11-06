@@ -39,12 +39,29 @@ def confirm_close(base, token, ask=None):
     return (ask or show_confirm)(BUSY_TEXT)
 
 
+class DesktopApi:
+    """Native actions exposed only to the desktop window."""
+    def __init__(self, webview):
+        self.webview = webview
+        self.window = None
+
+    def choose_workdir(self):
+        if self.window is None:
+            raise RuntimeError("桌面窗口尚未准备好")
+        kinds = getattr(self.webview, "FileDialog", None)
+        folder = kinds.FOLDER if kinds else self.webview.FOLDER_DIALOG
+        result = self.window.create_file_dialog(folder, allow_multiple=False)
+        return str(result[0]) if result else None
+
+
 def open_window(url, on_closing, module=None):
     webview = module or __import__("webview")
     settings = getattr(webview, "settings", None)
     if isinstance(settings, dict) and "OPEN_EXTERNAL_LINKS_IN_BROWSER" in settings:
         settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
-    window = webview.create_window(TITLE, url, width=1280, height=860, min_size=(960, 640))
+    api = DesktopApi(webview)
+    window = webview.create_window(TITLE, url, width=1280, height=860, min_size=(960, 640), js_api=api)
+    api.window = window
     window.events.closing += on_closing
     kwargs = {}
     try:

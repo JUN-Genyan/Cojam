@@ -5,6 +5,26 @@ import subprocess
 import unittest
 
 
+class WorkspaceFolderPicker(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to test the desktop bridge')
+    def test_selection_and_cancel_keep_the_expected_path(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const source=fs.readFileSync('static/workspace.js','utf8');
+const helper=source.match(/function attachWorkspaceFolderPicker\(inputId\)\{[\s\S]*?\n\}/)[0];
+let button, next='D:\\Project';
+const parent={append(b){button=b}}, input={value:'old',parentElement:parent,dispatchEvent(){}};
+const context=vm.createContext({document:{getElementById:()=>input,createElement:()=>({})},
+ window:{pywebview:{api:{choose_workdir:async()=>next}},addEventListener(){}},Event:function(){},alert:()=>{throw Error('unexpected alert')}});
+vm.runInContext(helper,context);context.attachWorkspaceFolderPicker('pWd');
+(async()=>{assert.equal(button.hidden,false);await button.onclick();assert.equal(input.value,'D:\\Project');
+ next=null;await button.onclick();assert.equal(input.value,'D:\\Project');assert.equal(button.disabled,false)})().catch(e=>{console.error(e);process.exitCode=1});
+'''
+        result = subprocess.run(['node','-e',script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 class GuestInvitation(unittest.TestCase):
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
     def test_full_invitation_url_can_be_pasted_as_key(self):

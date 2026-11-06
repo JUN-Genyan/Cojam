@@ -238,6 +238,16 @@ class FakeWebview:
 
 
 class WindowAndFlow(unittest.TestCase):
+    def test_folder_picker_returns_selected_path_and_cancel(self):
+        webview = Mock()
+        webview.FileDialog.FOLDER = 20
+        api = shell_main.DesktopApi(webview)
+        api.window = Mock()
+        api.window.create_file_dialog.side_effect = [(r'D:\project',), None]
+        self.assertEqual(api.choose_workdir(), r'D:\project')
+        self.assertIsNone(api.choose_workdir())
+        api.window.create_file_dialog.assert_called_with(20, allow_multiple=False)
+
     def test_open_window_uses_native_window_settings(self):
         fake = FakeWebview()
         handler = Mock()

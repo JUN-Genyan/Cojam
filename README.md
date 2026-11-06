@@ -24,6 +24,7 @@
 - 源码版：双击 `start.bat` 或 `open.pyw`（都在后台开，不弹终端窗口；没开就开、开了就直接打开网页）。要看日志或前台运行：`python roundtable.py`（或 `python -m bridge`）。地址 http://127.0.0.1:8765 。
 - 接别的工具（Antigravity / Cursor / Claude Code / Codex）一条命令：`Cojam.exe install antigravity`（源码版 `python roundtable.py install ...`）。见"接更多 AI"。
 - 第一次打开，从左侧创建项目和联系人，再在项目下新建会话。
+- 新建项目时，Windows 独立桌面窗口可点击「选择文件夹」打开系统选择器；浏览器或远程访问需手动填写运行 Cojam 的主机上的文件夹路径。
 - 会议记录、附件都存在本文件夹的 `data\`（不进 git）。
 - 装成 app：电脑上 Chrome / Edge 地址栏右边的"安装"图标；手机经 `tailscale serve` 的 https 地址打开后"添加到主屏幕"。见"装成 app"一节。
 
