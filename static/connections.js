@@ -12,8 +12,15 @@ async function checkConnectionBackend() {
   return info;
 }
 function connectionDefaultBase(type, info, origin) {
+  if (!['user', 'external', 'mydevice'].includes(type)) return origin;
+  try {
+    const host = new URL(origin).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    // When already using a remote address, it is the only address known to
+    // work from this device; replacing it with the server's LAN breaks tunnels.
+    if (!['127.0.0.1', 'localhost', '::1'].includes(host)) return origin;
+  } catch (e) { return origin; }
   if (type === 'mydevice') return (info && info.tailscale_url) || (info && info.lan_url) || origin;
-  return ['user', 'external'].includes(type) && info && info.lan_url ? info.lan_url : origin;
+  return (info && info.lan_url) || origin;
 }
 function connectionBaseWarning(base) {
   try {
@@ -242,7 +249,7 @@ function renderConnectionSetup(w) {
     const hint = document.getElementById('connBaseHint');
     const showBaseHint = () => {
       const issue = connectionBaseWarning(w.base);
-      hint.textContent = issue || '默认是这台电脑的局域网地址。手机和电脑要连同一个 WiFi；跨网络请填 Tailscale Serve 或其他 HTTPS 地址。';
+      hint.textContent = issue || '这个地址必须能在朋友的电脑上打开。同一局域网可用局域网地址；跨网络需双方可达的 Tailscale 或 HTTPS 地址。HTTP 的消息和密钥未加密，避免在不可信网络使用。';
       hint.classList.toggle('warn', !!issue);
     };
     showBaseHint();
@@ -471,7 +478,7 @@ function connectionConfiguration(w) {
 function renderConnectionCredentials(w) {
   const box = document.getElementById('connCredentials'); if (!box || !w.token) return;
   if (w.memberMode !== 'manual') {
-    box.innerHTML = '<ol class="connection-instructions"><li>在 Harness 所在设备打开「合拍 Cojam 成员连接端」（支持 Windows / macOS 的 Python 版本）。</li><li>导入下面的连接配置，选择该设备上的 Harness 和工作文件夹，点击「连接并开启自动响应」。</li><li>这里显示「自动响应已连接」后，继续选择会话与权限。成员随后会自动收取任务、回复和互相 @。</li></ol><p><a href="/static/member-connector.zip" download="Cojam-Member.zip">下载成员连接端（Windows / macOS 便携源码包）</a></p><button id="connDownloadMember" class="pri">下载此成员的连接配置</button><button id="connCopyMember">复制连接配置</button><p class="hint">配置含成员密钥，请仅交给该成员。首次使用连接端需下载便携连接端包；macOS 版本需要 Python 3.11+ 和 Tk。网络可继续使用 Tailscale，不需要开放本地执行端端口。</p>';
+    box.innerHTML = '<ol class="connection-instructions"><li>下载下方的成员连接端和连接配置，通过可信渠道把两个文件发给朋友。</li><li>朋友解压连接端：Windows 双击 start-member.bat；Mac 双击 start-member.command（需要 Python 3.11 和 Tk）。</li><li>朋友导入连接配置，选择自己电脑上的 Harness 和工作文件夹，点击「连接并开启自动响应」。</li><li>这里显示「自动响应已连接」后，选择会话与权限。成员随后能接收任务、回复和互相 @。</li></ol><p><a href="/static/member-connector.zip" download="Cojam-Member.zip">下载成员连接端（Windows / macOS 源码包）</a></p><button id="connDownloadMember" class="pri">下载此成员的连接配置</button><button id="connCopyMember">复制连接配置</button><p class="hint">连接配置含成员密钥，只发给对应朋友，不要公开。跨网络需要朋友能够访问上面的地址；不会自动组网，也无需开放朋友电脑的入站端口。</p>';
     const profile = JSON.stringify({protocol:1, server:w.base, key:w.token, member:w.id},null,2);
     document.getElementById('connCopyMember').onclick = () => copyText(profile);
     document.getElementById('connDownloadMember').onclick = () => { const url=URL.createObjectURL(new Blob([profile],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='ai-bridge-'+w.id+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000); };

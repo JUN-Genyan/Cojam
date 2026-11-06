@@ -1,6 +1,9 @@
 """Shared-room scheduling and the portable connector, without real AI calls."""
 import json
 import os
+import socket
+import ssl
+import urllib.error
 from pathlib import Path
 import subprocess
 import sys
@@ -12,6 +15,23 @@ from unittest.mock import patch
 
 import test_contacts_access as support
 from bridge import access, drivers, members, registry, room as R
+from bridge.member import Client, ConnectionError as MemberConnectionError
+
+
+class NetworkDiagnostics(unittest.TestCase):
+    def test_connection_failures_are_actionable_and_do_not_echo_secrets(self):
+        client = Client('https://example.test', 'secret-key')
+        cases = [(socket.gaierror('secret-key'), '域名'),
+                 (TimeoutError('secret-key'), '超时'),
+                 (ConnectionRefusedError('secret-key'), '拒绝连接'),
+                 (ssl.SSLCertVerificationError('secret-key'), '证书')]
+        for reason, expected in cases:
+            with self.subTest(reason=reason), patch('urllib.request.build_opener') as opener:
+                opener.return_value.open.side_effect = urllib.error.URLError(reason)
+                with self.assertRaises(MemberConnectionError) as result:
+                    client.request('connect')
+                self.assertIn(expected, str(result.exception))
+                self.assertNotIn('secret-key', str(result.exception))
 
 
 def wait_until(predicate, timeout=5):

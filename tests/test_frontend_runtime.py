@@ -195,6 +195,9 @@ assert.equal(context.connectionDefaultBase('mydevice',
   'http://100.64.0.5:8767');
 assert.equal(context.connectionDefaultBase('mydevice', {lan_url: lan}, origin), lan);
 assert.equal(context.connectionDefaultBase('mydevice', {}, origin), origin);
+const remote = 'https://bridge.example.test';
+for (const type of ['user', 'external', 'mydevice'])
+  assert.equal(context.connectionDefaultBase(type, {lan_url: lan, tailscale_url: 'http://100.64.0.5:8767'}, remote), remote);
 assert.ok(vm.runInContext('CONNECTION_TYPES.mydevice', context));
 assert.match(context.connectionBaseWarning('http://127.0.0.1:8765'), /只有这台电脑/);
 assert.match(context.connectionBaseWarning('http://localhost:8765'), /只有这台电脑/);

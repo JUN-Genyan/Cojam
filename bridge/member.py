@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import ssl
 import sys
 import threading
 import time
@@ -28,6 +29,20 @@ class ConnectionError(Exception):
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args):
         return None
+
+
+def connection_problem(error):
+    """Useful network diagnostics without echoing URLs, credentials or proxy output."""
+    reason = error.reason if isinstance(error, urllib.error.URLError) else error
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        return "HTTPS 证书验证失败，请检查服务地址和证书；不要关闭证书验证"
+    if isinstance(reason, socket.gaierror):
+        return "找不到会议室的域名，请检查地址或 DNS"
+    if isinstance(reason, (TimeoutError, socket.timeout)):
+        return "连接会议室超时，请检查网络、防火墙及服务地址是否可达"
+    if isinstance(reason, ConnectionRefusedError):
+        return "会议室拒绝连接，请确认主机已启动且地址和端口正确"
+    return "无法连接会议室，请检查网络和服务地址（127.0.0.1 只代表当前设备）"
 
 
 class Client:
@@ -61,7 +76,7 @@ class Client:
             message = {401:"密钥已失效，请重新配对", 403:"此成员没有访问权限", 409:"连接或任务状态冲突，请检查是否已有同一成员的执行端", 410:"任务已取消或会议室已重启"}.get(e.code, "会议室请求失败（HTTP %s）" % e.code)
             raise ConnectionError(message, e.code) from e
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
-            raise ConnectionError("无法连接会议室，请检查网络和服务地址") from e
+            raise ConnectionError(connection_problem(e)) from e
 
     def task_request(self, action, task, timeout=10, **body):
         return self.request(action, dict(body, task=task["id"], lease=task["lease"]), timeout=timeout)
