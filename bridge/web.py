@@ -241,6 +241,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._external_get(path, q)
         if path.startswith("/api/") and not self._from_browser():
             return self._json(403, {"error": USER_ONLY_MSG})
+        if path == "/api/update/check":
+            from . import updater
+            return self._json(200, updater.check())
+        if path == "/api/update/status":
+            from . import updater
+            return self._json(200, updater.status())
         if path == "/api/server/runtime":
             from .common import LOG_DIR
             from .server_runtime import installation
@@ -406,6 +412,14 @@ class Handler(BaseHTTPRequestHandler):
         data = self._read_json()
         if data is None:
             return
+        if path == "/api/update/download":
+            if not self._is_local_owner():
+                return self._json(403, {"error": "请在运行合拍的电脑上下载更新"})
+            from . import updater
+            try:
+                return self._json(200, updater.start_download())
+            except ValueError as error:
+                return self._json(409, {"error": str(error)})
         if path == "/api/invites":
             room = str(data.get("room") or "")
             r = R.rooms.get(room)

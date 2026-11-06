@@ -1,0 +1,8 @@
+{
+  "app": "Cojam",
+  "version": "2.6.1",
+  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.1.exe",
+  "sha256": "9937ad966a8d96cc5feb7487028e4a32f16b83af87e3fc7e8fc4d9caaf2ccc5a",
+  "size": 31612369,
+  "notes": "新增应用内更新、工作区文件夹选择和接入体验改进。"
+}
