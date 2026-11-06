@@ -5,6 +5,30 @@ import subprocess
 import unittest
 
 
+class ContactRoutes(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to test contact routing UI')
+    def test_same_brand_contacts_keep_separate_mentions_and_channels(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const ws=fs.readFileSync('static/workspace.js','utf8'), html=fs.readFileSync('index.html','utf8');
+const part=ws.slice(ws.indexOf('function contactStatusLabel'),ws.indexOf('function drawRoomIdentity'));
+const quick=html.match(/function drawQuick\(\)\{[\s\S]*?\n\}/)[0];
+const boxes={contactList:{innerHTML:''},contactCount:{},quick:{innerHTML:'',dataset:{},querySelectorAll(){return []}}};
+const contacts=[{id:'codex',label:'我的 Codex',kind:'agent',driver:'codex',enabled:true,builtin:true,color:'#fff',letter:'C'},
+ {id:'friend-codex',label:'朋友的 Codex',kind:'agent',driver:'external',enabled:true,user:true,color:'#fff',letter:'C'}];
+const ctx=vm.createContext({document:{getElementById:id=>boxes[id]},esc:s=>String(s),CONTACTS:contacts,
+ agCat:{owner_devices:[{label:'我的手机',online:true}],connections:{'friend-codex':{state:'connected',label:'已连接'}},members:{'friend-codex':{automatic:true,device:'朋友的 Mac'}}},
+ AG_DRV:{},S:{participants:['codex','friend-codex']},quickEl:boxes.quick});
+vm.runInContext(part+'\n'+quick,ctx);ctx.drawContacts();ctx.drawQuick();
+assert.match(boxes.contactList.innerHTML,/我的手机/);assert.match(boxes.contactList.innerHTML,/朋友的 Mac/);assert.match(boxes.contactList.innerHTML,/@friend-codex/);
+assert.match(boxes.quick.innerHTML,/data-ins="@codex "[^>]*>@我的 Codex/);
+assert.match(boxes.quick.innerHTML,/data-ins="@friend-codex "[^>]*>@朋友的 Codex/);
+'''
+        result=subprocess.run(['node','-e',script],cwd=root,capture_output=True,text=True,timeout=15)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+
 class WorkspaceFolderPicker(unittest.TestCase):
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to test the desktop bridge')
     def test_selection_and_cancel_keep_the_expected_path(self):

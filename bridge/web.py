@@ -263,6 +263,7 @@ class Handler(BaseHTTPRequestHandler):
             if (q.get("reload") or [""])[0] in ("1", "true", "yes"):
                 registry.load()      # 用户刚改了 data/agents.d：重读一遍，不用重启服务器
             return self._json(200, dict(registry.catalog(), default_dir=PROJECT, hosts=install.hosts_status(),
+                                        owner_devices=devices.listing(getattr(self, "_device_id", "")),
                                         connections=connections.catalog(), members={s["id"]: members.broker.status(s["id"]) for s in registry.all_specs() if s["driver"] == "external" and s.get("kind") != "user"},
                                         mcp_url="http://127.0.0.1:%d/mcp" % PORT))
         if path in ("/api/state", "/api/messages"):   # 老页面（服务器换了新版、页面还没刷新）：按最近打开的那场回

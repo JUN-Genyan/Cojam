@@ -8,6 +8,7 @@
 #contactList button{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;text-align:left;border:0;border-radius:8px;background:none;color:var(--fg);font-size:13px}
 #contactList button:hover,.project-head button:hover,.new-conversation:hover{background:var(--hover)}
 #contactList small,.contact-manage small{display:block;font-size:11px;color:var(--mut)}
+#contactList .contact-channel{padding-left:2px;color:var(--mut)}
 #rooms .rh #contactsManage{margin-left:auto;font-size:18px}#rooms .rh #contactsAdd{margin-left:0;font-size:12px;padding:2px 7px;line-height:23px}
 .avatar{display:grid;place-items:center;flex:none;width:30px;height:30px;font-weight:700;border-radius:9px;color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent)}
 .project-head{display:flex;align-items:center;gap:4px;margin-top:6px}.project-head button{border:0;background:none;color:var(--fg);padding:8px;border-radius:7px;font-size:13px}.project-head button:first-child{display:flex;gap:7px;flex:1;min-width:0;text-align:left;font-weight:600}.project-head span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.project-head button:last-child{color:var(--mut);font-size:18px;padding:0 8px}

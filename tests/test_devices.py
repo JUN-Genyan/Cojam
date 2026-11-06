@@ -127,6 +127,11 @@ class DeviceHTTP(unittest.TestCase):
         self.assertEqual([row["id"] for row in data["devices"]], [device["id"]])
         self.assertTrue(data["devices"][0]["current"])
         self.assertEqual(call("/api/rooms", token=token)[0], 200)
+        status, catalog_body, _ = call("/api/agents", token=token)
+        self.assertEqual(status, 200)
+        self.assertEqual(body_json(catalog_body)["owner_devices"][0]["id"], device["id"])
+        self.assertNotIn(token, catalog_body.decode('utf-8'))
+        self.assertEqual(call("/api/agents")[0], 403)
 
     def test_revoked_device_cannot_call_admin_api(self):
         token, device, _ = self.make_device("旧手机")

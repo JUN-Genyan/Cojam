@@ -887,7 +887,7 @@ function agentLetter(id){const a=agentMeta(id);return (a&&a.letter)||(id||'?').s
 const capsEl=document.getElementById('caps');
 function drawCaps(){
   const ids=(S&&S.participants)||[];
-  const key=ids.join(',');
+  const key=ids.map(id=>id+':'+((CONTACTS.find(a=>a.id===id)||{}).label||'')).join(',');
   if(capsEl.dataset.k!==key){          // 参会的人变了才重建按钮，平时只改里面
     capsEl.dataset.k=key;capsEl.innerHTML='';
     ids.forEach(a=>{
@@ -908,7 +908,7 @@ function drawQuick(){          // 输入框上面那排 @：跟着这场会议�
   const key=ids.join(',');
   if(quickEl.dataset.k===key)return;
   quickEl.dataset.k=key;
-  quickEl.innerHTML=ids.map(a=>'<button type="button" data-ins="@'+esc(a)+' ">@'+esc(a)+'</button>').join('')
+  quickEl.innerHTML=ids.map(id=>{const contact=CONTACTS.find(a=>a.id===id),label=contact&&contact.label||id;return '<button type="button" data-ins="@'+esc(id)+' " title="@'+esc(id)+'">@'+esc(label)+'</button>'}).join('')
     +'<button type="button" data-ins="@用户 ">@用户</button>';
   quickEl.querySelectorAll('button').forEach(b=>b.onclick=()=>{
     const t=document.getElementById('ta');if(!t)return;t.value+=b.dataset.ins;t.focus();

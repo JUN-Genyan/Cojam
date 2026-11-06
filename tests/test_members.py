@@ -102,6 +102,20 @@ class Members(unittest.TestCase):
         wait_until(lambda: not r.busy_for())
         self.assertEqual([m['speaker'] for m in r.messages if m['speaker'] != '系统'],['你','member-a','member-b','member-a'])
 
+    def test_same_brand_on_different_devices_remains_distinct(self):
+        registry.save_agent({'id':'member-a','label':'我的 Codex','driver':'external','enabled':True})
+        registry.save_agent({'id':'member-b','label':'朋友的 Codex','driver':'external','enabled':True})
+        r = self.room()
+        self.connect('member-a', worker='my-device')
+        self.connect('member-b', worker='friend-device')
+        r.handle_message('你', '@member-b 请回复')
+        task = self.receive('member-b', worker='friend-device')
+        self.assertEqual(task['member'], 'member-b')
+        self.assertIsNone(self.op('member-a','receive',{'worker':'my-device','timeout':0})[1]['task'])
+        self.assertEqual(self.reply('member-b', task, '朋友的 Codex 回复', worker='friend-device')[0], 200)
+        wait_until(lambda:not r.busy_for())
+        self.assertTrue(any(m['speaker']=='member-b' and m['text']=='朋友的 Codex 回复' for m in r.messages))
+
     def test_duplicate_results_do_not_duplicate_messages(self):
         r = self.room(['member-a'])
         self.connect('member-a')
