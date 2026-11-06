@@ -187,6 +187,35 @@ assert.equal(context.connectionInviteStatus({expires: 9999999999, guest_count: 0
 
 class LanInvite(unittest.TestCase):
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
+    def test_my_device_can_enter_custom_tailscale_serve_address(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const elements = {};
+function node(id) { return elements[id] ||= {value:'', hidden:false, innerHTML:'', textContent:'',
+  classList:{toggle(){}}, querySelectorAll(){return []}}; }
+const context = vm.createContext({URL, uiIcon:()=>'', esc:s=>s,
+  location:{origin:'http://127.0.0.1:8765'}, document:{getElementById:node},
+  fetch:async()=>({ok:true,json:async()=>({account:{},devices:[]})})});
+vm.runInContext(fs.readFileSync('static/connections.js','utf8'), context);
+(async()=>{
+  const w={base:'http://100.64.0.5:8767',info:{tailscale_url:'http://100.64.0.5:8767'},form:{}};
+  await context.renderDeviceSetup(w);
+  const select=node('connDeviceBase'), custom=node('connDeviceCustomBase');
+  assert.match(select.innerHTML, /自定义 HTTPS 地址/);
+  select.value='__custom__'; select.onchange();
+  assert.equal(custom.hidden,false);
+  custom.value='https://host.example.ts.net/'; custom.oninput();
+  assert.equal(w.base,'https://host.example.ts.net');
+  select.value='http://100.64.0.5:8767'; select.onchange();
+  assert.equal(custom.hidden,true);
+  assert.equal(w.base,'http://100.64.0.5:8767');
+})().catch(e=>{console.error(e);process.exitCode=1});
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
     def test_lan_base_and_loopback_warning(self):
         root = Path(__file__).resolve().parents[1]
         script = r'''

@@ -52,19 +52,29 @@ async function connectionGet(url) {
 }
 async function renderDeviceSetup(w) {
   const select = document.getElementById('connDeviceBase');
+  const custom = document.getElementById('connDeviceCustomBase');
   const hint = document.getElementById('connDeviceBaseHint');
   const options = [];
   if (w.info && w.info.tailscale_url) options.push([w.info.tailscale_url, 'Tailscale（完整界面）']);
   if (w.info && w.info.lan_url) options.push([w.info.lan_url, '局域网']);
   options.push([location.origin, '当前地址']);
-  select.innerHTML = options.map(([value, label]) => '<option value="' + esc(value) + '">' + esc(label) + '</option>').join('');
-  select.value = w.base;
+  select.innerHTML = options.map(([value, label]) => '<option value="' + esc(value) + '">' + esc(label) + '</option>').join('')
+    + '<option value="__custom__">自定义 HTTPS 地址</option>';
+  const known = options.some(([value]) => value === w.base);
+  select.value = known ? w.base : '__custom__';
+  custom.value = known ? '' : w.base;
+  custom.hidden = known;
   const showHint = () => {
     const issue = connectionBaseWarning(w.base);
     hint.textContent = issue || '用要接入的设备扫描二维码或打开链接。只发给可信设备。';
     hint.classList.toggle('warn', !!issue);
   };
-  select.onchange = () => { w.base = select.value; showHint(); };
+  select.onchange = () => {
+    custom.hidden = select.value !== '__custom__';
+    w.base = select.value === '__custom__' ? custom.value.trim().replace(/\/+$/, '') : select.value;
+    showHint();
+  };
+  custom.oninput = () => { w.base = custom.value.trim().replace(/\/+$/, ''); showHint(); };
   showHint();
   document.getElementById('connDeviceCreate').onclick = () => generateDeviceCode(w);
   try {
@@ -103,7 +113,12 @@ async function generateDeviceCode(w) {
   const nameInput = document.getElementById('connDeviceName');
   const baseSelect = document.getElementById('connDeviceBase');
   if (nameInput) w.form.deviceName = nameInput.value;
-  if (baseSelect) w.base = baseSelect.value;
+  if (baseSelect) w.base = baseSelect.value === '__custom__'
+    ? document.getElementById('connDeviceCustomBase').value.trim().replace(/\/+$/, '') : baseSelect.value;
+  try {
+    const url = new URL(w.base);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw 0;
+  } catch (e) { wizardError('请填写完整的服务根地址，例如 https://example.ts.net'); return; }
   setConnectionBusy(w, true);
   try {
     const [ok, data] = await post('/api/devices/code', {
@@ -185,7 +200,7 @@ function renderConnectionSetup(w) {
   if (w.type === 'mydevice') {
     content += '<p class="hint">接入码 10 分钟内有效，只能使用一次。设备拿到长期凭证后，重启应用也不用重新接入。</p>'
       + '<label>设备名称<input id="connDeviceName" maxlength="40" placeholder="例如：我的 iPhone" value="' + esc(w.form.deviceName || '') + '"></label>'
-      + '<label>接入地址<select id="connDeviceBase"></select></label>'
+      + '<label>接入地址<select id="connDeviceBase"></select></label><input id="connDeviceCustomBase" type="url" placeholder="https://example.ts.net" aria-label="自定义接入地址" hidden>'
       + '<p class="hint" id="connDeviceBaseHint"></p>'
       + '<button id="connDeviceCreate" class="pri">生成设备接入码</button>'
       + '<div id="connDeviceResult"></div>'
