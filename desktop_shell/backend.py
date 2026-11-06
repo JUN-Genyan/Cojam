@@ -80,6 +80,10 @@ def probe(base, timeout=.5):
 
 def spawn_core(command, cwd):
     env = dict(os.environ)
+    if sys.platform == "darwin":
+        env.setdefault("ROUNDTABLE_LOG_DIR", str(Path.home() / "Library" / "Application Support" / "Cojam"))
+        paths = [str(Path.home() / ".local" / "bin"), "/opt/homebrew/bin", "/usr/local/bin"]
+        env["PATH"] = os.pathsep.join(paths + [env.get("PATH", os.defpath)])
     env["ROUNDTABLE_NO_BROWSER"] = "1"
     env["ROUNDTABLE_OWNER_LIFECYCLE"] = "1"
     flags = (subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP) if os.name == "nt" else 0
@@ -153,7 +157,8 @@ def stop_process(proc):
 
 
 def log_path(core_dir):
-    directory = os.environ.get("ROUNDTABLE_LOG_DIR") or os.path.join(core_dir, "data")
+    default = str(Path.home() / "Library" / "Application Support" / "Cojam") if sys.platform == "darwin" else os.path.join(core_dir, "data")
+    directory = os.environ.get("ROUNDTABLE_LOG_DIR") or default
     return os.path.join(directory, "cojam.log")
 
 

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
 import tempfile
 import threading
 import urllib.parse
@@ -57,6 +58,8 @@ def parse_manifest(data):
 
 def check():
     global RELEASE
+    if sys.platform == 'darwin':
+        return {'state': 'error', 'current': VERSION, 'error': 'macOS 版请通过官网获取更新并手动替换应用。'}
     with LOCK:
         if STATE['state'] == 'downloading':
             return dict(STATE)

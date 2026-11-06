@@ -10,6 +10,13 @@ from bridge import updater
 
 
 class Updates(unittest.TestCase):
+    def test_macos_does_not_offer_windows_installer(self):
+        with patch.object(updater.sys, 'platform', 'darwin'), patch.object(updater, '_open') as request:
+            result = updater.check()
+        self.assertEqual(result['state'], 'error')
+        self.assertIn('macOS', result['error'])
+        request.assert_not_called()
+
     def manifest(self, payload=b'installer'):
         return {'app':'Cojam', 'version':'99.0.0',
                 'url':'https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-99.0.0.exe',

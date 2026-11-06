@@ -1,12 +1,12 @@
 // Guided onboarding. Credentials stay in this modal's memory and never in localStorage.
 let connectionWizard = null, connectionSequence = 0;
-async function checkConnectionBackend() {
+async function checkConnectionBackend(signal) {
   let info;
   try {
-    const response = await fetch('/api/server/info');
+    const response = await fetch('/api/server/info', {signal});
     if (!response.ok) throw Error();
     info = await response.json();
-  } catch (e) { throw Error('当前仍在运行旧版后台，无法配置接入。请退出旧后台并重新打开合拍 Cojam；只刷新网页不会更新后台。'); }
+  } catch (e) { if (signal && signal.aborted) throw e; throw Error('无法连接合拍后台，请重新打开合拍后重试。'); }
   if (info.app !== 'AI Bridge' || info.version !== '2.6.2' || info.api_revision !== 2)
     throw Error('界面与后台版本不一致。请重新打开最新的合拍 Cojam，再刷新此页面。');
   return info;
@@ -37,7 +37,7 @@ const CONNECTION_TYPES = {
   user: ['其他用户', '生成邀请票；对方打开链接领取身份，只进指定会话。同一设备之后仍是同一个人。', uiIcon('user')]
 };
 function stopConnectionWizard() {
-  if (connectionWizard) { clearInterval(connectionWizard.timer); connectionWizard.token = ''; }
+  if (connectionWizard) { clearInterval(connectionWizard.timer); if (connectionWizard.controller) connectionWizard.controller.abort(); connectionWizard.token = ''; }
   connectionWizard = null;
 }
 function connectionModalChanged() {
@@ -156,9 +156,11 @@ async function startConnectionWizard(id, type) {
   const w = {seq: ++connectionSequence, step: 1, type: type || '', id: id || '', token: '', base: location.origin,
     form: {}, status: null, busy: false, permissions: {read: true, post: true, trigger: true, board: false, files: false, work: false}};
   connectionWizard = w;
+  w.controller = new AbortController();
+  showModal('<div id="connectionWizard" data-flow="' + w.seq + '"><h3>正在准备接入…</h3><p class="hint" role="status">正在读取联系人和连接信息。</p><div class="btns"><button onclick="hideModal()">取消</button></div></div>');
+  const timeout = setTimeout(() => w.controller.abort(), 15000);
   try {
-    const info = await checkConnectionBackend();
-    await refreshContacts();
+    const [info] = await Promise.all([checkConnectionBackend(w.controller.signal), refreshContacts(w.controller.signal, true)]);
     if (connectionWizard !== w) return;
     const contact = CONTACTS.find(a => a.id === id);
     if (contact) {
@@ -169,7 +171,11 @@ async function startConnectionWizard(id, type) {
     w.info = info;
     w.base = connectionDefaultBase(w.type, info, location.origin);
     renderConnectionWizard();
-  } catch (e) { stopConnectionWizard(); showModal('<h3>接入暂不可用</h3><p role="alert">' + esc(e.message || '无法读取联系人') + '</p><div class="btns"><button onclick="location.reload()">刷新页面</button><button onclick="hideModal()">关闭</button></div>'); }
+  } catch (e) {
+    if (connectionWizard !== w) return;
+    const message = w.controller.signal.aborted ? '读取接入信息超时，请检查后台是否仍在运行后重试。' : (e.message || '无法读取联系人');
+    stopConnectionWizard(); showModal('<h3>接入暂不可用</h3><p role="alert">' + esc(message) + '</p><div class="btns"><button onclick="startConnectionWizard()">重试</button><button onclick="hideModal()">关闭</button></div>');
+  } finally { clearTimeout(timeout); }
 }
 function addContact() { return startConnectionWizard(); }
 function openConnection(id) { return startConnectionWizard(id); }
@@ -185,8 +191,14 @@ function renderConnectionWizard() {
   const w = connectionWizard; if (!w) return;
   clearInterval(w.timer);
   if (w.step === 1) {
-    wizardFrame(w, '<h3>谁来一起合拍？</h3><p class="hint">邀请朋友，连接 Harness。无论来自哪台设备，都在同一场会话里协作。</p><div class="connection-choices">' + Object.entries(CONNECTION_TYPES).map(([id, t]) => '<button class="connection-choice" data-connection-type="' + id + '"><span class="connection-symbol">' + t[2] + '</span><span><b>' + t[0] + '</b><small>' + t[1] + '</small></span><span>›</span></button>').join('') + '</div>');
-    mbox.querySelectorAll('[data-connection-type]').forEach(b => b.onclick = () => { w.type = b.dataset.connectionType; w.base = connectionDefaultBase(w.type, w.info, location.origin); w.step = 2; renderConnectionWizard(); });
+    const choices = w.chooseAI ? ['local','external','http'].map(id => [id, CONNECTION_TYPES[id]]) : [
+      ['user', ['邀请其他人', '生成邀请链接，让朋友加入指定会话。', uiIcon('user')]],
+      ['ai', ['连接 AI', '连接本机程序、其他设备上的 Harness 或 HTTP 服务。', uiIcon('terminal')]],
+      ['mydevice', CONNECTION_TYPES.mydevice]
+    ];
+    wizardFrame(w, '<h3>' + (w.chooseAI ? '选择 AI 的连接方式' : '谁来一起合拍？') + '</h3><p class="hint">' + (w.chooseAI ? '选择 AI 所在的位置或服务类型。' : '选择要邀请的人、AI 或自己的设备。') + '</p><div class="connection-choices">' + choices.map(([id, t]) => '<button class="connection-choice" data-connection-type="' + id + '"><span class="connection-symbol">' + t[2] + '</span><span><b>' + t[0] + '</b><small>' + t[1] + '</small></span><span>›</span></button>').join('') + '</div>' + (w.chooseAI ? '<div class="btns"><button id="connChoiceBack">返回</button></div>' : ''));
+    if (w.chooseAI) document.getElementById('connChoiceBack').onclick = () => { w.chooseAI = false; renderConnectionWizard(); };
+    mbox.querySelectorAll('[data-connection-type]').forEach(b => b.onclick = () => { if (b.dataset.connectionType === 'ai') { w.chooseAI = true; renderConnectionWizard(); return; } w.type = b.dataset.connectionType; w.base = connectionDefaultBase(w.type, w.info, location.origin); w.step = 2; renderConnectionWizard(); });
   } else if (w.step === 2) renderConnectionSetup(w);
   else if (w.step === 3) renderConnectionAssignment(w);
   else renderConnectionComplete(w);

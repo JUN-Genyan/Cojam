@@ -21,6 +21,7 @@
 ## 怎么开
 
 - **下载版**：运行 Windows 桌面安装程序，安装后打开合拍；也可使用单文件浏览器版。桌面窗口版需要 `Cojam.exe` 和 `CojamCore.exe` 同目录。应用内「更新」可检查并下载安装程序，由用户手动运行。
+- **macOS 桌面版**：可从源码启动，或在 Mac 上构建独立应用包；依赖、数据目录与签名说明见 [macOS 使用说明](docs/MACOS.md)。
 - 源码版：双击 `start.bat` 或 `open.pyw`（都在后台开，不弹终端窗口；没开就开、开了就直接打开网页）。要看日志或前台运行：`python roundtable.py`（或 `python -m bridge`）。地址 http://127.0.0.1:8765 。
 - 接别的工具（Antigravity / Cursor / Claude Code / Codex）一条命令：`Cojam.exe install antigravity`（源码版 `python roundtable.py install ...`）。见"接更多 AI"。
 - 第一次打开，从左侧创建项目和联系人，再在项目下新建会话。

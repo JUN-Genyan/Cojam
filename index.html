@@ -672,7 +672,7 @@ function add(m){
   const md=cls==='ai';
   d.innerHTML=who+q+(m.text?'<div class="body'+(md?' md':'')+'">'+render(m.text,md)+'</div>':'')+attHtml(m.attachments)+(m.step!=null?'<button type="button" class="undo" data-step="'+m.step+'">撤回这一步</button>':'');
   feed.appendChild(d);
-  const ub=d.querySelector('.undo');if(ub){ub.onclick=()=>undoStep(m.step);syncUndo()}
+  const ub=d.querySelector('.undo');if(ub)ub.onclick=()=>undoStep(m.step);
   const rb=d.querySelector('.rp');if(rb)rb.onclick=()=>{const sel=lastSel&&lastSel.id===m.id&&Date.now()-lastSel.t<15000?lastSel.text:'';setQuote(m,sel)};
   const qb=d.querySelector('.qt');if(qb)qb.onclick=()=>{const o=feed.querySelector('.msg[data-id="'+qb.dataset.to+'"]');if(o){o.scrollIntoView({block:'center',behavior:'smooth'});o.classList.add('flash');setTimeout(()=>o.classList.remove('flash'),1200)}};
 }
@@ -692,24 +692,29 @@ function drawStatus(){
   const h=Object.keys(lv).filter(a=>lv[a].text&&lastRun.running.includes(a)).map(a=>'<div class="ln '+esc(a)+(openLive.has(a)?' open':'')+'" data-ai="'+esc(a)+'" title="点一下展开 / 收起"><b>'+esc(a)+'</b><span class="t">'+esc(lv[a].time.slice(0,5))+'</span>'+esc(lv[a].text)+'</div>').join('');
   if(stLive.innerHTML!==h)stLive.innerHTML=h;
 }
-let polling=null;   // 正在拉哪场会议的消息（同一场不叠着拉，免得同一条加两遍；切到别的会议时不用等）
+let polling=null, roomViewGeneration=0;   // 渲染时也保持单次轮询，切换会话后丢弃旧批次
 async function poll(){
-  if(!RID||polling===RID)return;
-  const rid=RID;polling=rid;
+  if(!RID||(polling&&polling.rid===RID&&polling.generation===roomViewGeneration))return;
+  const rid=RID, generation=roomViewGeneration, request={rid,generation};polling=request;
   try{
-    if(!S)await loadState();if(rid!==RID)return;
+    if(!S)await loadState();if(rid!==RID||generation!==roomViewGeneration)return;
     const r=await fetch(api('messages')+'?since='+since,{cache:'no-store'});
-    if(r.status===404){polling=null;return roomGone()}
+    if(r.status===404){if(rid!==RID||generation!==roomViewGeneration)return;if(polling===request)polling=null;return roomGone()}
     const j=await r.json();
-    if(rid!==RID)return;   // 等回来的时候已经切到别的会议了
-    if(j.meeting!==curMeeting){curMeeting=j.meeting;feed.innerHTML='';if(since!==0||j.messages.length<j.next){since=0;polling=null;return poll()}}
+    if(rid!==RID||generation!==roomViewGeneration)return;
+    if(j.meeting!==curMeeting){curMeeting=j.meeting;feed.innerHTML='';if(since!==0||j.messages.length<j.next){since=0;if(polling===request)polling=null;return poll()}}
     const atBottom=feed.scrollHeight-feed.scrollTop-feed.clientHeight<60;
-    j.messages.forEach(add);since=j.next;
+    for(let i=0;i<j.messages.length;i++){
+      if(rid!==RID||generation!==roomViewGeneration)return;
+      add(j.messages[i]);
+      if((i+1)%20===0&&i+1<j.messages.length)await new Promise(resolve=>setTimeout(resolve,0));
+    }
+    syncUndo();since=j.next;
     if(j.messages.length&&atBottom)feed.scrollTop=feed.scrollHeight;
     lastRun={running:j.running||[],queued:j.queued||0};
     if(!document.hidden)markSeen(rid,j.next);
   }catch(e){}
-  finally{if(polling===rid)polling=null}
+  finally{if(polling===request)polling=null}
   if(rid!==RID)return;
   await loadState();
   drawStatus();
@@ -1358,7 +1363,7 @@ function resetRoomView(){
 }
 function switchRoom(id,replace){
   if(!id)return;
-  if(id!==RID){RID=id;resetRoomView()}
+  if(id!==RID){roomViewGeneration++;RID=id;resetRoomView()}
   const params=new URLSearchParams(location.search);
   params.set('r',id);
   const u='?'+params.toString();
@@ -1367,7 +1372,7 @@ function switchRoom(id,replace){
   drawRooms();
   poll().then(()=>{feed.scrollTop=feed.scrollHeight;queueJump()});
 }
-addEventListener('popstate',()=>{const id=new URLSearchParams(location.search).get('r');if(id&&id!==RID){RID=id;resetRoomView();drawRooms();poll().then(()=>{feed.scrollTop=feed.scrollHeight})}});
+addEventListener('popstate',()=>{const id=new URLSearchParams(location.search).get('r');if(id&&id!==RID){roomViewGeneration++;RID=id;resetRoomView();drawRooms();poll().then(()=>{feed.scrollTop=feed.scrollHeight})}});
 let goneShown=false;
 function roomGone(){
   if(goneShown)return;goneShown=true;

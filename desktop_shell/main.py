@@ -2,6 +2,7 @@
 import ctypes
 import inspect
 import os
+import subprocess
 import sys
 import webbrowser
 
@@ -16,6 +17,10 @@ def base_url():
 
 
 def _message_box(text, flags):
+    if sys.platform == "darwin":
+        script = 'on run argv\n display dialog (item 1 of argv) with title "合拍 Cojam" buttons {"取消", "确定"} default button "确定"\nend run' if flags & 0x04 else 'on run argv\n display alert "合拍 Cojam" message (item 1 of argv)\nend run'
+        result = subprocess.run(["/usr/bin/osascript", "-e", script, text], capture_output=True)
+        return 6 if result.returncode == 0 else 2
     return ctypes.windll.user32.MessageBoxW(None, text, TITLE, flags)
 
 
@@ -76,7 +81,7 @@ def main():
     base = base_url()
     core = backend.find_core()
     if core is None:
-        show_error("找不到 CojamCore.exe。请把 Cojam.exe 和 CojamCore.exe 放在同一个文件夹里。")
+        show_error("找不到合拍后台。请确认应用包完整；Windows 版需要把 Cojam.exe 和 CojamCore.exe 放在同一个文件夹里。")
         return 2
     state, info = backend.probe(base)
     if state in ("foreign", "timeout"):
@@ -123,7 +128,7 @@ def main():
             heartbeat.stop()
             show_error("没能打开桌面窗口，也没能打开浏览器。")
             return 2
-        show_error("没能打开桌面窗口（可能缺少 Microsoft Edge WebView2）。已改用浏览器打开合拍。")
+        show_error("没能打开桌面窗口。已改用浏览器打开合拍。")
         return 0
     heartbeat.stop()
     return 0

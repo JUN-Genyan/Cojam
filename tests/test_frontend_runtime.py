@@ -28,6 +28,25 @@ assert.match(boxes.quick.innerHTML,/data-ins="@friend-codex "[^>]*>@朋友的 Co
         result=subprocess.run(['node','-e',script],cwd=root,capture_output=True,text=True,timeout=15)
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
 
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to test message rendering')
+    def test_history_render_yields_and_stops_after_room_switch(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs=require('fs'), vm=require('vm'), assert=require('assert/strict');
+const html=fs.readFileSync('index.html','utf8');
+const source=html.match(/async function poll\(\)\{[\s\S]*?\n\}/)[0];
+let rendered=[], yielded=0;
+const context=vm.createContext({RID:'first', roomViewGeneration:0, polling:null, S:{}, since:0, curMeeting:'first',
+ api:()=>'', fetch:async()=>({status:200,json:async()=>({meeting:'first',messages:Array.from({length:45},(_,id)=>({id})),next:45})}),
+ feed:{scrollHeight:0,scrollTop:0,clientHeight:0}, add:m=>rendered.push(m.id), syncUndo:()=>{},
+ setTimeout:f=>{yielded++; if(yielded===1)context.roomViewGeneration++; f()},
+ document:{hidden:true}, loadState:async()=>{}, drawStatus:()=>{}, markSeen:()=>{}});
+vm.runInContext(source,context);
+(async()=>{await context.poll(); assert.equal(yielded,1); assert.equal(rendered.length,20); assert.equal(context.since,0)})().catch(e=>{console.error(e);process.exitCode=1});
+'''
+        result=subprocess.run(['node','-e',script],cwd=root,capture_output=True,text=True,timeout=30)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
 
 class WorkspaceFolderPicker(unittest.TestCase):
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to test the desktop bridge')
@@ -364,7 +383,7 @@ const roomMatch = html.match(/function switchRoom\(id,replace\)\{[\s\S]*?\n\}/);
 assert.ok(roomMatch, 'switchRoom missing');
 let pushed = null;
 const roomContext = vm.createContext({
-  RID: null, resetRoomView: () => {}, post: () => {}, api: () => '', drawRooms: () => {},
+  RID: null, roomViewGeneration: 0, resetRoomView: () => {}, post: () => {}, api: () => '', drawRooms: () => {},
   poll: () => Promise.resolve(), feed: {scrollTop: 0, scrollHeight: 0}, queueJump: () => {},
   location: {search: '?owner_tab=' + valid},
   history: {replaceState: (state, title, url) => { pushed = url; },
@@ -449,12 +468,12 @@ const js = fs.readFileSync('static/connections.js', 'utf8');
 const context = vm.createContext({});
 vm.runInContext(html.match(/^function apiError.*$/m)[0], context);
 vm.runInContext(html.match(/^async function post.*$/m)[0], context);
-vm.runInContext(js.match(/async function checkConnectionBackend\(\) \{[\s\S]*?\n\}/)[0], context);
+vm.runInContext(js.match(/async function checkConnectionBackend\(signal\) \{[\s\S]*?\n\}/)[0], context);
 (async () => {
  context.fetch = async () => ({ok:false,status:404,json:async()=>{throw Error('HTML response')}});
  let result = await context.post('/api/contacts/check', {});
  assert.equal(result[0], false); assert.match(result[1].error, /旧版本/);
- await assert.rejects(context.checkConnectionBackend(), /旧版后台/);
+ await assert.rejects(context.checkConnectionBackend(), /无法连接/);
  context.fetch = async () => ({ok:false,status:403,json:async()=>({error:'owner only'})});
  result = await context.post('/api/agents/add', {});
  assert.equal(result[0], false); assert.match(result[1].error, /刷新/);
