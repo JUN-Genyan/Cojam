@@ -1,8 +1,8 @@
 {
   "app": "Cojam",
-  "version": "2.6.3",
-  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.3.exe",
-  "sha256": "c55d722c6f1a0b8accb792a4aa1ffbdaa6a748b54cbee9d8bb91404b921c8cfd",
-  "size": 27705633,
-  "notes": "优化启动与接入流程，简化接入入口并改进联系人管理。"
+  "version": "2.6.4",
+  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.4.exe",
+  "sha256": "b9a62ea5b85728f7a51ade8732e955111ac1c4c7227a8088b9c12800df82f009",
+  "size": 27710362,
+  "notes": "改进本机程序检测、设备重连与接入体验，并限制远程工作目录选择。"
 }
