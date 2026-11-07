@@ -80,11 +80,13 @@ async function renderDeviceSetup(w) {
   try {
     const [ok, data] = await connectionGet('/api/devices');
     if (!ok) throw Error(data.error || '读取设备失败');
+    if (!wizardCurrent(w) || w.type !== 'mydevice' || w.step !== 2) return;
     w.account = data.account;
     w.devices = data.devices || [];
     renderDeviceList(w);
   } catch (error) {
-    document.getElementById('connDeviceList').textContent = error.message;
+    const list = document.getElementById('connDeviceList');
+    if (wizardCurrent(w) && list) list.textContent = error.message;
   }
 }
 function renderDeviceList(w) {

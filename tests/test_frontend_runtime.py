@@ -6,6 +6,28 @@ import unittest
 
 
 class ContactRoutes(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to test contact refresh')
+    def test_contact_refresh_ignores_stale_responses_and_preserves_list(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const source=fs.readFileSync('static/workspace.js','utf8');
+const part=source.slice(source.indexOf('let contactsRequestSequence'),source.indexOf('function drawRoomIdentity'));
+let pending=[],writes=0,markup='';
+const list={scrollTop:37,set innerHTML(v){writes++;markup=v},get innerHTML(){return markup}};
+const context=vm.createContext({fetch:()=>new Promise(resolve=>pending.push(resolve)),
+ document:{activeElement:null,getElementById:id=>id==='contactList'?list:{}},
+ esc:String,CONTACTS:[],agCat:{},drawQuick:()=>{}});
+vm.runInContext(part,context);
+const response=label=>({ok:true,json:async()=>({agents:[{id:'a',label,letter:'A',color:'#fff',driver:'cli',enabled:true,user:true}]})});
+(async()=>{const old=context.refreshContacts(),fresh=context.refreshContacts();pending[1](response('新'));await fresh;
+ pending[0](response('旧'));await old;assert.match(markup,/新/);assert.doesNotMatch(markup,/旧/);assert.equal(writes,1);
+ const same=context.refreshContacts();pending[2](response('新'));await same;assert.equal(writes,1);assert.equal(list.scrollTop,37);
+})().catch(e=>{console.error(e);process.exitCode=1});
+'''
+        result=subprocess.run(['node','-e',script],cwd=root,capture_output=True,text=True,timeout=30)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to test contact routing UI')
     def test_same_brand_contacts_keep_separate_mentions_and_channels(self):
         root = Path(__file__).resolve().parents[1]
