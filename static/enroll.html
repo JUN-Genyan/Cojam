@@ -18,6 +18,7 @@ button:disabled{opacity:.5;cursor:not-allowed}#error{color:#fca5a5;min-height:1.
   <label for="name">设备名称</label>
   <input id="name" maxlength="40" autocomplete="off">
   <button id="join">接入</button>
+  <button id="enter" hidden>直接进入合拍</button>
   <p id="error" role="alert"></p>
   <p id="address" class="hint"></p>
 </main>
@@ -45,6 +46,39 @@ if (!code) {
   el('error').textContent = '接入码无效，请让主机重新生成。';
 }
 history.replaceState(null, '', location.pathname + location.search);
+
+// 这台设备可能早就接入过了（cookie 或本地凭证还在）：
+// 重新点开旧接入链接时不用再要新码，直接进。
+async function alreadyEnrolled() {
+  try {
+    const page = await (await fetch('/', {cache: 'no-store'})).text();
+    if (page.includes('name="rt-token"')) return true;   // cookie 仍有效，首页直接给了完整界面
+  } catch (e) {}
+  let own = '';
+  try { own = localStorage.getItem('cojam_owner_device_token') || ''; } catch (e) {}
+  if (!own) return false;
+  try {
+    const response = await fetch('/api/devices/restore', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({token: own})});
+    if (response.ok) return true;
+    if (response.status === 401) { try { localStorage.removeItem('cojam_owner_device_token'); } catch (e) {} }
+  } catch (e) {}
+  return false;
+}
+(async () => {
+  if (!await alreadyEnrolled()) return;
+  if (code) {
+    el('error').textContent = '';
+    el('address').textContent = '这台设备已经接入过，不需要新的接入码。';
+    const enter = el('enter');
+    enter.hidden = false;
+    enter.onclick = () => location.replace('/');
+  } else {
+    el('error').textContent = '';
+    el('address').textContent = '这台设备已经接入过，正在进入…';
+    location.replace('/');
+  }
+})();
 el('join').onclick = async () => {
   const label = el('name').value.trim() || defaultName();
   el('join').disabled = true;

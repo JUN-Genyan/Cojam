@@ -249,6 +249,17 @@ class DeviceHTTP(unittest.TestCase):
         self.assertIn("location.replace('/')", html)
         self.assertIn("cojam_owner_device_token", html)
 
+    def test_enroll_page_redirects_already_enrolled_devices(self):
+        request = urllib.request.Request(BASE + "/enroll", headers={"Host": "192.168.1.9"})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            html = response.read().decode("utf-8")
+        # 重开旧接入链接的设备：先认已有凭证（cookie 或本地备份），不再逼着要新码
+        self.assertIn("alreadyEnrolled", html)
+        self.assertIn("/api/devices/restore", html)
+        self.assertIn('name="rt-token"', html)
+        self.assertIn('id="enter"', html)
+        self.assertIn("不需要新的接入码", html)
+
 
 if __name__ == "__main__":
     unittest.main()
