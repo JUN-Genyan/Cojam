@@ -1,8 +1,8 @@
 {
   "app": "Cojam",
-  "version": "2.6.4",
-  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.4.exe",
-  "sha256": "b9a62ea5b85728f7a51ade8732e955111ac1c4c7227a8088b9c12800df82f009",
-  "size": 27710362,
-  "notes": "改进本机程序检测、设备重连与接入体验，并限制远程工作目录选择。"
+  "version": "2.6.5",
+  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.5.exe",
+  "sha256": "a1715b7f69843a0312e7e0147ce4263778d0661098c78f016913004cca40441f",
+  "size": 27719632,
+  "notes": "支持 Windows 桌面版在应用内下载并安装更新。"
 }
