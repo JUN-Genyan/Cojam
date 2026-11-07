@@ -242,11 +242,16 @@ class WindowAndFlow(unittest.TestCase):
         webview = Mock()
         webview.FileDialog.FOLDER = 20
         api = shell_main.DesktopApi(webview)
-        api.window = Mock()
-        api.window.create_file_dialog.side_effect = [(r'D:\project',), None]
+        api._window = Mock()
+        api._window.create_file_dialog.side_effect = [(r'D:\project',), None]
         self.assertEqual(api.choose_workdir(), r'D:\project')
         self.assertIsNone(api.choose_workdir())
-        api.window.create_file_dialog.assert_called_with(20, allow_multiple=False)
+        api._window.create_file_dialog.assert_called_with(20, allow_multiple=False)
+
+    def test_only_folder_picker_is_public_to_js_bridge(self):
+        api = shell_main.DesktopApi(Mock())
+        api._window = Mock()
+        self.assertEqual([name for name in dir(api) if not name.startswith('_')], ['choose_workdir'])
 
     def test_open_window_uses_native_window_settings(self):
         fake = FakeWebview()

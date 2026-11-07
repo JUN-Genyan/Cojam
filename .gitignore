@@ -7,3 +7,5 @@ build/
 .test-tmp/
 static/member-connector.zip
 website/downloads/
+
+experiments/tauri/src-tauri/target/

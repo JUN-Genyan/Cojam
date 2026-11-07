@@ -47,15 +47,17 @@ def confirm_close(base, token, ask=None):
 class DesktopApi:
     """Native actions exposed only to the desktop window."""
     def __init__(self, webview):
-        self.webview = webview
-        self.window = None
+        # pywebview recursively inspects public attributes when exposing its JS API.
+        # Keep implementation objects private so it only discovers our method.
+        self._webview = webview
+        self._window = None
 
     def choose_workdir(self):
-        if self.window is None:
+        if self._window is None:
             raise RuntimeError("桌面窗口尚未准备好")
-        kinds = getattr(self.webview, "FileDialog", None)
-        folder = kinds.FOLDER if kinds else self.webview.FOLDER_DIALOG
-        result = self.window.create_file_dialog(folder, allow_multiple=False)
+        kinds = getattr(self._webview, "FileDialog", None)
+        folder = kinds.FOLDER if kinds else self._webview.FOLDER_DIALOG
+        result = self._window.create_file_dialog(folder, allow_multiple=False)
         return str(result[0]) if result else None
 
 
@@ -66,7 +68,7 @@ def open_window(url, on_closing, module=None):
         settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
     api = DesktopApi(webview)
     window = webview.create_window(TITLE, url, width=1280, height=860, min_size=(960, 640), js_api=api)
-    api.window = window
+    api._window = window
     window.events.closing += on_closing
     kwargs = {}
     try:
