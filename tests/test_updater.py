@@ -75,7 +75,7 @@ class Updates(unittest.TestCase):
                 args=launch.call_args.args[0]
                 self.assertIn('-EncodedCommand',args)
                 env=launch.call_args.kwargs['env']
-                self.assertEqual(env['COJAM_UPDATE_DIRECTORY'],str(folder))
+                self.assertEqual(Path(env['COJAM_UPDATE_DIRECTORY']),folder.resolve())
                 self.assertEqual(env['COJAM_UPDATE_INSTALLER'],str(installer))
                 self.assertIn('/NOFORCECLOSEAPPLICATIONS',updater._INSTALL_HELPER)
                 self.assertIn('Start-Process -FilePath $shellPath',updater._INSTALL_HELPER)
