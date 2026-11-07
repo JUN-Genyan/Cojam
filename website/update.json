@@ -1,8 +1,8 @@
 {
   "app": "Cojam",
-  "version": "2.6.6",
-  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.6.exe",
-  "sha256": "2f6e9fa4dbb4c5fb0b54a12764890c4e52e583e51e98ceef0697ac90ae082bf3",
-  "size": 27723219,
-  "notes": "同一设备重复接入不再重复记录；窗口标题栏跟随应用主题；开始菜单快捷方式检测 Devin、Antigravity 等桌面端应用。"
+  "version": "2.6.7",
+  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.7.exe",
+  "sha256": "cafde483387487fcaeaa754448acfe5d937c3edf12d0f1d31db198f2a88f0164",
+  "size": 27725220,
+  "notes": "重开旧的设备接入链接不再要求新的接入码：已接入的设备直接进入合拍。"
 }
