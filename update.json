@@ -1,8 +1,8 @@
 {
   "app": "Cojam",
-  "version": "2.6.5",
-  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.5.exe",
-  "sha256": "a1715b7f69843a0312e7e0147ce4263778d0661098c78f016913004cca40441f",
-  "size": 27719632,
-  "notes": "支持 Windows 桌面版在应用内下载并安装更新。"
+  "version": "2.6.6",
+  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.6.exe",
+  "sha256": "2f6e9fa4dbb4c5fb0b54a12764890c4e52e583e51e98ceef0697ac90ae082bf3",
+  "size": 27723219,
+  "notes": "同一设备重复接入不再重复记录；窗口标题栏跟随应用主题；开始菜单快捷方式检测 Devin、Antigravity 等桌面端应用。"
 }
