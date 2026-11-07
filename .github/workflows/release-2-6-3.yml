@@ -1,0 +1,90 @@
+name: Release Cojam 2.6.3
+on:
+  push:
+    branches: ["codex/release-2-6-3"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: source
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: python -m pip install pyinstaller pywebview pillow
+      - name: Check frontend and desktop behavior
+        run: |
+          python -m unittest discover -s tests -p 'test_frontend_runtime.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p 'test_desktop_shell.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build application
+        run: |
+          ./build_exe.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build_desktop.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify isolated installation and data retention
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $compiler)) { throw 'Inno Setup compiler missing' }
+          & $compiler '/DTEST_BUILD' 'packaging/cojam-desktop.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'Test installer build failed' }
+          $testDir = Join-Path $env:RUNNER_TEMP 'cojam-release-test'
+          New-Item -ItemType Directory -Force -Path (Join-Path $testDir 'data') | Out-Null
+          Set-Content -LiteralPath (Join-Path $testDir 'data/sentinel.txt') -Value 'keep' -Encoding utf8
+          $setup = (Resolve-Path 'dist/Cojam-Setup-2.6.3-test.exe').Path
+          foreach ($attempt in 1..2) {
+            $p = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',("/DIR=$testDir")) -Wait -PassThru -WindowStyle Hidden
+            if ($p.ExitCode -ne 0) { throw "Test installation failed: $($p.ExitCode)" }
+            if ((Get-FileHash (Join-Path $testDir 'Cojam.exe')).Hash -ne (Get-FileHash 'dist/CojamDesktop.exe').Hash) { throw 'Desktop executable mismatch' }
+            if ((Get-FileHash (Join-Path $testDir 'CojamCore.exe')).Hash -ne (Get-FileHash 'dist/Cojam.exe').Hash) { throw 'Core executable mismatch' }
+            if (-not (Test-Path (Join-Path $testDir 'data/sentinel.txt'))) { throw 'Data lost on installation' }
+          }
+          $p = Start-Process -FilePath (Join-Path $testDir 'unins000.exe') -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru -WindowStyle Hidden
+          if ($p.ExitCode -ne 0 -or -not (Test-Path (Join-Path $testDir 'data/sentinel.txt'))) { throw 'Uninstall failed or lost data' }
+      - name: Build production installer and manifest
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" 'packaging/cojam-desktop.iss'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python packaging/make_update_manifest.py --notes '优化启动与接入流程，简化接入入口并改进联系人管理。'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cojam-2.6.3-windows
+          path: |
+            source/dist/Cojam-Setup-2.6.3.exe
+            source/dist/Cojam.exe
+            source/website/update.json
+          if-no-files-found: error
+      - name: Fetch current website
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: site
+      - name: Publish tested files and update manifest together
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path '../site/downloads' | Out-Null
+          Copy-Item 'dist/Cojam-Setup-2.6.3.exe' '../site/downloads/Cojam-Setup-2.6.3.exe'
+          Copy-Item 'dist/Cojam.exe' '../site/downloads/Cojam-Portable-2.6.3.exe'
+          Copy-Item 'website/update.json' '../site/update.json'
+          Copy-Item 'website/index.html' '../site/index.html'
+          git -C ../site config user.name 'github-actions[bot]'
+          git -C ../site config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C ../site add index.html update.json downloads/Cojam-Setup-2.6.3.exe downloads/Cojam-Portable-2.6.3.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C ../site commit -m 'Publish Cojam 2.6.3 for Windows'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C ../site push origin HEAD:gh-pages
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

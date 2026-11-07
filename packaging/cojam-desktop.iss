@@ -1,11 +1,11 @@
 ﻿#define MyAppName "合拍 Cojam"
-#define MyAppVersion "2.6.2"
+#define MyAppVersion "2.6.3"
 #ifdef TEST_BUILD
 #define MyAppId "{{E49FBE28-CC82-4E08-B5CD-E48A2C894472}"
-#define OutputName "Cojam-Setup-2.6.2-test"
+#define OutputName "Cojam-Setup-2.6.3-test"
 #else
 #define MyAppId "{{856A26B5-6DDE-40EC-A6B0-2CDE2C62A58E}"
-#define OutputName "Cojam-Setup-2.6.2"
+#define OutputName "Cojam-Setup-2.6.3"
 #endif
 [Setup]
 AppId={#MyAppId}
@@ -85,7 +85,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "..\dist\CojamDesktop.exe"; DestDir: "{app}"; DestName: "Cojam.exe"; Flags: ignoreversion
 Source: "..\dist\Cojam.exe"; DestDir: "{app}"; DestName: "CojamCore.exe"; Flags: ignoreversion
 Source: "connect-member.bat"; DestDir: "{app}"; DestName: "连接其他会议室.bat"; Flags: ignoreversion
-Source: "README.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "desktop-readme.txt"; DestDir: "{app}"; DestName: "README.txt"; Flags: ignoreversion
 [Icons]
 Name: "{autoprograms}\合拍 Cojam"; Filename: "{app}\Cojam.exe"; WorkingDir: "{app}"
 Name: "{autodesktop}\合拍 Cojam"; Filename: "{app}\Cojam.exe"; WorkingDir: "{app}"; Tasks: desktopicon
