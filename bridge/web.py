@@ -439,7 +439,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(403, {"error": "请在运行合拍的电脑上下载更新"})
             from . import updater
             try:
+                if data.get('auto_install') is True:
+                    return self._json(200, updater.start_download(auto_install=True,
+                        busy=lambda: any(row.get('running') or row.get('queued') for row in R.rooms.listing()),
+                        stop_backend=lambda: stop_idle_for_update(self.server)))
                 return self._json(200, updater.start_download())
+            except ValueError as error:
+                return self._json(409, {"error": str(error)})
+        if path == "/api/update/install":
+            if not self._is_local_owner() or getattr(self, "_device_id", ""):
+                return self._json(403, {"error": "请在运行合拍的电脑上安装更新"})
+            if any(row.get("running") or row.get("queued") for row in R.rooms.listing()):
+                return self._json(409, {"error": "还有任务正在运行或排队，请等待完成后再更新"})
+            from . import updater
+            try:
+                return self._json(200, updater.start_install(lambda: stop_idle_for_update(self.server)))
             except ValueError as error:
                 return self._json(409, {"error": str(error)})
         if path == "/api/invites":
@@ -569,6 +583,10 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200 if ok else 409, {"ok": ok, "error": msg})
 
     def _room_post(self, r, act, qs):
+        if act in ('send', 'compact', 'wrapup'):
+            from . import updater
+            if updater.status().get('state') == 'installing':
+                return self._json(409, {"error": "合拍正在更新，请重新打开后再操作"})
         if act == "upload":
             n = self._length()
             if n <= 0:
@@ -678,6 +696,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _external_post(self):
         """给外部程序用：桌面应用里的 Claude、终端里的 Claude / Codex 等。room 不填 = 用户最近打开的那场。"""
+        from . import updater
+        if updater.status().get('state') == 'installing':
+            return self._json(409, {"error": "合拍正在更新，请重新打开后再操作"})
         data = self._read_json()
         if data is None:
             return
@@ -794,6 +815,22 @@ def stop_application(server):
         except Exception as error:
             print("退出时停止会话失败:", error, file=sys.stderr)
     server.shutdown()
+
+
+def stop_idle_for_update(server):
+    """Do not interrupt work if it started while an update was downloading."""
+    if any(row.get('running') or row.get('queued') for row in R.rooms.listing()):
+        return False
+    def shutdown():
+        # Unlike the normal exit action, never stop active work during update.
+        for room in R.rooms.all():
+            with room.lock:
+                if room.state['running'] or room.pending or not room.jobs.empty():
+                    return
+            agents.stop_codex(room)
+        server.shutdown()
+    threading.Thread(target=shutdown, daemon=True).start()
+    return True
 
 
 def start_lan_listener(port=None):

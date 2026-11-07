@@ -57,6 +57,77 @@ class Updates(unittest.TestCase):
         with patch.object(updater,'start_download',return_value={'state':'downloading'}):
             self.assertEqual(support.call('/api/update/download', {}, owner=True)[0],200)
 
+    def test_install_revalidates_and_targets_current_desktop_directory(self):
+        payload=b'verified-installer'
+        release=updater.parse_manifest(self.manifest(payload))
+        with tempfile.TemporaryDirectory() as tmp:
+            folder=Path(tmp,'My Cojam');folder.mkdir()
+            core=folder/'CojamCore.exe';core.write_bytes(b'core')
+            (folder/'Cojam.exe').write_bytes(b'shell')
+            installer=Path(tmp,'Cojam-Setup-99.0.0.exe');installer.write_bytes(payload)
+            old_state=dict(updater.STATE);old_release=updater.RELEASE
+            self.addCleanup(lambda: (updater.STATE.clear(),updater.STATE.update(old_state),setattr(updater,'RELEASE',old_release)))
+            updater.STATE.update(state='downloaded',path=str(installer));updater.RELEASE=release
+            with patch.object(updater.sys,'platform','win32'), patch.object(updater.sys,'frozen',True,create=True), \
+                 patch.object(updater.sys,'executable',str(core)), patch.object(updater.subprocess,'Popen') as launch, \
+                 patch.object(updater,'_watch_install'):
+                self.assertEqual(updater.start_install(lambda: True)['state'],'installing')
+                args=launch.call_args.args[0]
+                self.assertIn('-EncodedCommand',args)
+                env=launch.call_args.kwargs['env']
+                self.assertEqual(env['COJAM_UPDATE_DIRECTORY'],str(folder))
+                self.assertEqual(env['COJAM_UPDATE_INSTALLER'],str(installer))
+                self.assertIn('/NOFORCECLOSEAPPLICATIONS',updater._INSTALL_HELPER)
+                self.assertIn('Start-Process -FilePath $shellPath',updater._INSTALL_HELPER)
+                updater.STATE['state']='downloaded';installer.write_bytes(b'altered-installer!')
+                with self.assertRaisesRegex(ValueError,'更改|校验'):
+                    updater.start_install(lambda: True)
+                self.assertEqual(launch.call_count,1)
+                installer.write_bytes(payload)
+                updater.STATE['state']='downloaded'
+                with self.assertRaisesRegex(ValueError,'安全退出'):
+                    updater.start_install(lambda: False)
+                launch.return_value.terminate.assert_called_once()
+                self.assertEqual(updater.STATE['state'],'downloaded')
+
+    def test_install_requires_local_owner_and_idle(self):
+        self.assertEqual(support.call('/api/update/install', {})[0],403)
+        self.assertEqual(support.call('/api/update/install', {}, owner=True,
+                                      headers={'X-Forwarded-For':'10.0.0.2'})[0],403)
+        with patch('bridge.web.R.rooms.listing',return_value=[{'running':['codex']}]), \
+             patch.object(updater,'start_install') as launch:
+            self.assertEqual(support.call('/api/update/install', {}, owner=True)[0],409)
+            launch.assert_not_called()
+
+    def test_automatic_install_waits_if_tasks_are_running(self):
+        release=updater.parse_manifest(self.manifest())
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(updater,'_open',return_value=io.BytesIO(b'installer')), \
+             patch.object(updater,'start_install') as launch:
+            updater._download(release,tmp,auto_install=True,busy=lambda:True)
+            result=updater.status()
+            self.assertEqual(result['state'],'downloaded')
+            self.assertIn('运行',result['error'])
+            self.assertTrue(Path(result['path']).is_file())
+            launch.assert_not_called()
+
+    def test_install_failure_is_available_for_retry(self):
+        from unittest.mock import Mock
+        old=dict(updater.STATE)
+        self.addCleanup(lambda: (updater.STATE.clear(),updater.STATE.update(old)))
+        updater.STATE.update(state='installing',error='')
+        updater._watch_install(Mock(wait=Mock(return_value=1)))
+        self.assertEqual(updater.status()['state'],'downloaded')
+        self.assertIn('安装未完成',updater.status()['error'])
+
+    def test_update_shutdown_does_not_stop_busy_rooms(self):
+        from bridge import web
+        from unittest.mock import Mock
+        with patch.object(web.R.rooms,'listing',return_value=[{'running':['codex']}]), \
+             patch.object(web,'stop_application') as stop:
+            self.assertFalse(web.stop_idle_for_update(Mock()))
+            stop.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

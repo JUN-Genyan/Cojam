@@ -8,15 +8,19 @@
     entry.classList.toggle('has-update',data.state==='available');
     const box=document.getElementById('updateContent');if(!box)return;
     let body='<p>当前版本：'+esc(data.current||'未知')+'</p>';
-    if(data.state==='available')body+='<p>发现新版本 '+esc(data.latest)+'。</p>'+(data.notes?'<p>'+esc(data.notes)+'</p>':'')+'<button id="updateDownload" class="pri">下载安装程序</button><p class="hint">下载后请关闭合拍，再手动运行安装程序。原来使用解压版时，请在安装向导中选择原来的程序文件夹，以继续使用其中的 data 数据。</p>';
+    if(data.state==='available')body+='<p>发现新版本 '+esc(data.latest)+'。</p>'+(data.notes?'<p>'+esc(data.notes)+'</p>':'')+'<button id="updateDownload" class="pri">'+(data.can_install?'下载并更新':'下载安装程序')+'</button><p class="hint">'+(data.can_install?'更新会在任务结束后关闭并重新打开合拍，会话数据会保留。':'下载后请关闭合拍，再手动运行安装程序。原来使用解压版时，请在安装向导中选择原来的程序文件夹，以继续使用其中的 data 数据。')+'</p>';
     else if(data.state==='downloading')body+='<p>正在下载… '+Math.floor((data.downloaded||0)*100/(data.size||1))+'%</p>';
-    else if(data.state==='downloaded')body+='<p>下载完成，文件已校验。请关闭合拍后手动运行：</p><p><code>'+esc(data.path)+'</code></p>';
+    else if(data.state==='downloaded')body+='<p>下载完成，文件已校验。</p>'+(data.error?'<p role="alert">'+esc(data.error)+'</p>':'')+(data.can_install?'<button id="updateInstall" class="pri">安装并重新打开</button>':'<p>请关闭合拍后手动运行：</p>')+'<p><code>'+esc(data.path)+'</code></p>';
+    else if(data.state==='installing')body+='<p>正在安装更新，合拍将关闭并在安装完成后重新打开。</p>';
+    else if(data.state==='installed')body+='<p>安装完成。如果合拍没有自动重新打开，请退出后重新打开。</p>';
     else if(data.state==='current')body+='<p>当前已是最新发布版本（'+esc(data.latest)+'）。</p>';
     else body+='<p role="alert">'+esc(data.error||'正在检查更新…')+'</p>';
     box.innerHTML=body;
     const button=document.getElementById('updateDownload');
-    if(button)button.onclick=async()=>{button.disabled=true;try{const [ok,result]=await post('/api/update/download',{});if(!ok)throw Error(result.error||'下载失败');render(result);poll()}catch(e){box.insertAdjacentHTML('beforeend','<p role="alert">'+esc(e.message)+'</p>');button.disabled=false}};
-    if(data.state==='downloading')poll();
+    if(button)button.onclick=async()=>{if(data.can_install&&!confirm('更新时会关闭并重新打开合拍。请确认当前没有未完成的操作。继续吗？'))return;button.disabled=true;try{const [ok,result]=await post('/api/update/download',data.can_install?{auto_install:true}:{});if(!ok)throw Error(result.error||'下载失败');render(result);poll()}catch(e){box.insertAdjacentHTML('beforeend','<p role="alert">'+esc(e.message)+'</p>');button.disabled=false}};
+    const install=document.getElementById('updateInstall');
+    if(install)install.onclick=async()=>{if(!confirm('更新时会关闭并重新打开合拍。继续吗？'))return;install.disabled=true;try{const [ok,result]=await post('/api/update/install',{});if(!ok)throw Error(result.error||'安装失败');render(result)}catch(e){box.insertAdjacentHTML('beforeend','<p role="alert">'+esc(e.message)+'</p>');install.disabled=false}};
+    if(data.state==='downloading'||data.state==='installing')poll();
   }
   function poll(){clearTimeout(timer);timer=setTimeout(async()=>{try{render(await get('/api/update/status'))}catch(e){const box=document.getElementById('updateContent');if(box)box.textContent='无法获取下载状态，请检查后台是否运行。'}},1000)}
   async function check(){try{render(await get('/api/update/check'))}catch(e){render({state:'error',current:latest&&latest.current,error:e.message})}}
