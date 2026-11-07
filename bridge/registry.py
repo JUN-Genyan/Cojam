@@ -18,7 +18,7 @@ r"""参与者注册表：会议室里能有哪些 AI、每一个怎么叫。
 """
 import glob, json, os, re, shutil, threading
 
-from .common import LOG_DIR, resolve_cmd, write_json
+from .common import LOG_DIR, read_json, resolve_cmd, write_json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRESET_DIR = os.path.join(HERE, "presets")
@@ -216,6 +216,23 @@ def _sources():
     return out
 
 
+def _hidden_path():
+    """用户在界面上删掉的预置联系人名单（想恢复：删掉名单里的 id 或重新接入同名联系人）。"""
+    return os.path.join(LOG_DIR, "hidden_presets.json")
+
+
+def _hidden_ids():
+    try:
+        data = read_json(_hidden_path())
+    except Exception:
+        return []
+    return sorted(str(x) for x in data if isinstance(x, str)) if isinstance(data, list) else []
+
+
+def _set_hidden(ids):
+    write_json(_hidden_path(), sorted(set(ids)))
+
+
 ERRORS = []     # 读配置时出的错，界面上能看（"加了一个但没生效"时好查）
 
 
@@ -227,6 +244,7 @@ def load():
         specs = {}
         for i, s in enumerate(builtin()):
             specs[s["id"]] = _norm(s, i)
+        hidden = _hidden_ids()
         for where, files in _sources():
             for path in files:
                 try:
@@ -234,6 +252,8 @@ def load():
                         spec = _norm(raw, len(specs))
                         spec["source"] = raw.get("source") or os.path.basename(path)
                         spec["user"] = (where == "agents.d")
+                        if where == "presets" and spec["id"] in hidden:
+                            continue    # 用户在界面上删掉的预置联系人，不再出现
                         specs[spec["id"]] = spec
                 except Exception as e:
                     ERRORS.append("%s：%s" % (os.path.basename(path), e))
@@ -310,6 +330,9 @@ def save_agent(raw):
         return False, "%s 是内置的，不能改" % spec["id"]
     d = os.path.join(LOG_DIR, "agents.d")
     os.makedirs(d, exist_ok=True)
+    hidden = _hidden_ids()
+    if spec["id"] in hidden:      # 重新接入被删掉的预置联系人 = 解除隐藏
+        _set_hidden([x for x in hidden if x != spec["id"]])
     write_json(os.path.join(d, spec["id"] + ".json"), raw)
     load()
     if spec["id"] not in SPECS:
@@ -318,18 +341,25 @@ def save_agent(raw):
 
 
 def remove_agent(pid):
-    """删掉自己在界面上加的那份配置（预置和内置的不动）。"""
+    """删除联系人：自己加的删掉配置文件；预置的记进隐藏名单（恢复=重新接入或清空名单）；内置的不让删。"""
     cur = SPECS.get(pid)
     if not cur:
         return False, "没有这个 AI"
     if cur["builtin"]:
         return False, "内置的不能删"
     path = os.path.join(LOG_DIR, "agents.d", pid + ".json")
-    if not os.path.isfile(path):
-        return False, "这个不是在这里加的（来自 %s），要改得去改那个文件" % (cur["source"] or "预置")
-    os.remove(path)
-    load()
-    return True, ""
+    if os.path.isfile(path):
+        os.remove(path)
+        load()
+        return True, ""
+    source = str(cur.get("source") or "")
+    if source and os.path.isfile(os.path.join(PRESET_DIR, source)):
+        hidden = _hidden_ids()
+        if pid not in hidden:
+            _set_hidden(hidden + [pid])
+        load()
+        return True, ""
+    return False, "这个不是在这里加的（来自 %s），要改得去改那个文件" % (source or "预置")
 
 
 def exe_of(spec):

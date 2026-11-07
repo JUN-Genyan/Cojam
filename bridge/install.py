@@ -51,8 +51,9 @@ HOSTS = [
      "restart": "重启 Antigravity（完全退出再开）"},
     {"id": "cursor", "label": "Cursor", "kind": "json",
      "path": os.path.join(HOME, ".cursor", "mcp.json"),
+     # 只认真正的 Cursor 程序文件；~/.cursor 目录不算（cursor-agent CLI 也会创建它）
      "detect": [os.path.join(HOME, "AppData", "Local", "Programs", "cursor", "Cursor.exe"),
-                os.path.join(HOME, ".cursor")],
+                os.path.join(HOME, "AppData", "Local", "Programs", "Cursor", "Cursor.exe")],
      "restart": "重启 Cursor"},
     {"id": "gemini", "label": "Gemini CLI", "kind": "json",
      "path": os.path.join(HOME, ".gemini", "settings.json"),

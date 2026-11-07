@@ -226,5 +226,67 @@ class Participants(Base):
         self.assertIn("第二件事", prompts[1])
 
 
+class PresetHiding(Base):
+    """预置联系人可以在界面上删除（记进隐藏名单），重新接入同名联系人会解除隐藏。"""
+
+    def setUp(self):
+        super().setUp()
+        self.saved_dir = registry.PRESET_DIR
+        self.preset_dir = os.path.join(DATA, "presets")
+        os.makedirs(self.preset_dir, exist_ok=True)
+        for f in os.listdir(self.preset_dir):
+            os.remove(os.path.join(self.preset_dir, f))
+        self.hidden = os.path.join(DATA, "hidden_presets.json")
+        if os.path.exists(self.hidden):
+            os.remove(self.hidden)
+        os.environ.pop("ROUNDTABLE_NO_PRESETS", None)
+        registry.PRESET_DIR = self.preset_dir
+
+    def tearDown(self):
+        registry.PRESET_DIR = self.saved_dir
+        os.environ["ROUNDTABLE_NO_PRESETS"] = "1"
+        if os.path.exists(self.hidden):
+            os.remove(self.hidden)
+        super().tearDown()
+
+    @staticmethod
+    def _write_preset(name, obj):
+        with open(os.path.join(DATA, "presets", name), "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False)
+
+    def test_preset_removable_and_hidden(self):
+        self._write_preset("cli1.json", dict(CLI_CFG, id="cli1", label="预置 CLI"))
+        registry.load()
+        self.assertIn("cli1", registry.SPECS)
+        ok, msg = registry.remove_agent("cli1")
+        self.assertTrue(ok, msg)
+        self.assertNotIn("cli1", registry.SPECS)
+        self.assertNotIn("cli1", [a["id"] for a in registry.catalog()["agents"]])
+        self.assertIn("cli1", json.load(open(self.hidden, encoding="utf-8")))
+
+    def test_readding_same_id_unhides_preset(self):
+        self._write_preset("cli1.json", dict(CLI_CFG, id="cli1", label="预置 CLI"))
+        registry.load()
+        registry.remove_agent("cli1")
+        ok, msg = registry.save_agent(dict(CLI_CFG, id="cli1", label="我的预置"))
+        self.assertTrue(ok, msg)
+        self.assertIn("cli1", registry.SPECS)
+        self.assertTrue(registry.get("cli1")["user"])
+        self.assertNotIn("cli1", json.load(open(self.hidden, encoding="utf-8")))
+
+    def test_agents_d_override_wins_over_hidden_preset(self):
+        self._write_preset("cli1.json", dict(CLI_CFG, id="cli1", label="预置 CLI"))
+        write_cfg("cli1.json", dict(CLI_CFG, id="cli1", label="我自己的"))
+        json.dump(["cli1"], open(self.hidden, "w", encoding="utf-8"))
+        registry.load()
+        spec = registry.get("cli1")
+        self.assertTrue(spec["user"])            # agents.d 的同名配置盖过被隐藏的预置
+        self.assertEqual(spec["label"], "我自己的")
+
+    def test_builtin_still_not_removable(self):
+        ok, _ = registry.remove_agent("claude")
+        self.assertFalse(ok)
+
+
 if __name__ == "__main__":
     unittest.main()
