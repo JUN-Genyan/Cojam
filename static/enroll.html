@@ -51,6 +51,7 @@ el('join').onclick = async () => {
     });
     const data = await response.json();
     if (!response.ok) throw Error(data.error || '接入失败');
+    try { localStorage.setItem('cojam_owner_device_token', data.token); } catch (e) {}
     location.replace('/');
   } catch (error) {
     el('error').textContent = error.message;

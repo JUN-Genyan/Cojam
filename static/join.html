@@ -40,7 +40,22 @@ el('logout').onclick=()=>{token='';save(KEYS.token,'');save(KEYS.deviceKey,'');s
 el('send').onsubmit=async e=>{e.preventDefault();const text=el('text').value.trim(),room=rid,gen=generation;if(!text||!permission)return;el('submit').disabled=true;try{await request('/api/post',{room,text});if(gen===generation){el('text').value='';await poll()}}catch(e){el('error').textContent=e.message}finally{el('submit').disabled=!permission}};
 setInterval(poll,1500);setInterval(refresh,5000);
 setInterval(()=>{if(token)request('/api/external/hello',{client:'Cojam 游客'}).catch(e=>{if(e.status===401){token='';save(KEYS.token,'');clear();el('identity').textContent='';el('error').textContent='身份已失效，请重新打开邀请链接。'}})},20000);
-token=saved(KEYS.token);
+  // A remembered own-device credential can restore the HttpOnly cookie after
+  // a browser restart; it is scoped to this browser and this exact origin.
+  async function restoreOwnDevice(){
+    const key='cojam_owner_device_token', own=saved(key);
+    if(!own||location.hash)return false;
+    try {
+      const response=await fetch('/api/devices/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:own})});
+      if(response.status===401){save(key,'');return false}
+      if(!response.ok)return false;
+      const html=await (await fetch('/',{cache:'no-store'})).text();
+      if(!html.includes('name="rt-'+'token" content="'+own+'"'))return false;
+      location.replace('/');return true;
+    }catch(e){return false}
+  }
+  restoreOwnDevice();
+  token=saved(KEYS.token);
 const hash=new URLSearchParams(location.hash.slice(1)),invite=hash.get('invite')||'',initialKey=hash.get('key')||'';
 if(invite){history.replaceState(null,'',location.pathname+location.search);if(token||saved(KEYS.name))redeemInvite(invite);else askName(invite)}
 else if(initialKey){history.replaceState(null,'',location.pathname+location.search);connectClient(initialKey)}

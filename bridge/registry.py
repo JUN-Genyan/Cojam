@@ -18,7 +18,7 @@ r"""参与者注册表：会议室里能有哪些 AI、每一个怎么叫。
 """
 import glob, json, os, re, shutil, threading
 
-from .common import LOG_DIR, read_json, resolve_cmd, write_json
+from .common import LOG_DIR, find_executable, read_json, resolve_cmd, write_json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRESET_DIR = os.path.join(HERE, "presets")
@@ -171,7 +171,11 @@ def _norm(raw, idx=0):
 
     # 有没有装：配置里写死了 enabled 就听配置的，没写就看命令在不在 PATH 里
     ra = raw.get("enabled")
-    if isinstance(ra, bool):
+    if driver in ("cli", "claude", "codex"):
+        # A saved contact or pairing is not evidence that its executable is
+        # still installed. Keep its configuration, but recheck availability.
+        spec["enabled"] = ra is not False and any(find_executable(b) for b in spec["bin"])
+    elif isinstance(ra, bool):
         spec["enabled"] = ra
     elif driver == "http":
         spec["enabled"] = True
@@ -317,6 +321,32 @@ def catalog():
     ensure()
     return {"agents": [public(v) for v in SPECS.values()], "errors": list(ERRORS),
             "active": [pid for pid, s in SPECS.items() if s["enabled"]]}
+
+
+def discover_hidden_presets():
+    """Find installed presets hidden from contacts without changing pairings."""
+    hidden = set(_hidden_ids())
+    found = []
+    for where, paths in _sources():
+        if where != "presets":
+            continue
+        for path in paths:
+            try:
+                for raw in _read_file(path):
+                    spec = _norm(raw)
+                    if spec["id"] in hidden and spec["id"] not in SPECS and spec["enabled"] and spec["driver"] in ("cli", "claude", "codex"):
+                        found.append(public(spec))
+            except (OSError, ValueError, TypeError):
+                continue
+    return found
+
+
+def restore_preset(pid):
+    if pid not in {row["id"] for row in discover_hidden_presets()}:
+        return False
+    _set_hidden([item for item in _hidden_ids() if item != pid])
+    load()
+    return True
 
 
 def save_agent(raw):

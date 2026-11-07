@@ -7,7 +7,7 @@ async function checkConnectionBackend(signal) {
     if (!response.ok) throw Error();
     info = await response.json();
   } catch (e) { if (signal && signal.aborted) throw e; throw Error('无法连接合拍后台，请重新打开合拍后重试。'); }
-  if (info.app !== 'AI Bridge' || info.version !== '2.6.3' || info.api_revision !== 2)
+  if (info.app !== 'AI Bridge' || info.version !== '2.6.4' || info.api_revision !== 2)
     throw Error('界面与后台版本不一致。请重新打开最新的合拍 Cojam，再刷新此页面。');
   return info;
 }
@@ -139,11 +139,26 @@ async function generateDeviceCode(w) {
       await copyText(data.url || ''); event.target.textContent = '已复制';
     };
     if (!issue) renderConnectionQrUrl('connQr', data.url || connectionDeviceUrl(w.base, data.code));
+    clearInterval(w.timer);
+    w.timer = setInterval(() => pollDeviceEnrollment(w, data.id), 2000);
   } catch (error) {
     wizardError(error.message);
   } finally {
     if (wizardCurrent(w)) setConnectionBusy(w, false);
   }
+}
+async function pollDeviceEnrollment(w, id) {
+  if (!wizardCurrent(w) || w.type !== 'mydevice' || w.step !== 2) { clearInterval(w.timer); return; }
+  if (w.devicePolling) return;
+  w.devicePolling = true;
+  try {
+    const [ok, status] = await connectionGet('/api/devices/code/status?id=' + encodeURIComponent(id));
+    if (ok && status.used && wizardCurrent(w)) {
+      clearInterval(w.timer);
+      try { await refreshContacts(); } finally { if (wizardCurrent(w)) hideModal(); }
+    } else if (ok && status.expired) clearInterval(w.timer);
+  } catch (e) { /* Retry while the code remains valid. */ }
+  finally { w.devicePolling = false; }
 }
 function renderConnectionQrUrl(id, text) {
   const box = document.getElementById(id);
@@ -230,9 +245,10 @@ function renderConnectionSetup(w) {
       + '<button id="connGuestGenerate" class="pri">生成邀请</button><div id="connGuestResult"></div>'
       + '<h4>邀请与游客</h4><div id="connInviteList">正在读取…</div>';
   } else if (w.type === 'local') {
-    const local = CONTACTS.filter(a => ['cli', 'claude', 'codex'].includes(a.driver) && a.enabled);
+    const local = [...CONTACTS, ...((agCat && agCat.discovered_presets) || [])].filter(a => ['cli', 'claude', 'codex'].includes(a.driver) && a.enabled);
     w.localChoice = w.localChoice || (local.find(a => a.enabled) || {}).id || '__custom__';
-    content += '<p class="hint">应用直接运行本机程序，不需要 MCP 地址或接入密钥。请先安装并登录你要使用的 Agent。</p><label>选择程序<select id="connLocal">' + local.map(a => '<option value="' + esc(a.id) + '"' + (w.localChoice === a.id ? ' selected' : '') + '>' + esc(a.label) + (a.enabled ? ' · 已检测到' : ' · 未找到程序') + '</option>').join('') + '<option value="__custom__"' + (w.localChoice === '__custom__' ? ' selected' : '') + '>自定义 CLI 程序…</option></select></label><div id="connCustom"' + (w.localChoice === '__custom__' ? '' : ' hidden') + '>' + connectionNameFields(w.localChoice === '__custom__' ? w : {...w, saved: false}) + '<label>命令或可执行文件路径<input id="connCommand" placeholder="my-agent 或完整程序路径" value="' + esc(w.form.command || '') + '"></label><label>调用参数（JSON 数组）<textarea id="connArgs">' + esc(w.form.args || '["-p", "{prompt}"]') + '</textarea></label></div><button id="connCheck" class="pri">检测并验证程序</button><p class="hint">仅运行 --version，不调用模型；登录和额度在首次回复时确认。</p>';
+    if (w.localChoice !== '__custom__' && !local.some(a => a.id === w.localChoice)) w.localChoice = (local[0] || {}).id || '__custom__';
+    content += '<p class="hint">自动检测运行合拍的设备上的程序；安装或卸载后可重新检索。</p><label>选择程序<select id="connLocal">' + local.map(a => '<option value="' + esc(a.id) + '"' + (w.localChoice === a.id ? ' selected' : '') + '>' + esc(a.label) + ' · 已检测到</option>').join('') + '<option value="__custom__"' + (w.localChoice === '__custom__' ? ' selected' : '') + '>自定义 CLI 程序…</option></select></label><button id="connRescan">重新检索已安装程序</button><div id="connCustom"' + (w.localChoice === '__custom__' ? '' : ' hidden') + '>' + connectionNameFields(w.localChoice === '__custom__' ? w : {...w, saved: false}) + '<label>命令或可执行文件路径<input id="connCommand" placeholder="my-agent 或完整程序路径" value="' + esc(w.form.command || '') + '"></label><label>调用参数（JSON 数组）<textarea id="connArgs">' + esc(w.form.args || '["-p", "{prompt}"]') + '</textarea></label></div><button id="connCheck" class="pri">检测并验证程序</button><p class="hint">仅运行 --version，不调用模型；登录和额度在首次回复时确认。</p>';
   } else {
     content += connectionNameFields(w);
     if (w.type === 'http') {
@@ -258,6 +274,13 @@ function renderConnectionSetup(w) {
     renderDeviceSetup(w);
   }
   if (w.type === 'local') {
+    document.getElementById('connRescan').onclick = async () => {
+      if (w.busy) return;
+      setConnectionBusy(w, true);
+      try { await refreshContacts(w.controller.signal, true); if (wizardCurrent(w)) { w.id=''; w.saved=false; w.localChoice=''; w.status=null; renderConnectionWizard(); } }
+      catch (e) { if (wizardCurrent(w)) wizardError('检索失败，请检查后台后重试。'); }
+      finally { if (wizardCurrent(w)) setConnectionBusy(w, false); }
+    };
     const selected = connectionContact(w) || CONTACTS.find(a => a.id === w.localChoice);
     const help = document.createElement('p');
     help.id = 'connProgramHelp'; help.className = 'hint';
@@ -339,6 +362,11 @@ function setConnectionBusy(w, busy) {
 async function checkConnection(w) {
   if (w.busy) return; wizardError(''); setConnectionBusy(w, true);
   try {
+    if (w.type === 'local' && (agCat.discovered_presets || []).some(a => a.id === w.id)) {
+      const [restored, result] = await post('/api/agents/restore', {id:w.id});
+      if (!restored) throw Error(result.error || '恢复联系人失败');
+      await refreshContacts();
+    }
     await saveConnectionContact(w); if (!wizardCurrent(w)) return;
     const box = document.getElementById('connEvidence'); box.textContent = w.type === 'http' ? '正在等待服务回复…' : '正在验证程序能否启动…';
     const [ok, j] = await post('/api/contacts/check', {id: w.id}); if (!ok) throw Error(j.error || '验证失败');

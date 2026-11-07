@@ -133,6 +133,21 @@ class DeviceHTTP(unittest.TestCase):
         self.assertNotIn(token, catalog_body.decode('utf-8'))
         self.assertEqual(call("/api/agents")[0], 403)
 
+    def test_code_status_and_restore_respect_revocation(self):
+        status, body, _ = call("/api/devices/code", {"label": "手机"}, token=web.RT_TOKEN)
+        issued = body_json(body)
+        status, body, _ = call('/api/devices/code/status?id=' + issued['id'], token=web.RT_TOKEN)
+        self.assertFalse(body_json(body)['used'])
+        _, body, _ = call('/api/devices/enroll', {'code': issued['code']})
+        enrolled = body_json(body)
+        _, body, _ = call('/api/devices/code/status?id=' + issued['id'], token=web.RT_TOKEN)
+        self.assertTrue(body_json(body)['used'])
+        status, _, headers = call('/api/devices/restore', {'token': enrolled['token']})
+        self.assertEqual(status, 200)
+        self.assertIn('HttpOnly', headers['Set-Cookie'])
+        call('/api/devices/revoke', {'id': enrolled['device']['id']}, token=web.RT_TOKEN)
+        self.assertEqual(call('/api/devices/restore', {'token': enrolled['token']})[0], 401)
+
     def test_revoked_device_cannot_call_admin_api(self):
         token, device, _ = self.make_device("旧手机")
         self.assertEqual(call("/api/devices/revoke", {"id": device["id"]}, token=web.RT_TOKEN)[0], 200)
@@ -165,6 +180,14 @@ class DeviceHTTP(unittest.TestCase):
         status, body, _ = call("/files/room-1/files/note.txt", cookie="cojam_device=" + token)
         self.assertEqual((status, body), (200, b"hello"))
 
+    def test_remote_device_cannot_set_host_project_path(self):
+        token, _, _ = self.make_device("手机")
+        status, body, _ = call('/api/projects/new', {'name': 'remote', 'workdir': DATA}, token=token)
+        self.assertEqual(status, 403)
+        self.assertIn('不能从其他设备', body_json(body)['error'])
+        status, _, _ = call('/api/rooms/new', {'title': 'remote', 'workdir': DATA}, token=token)
+        self.assertEqual(status, 403)
+
     def test_device_session_does_not_drive_owner_lifecycle(self):
         token, _, _ = self.make_device("手机")
         status, body, _ = call("/api/ui/session", {"tab": "t", "action": "open"}, token=token)
@@ -178,14 +201,14 @@ class DeviceHTTP(unittest.TestCase):
         self.assertTrue(data["owner_devices_supported"])
         self.assertIn("tailscale_url", data)
 
-    def test_enroll_page_is_public_and_does_not_store_tokens(self):
+    def test_enroll_page_is_public_and_remembers_own_device(self):
         request = urllib.request.Request(BASE + "/enroll", headers={"Host": "192.168.1.9"})
         with urllib.request.urlopen(request, timeout=5) as response:
             html = response.read().decode("utf-8")
         self.assertIn("接入我的设备", html)
         self.assertIn("/api/devices/enroll", html)
         self.assertIn("location.replace('/')", html)
-        self.assertNotIn("localStorage", html)
+        self.assertIn("cojam_owner_device_token", html)
 
 
 if __name__ == "__main__":

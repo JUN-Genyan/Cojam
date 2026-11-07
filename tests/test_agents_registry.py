@@ -38,6 +38,14 @@ CLI_CFG = {"id": "fake", "label": "假 CLI", "driver": "cli", "bin": ["python"],
 
 class Base(unittest.TestCase):
     def setUp(self):
+        # These tests exercise room behavior, not what happens to be installed
+        # on the machine running them. Keep the built-in agents deterministic.
+        from unittest.mock import patch
+        real_find = registry.find_executable
+        detector = patch.object(registry, 'find_executable',
+            side_effect=lambda name: ('test-' + name) if name in ('claude', 'codex') else real_find(name))
+        detector.start()
+        self.addCleanup(detector.stop)
         for f in os.listdir(AGD):
             os.remove(os.path.join(AGD, f))
         if os.path.exists(REC):
@@ -58,6 +66,27 @@ class Registry(Base):
         registry.load()
         self.assertFalse(registry.get("nobin")["enabled"])
         self.assertNotIn("nobin", common.AIS)
+
+    def test_saved_enabled_cli_disappears_when_executable_is_removed(self):
+        from unittest.mock import patch
+        config = {"id": "savedcli", "driver": "cli", "bin": ["savedcli"], "enabled": True}
+        with patch.object(registry, "find_executable", return_value="/installed/savedcli"):
+            self.assertTrue(registry._norm(config)["enabled"])
+        with patch.object(registry, "find_executable", return_value=None):
+            self.assertFalse(registry._norm(config)["enabled"])
+
+    def test_rescan_sees_a_command_after_path_changes(self):
+        from unittest.mock import patch
+        directory = tempfile.mkdtemp(prefix="cojam_scan_")
+        executable = os.path.join(directory, "cojam-scan-test" + (".cmd" if os.name == "nt" else ""))
+        with open(executable, "w", encoding="utf-8") as f:
+            f.write("@exit /b 0\n" if os.name == "nt" else "#!/bin/sh\nexit 0\n")
+        os.chmod(executable, 0o755)
+        with patch.dict(os.environ, {"PATH": directory + os.pathsep + os.environ.get("PATH", "")}):
+            self.assertIsNotNone(common.find_executable("cojam-scan-test"))
+        os.remove(executable)
+        with patch.dict(os.environ, {"PATH": directory + os.pathsep + os.environ.get("PATH", "")}):
+            self.assertIsNone(common.find_executable("cojam-scan-test"))
 
     def test_reserved_and_bad_driver(self):
         write_cfg("a.json", {"id": "user", "driver": "cli", "bin": ["python"]})
@@ -263,6 +292,9 @@ class PresetHiding(Base):
         self.assertNotIn("cli1", registry.SPECS)
         self.assertNotIn("cli1", [a["id"] for a in registry.catalog()["agents"]])
         self.assertIn("cli1", json.load(open(self.hidden, encoding="utf-8")))
+        self.assertIn("cli1", [a["id"] for a in registry.discover_hidden_presets()])
+        self.assertTrue(registry.restore_preset("cli1"))
+        self.assertIn("cli1", registry.SPECS)
 
     def test_readding_same_id_unhides_preset(self):
         self._write_preset("cli1.json", dict(CLI_CFG, id="cli1", label="预置 CLI"))

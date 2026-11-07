@@ -261,6 +261,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/devices":
             return self._json(200, {"account": devices.account(),
                                     "devices": devices.listing(getattr(self, "_device_id", ""))})
+        if path == "/api/devices/code/status":
+            status = devices.code_status((q.get("id") or [""])[0])
+            return self._json(200, status) if status is not None else self._json(404, {"error": "接入码不存在"})
         if path == "/api/invites":
             return self._json(200, {"invites": invites.listing(), "guests": invites.guest_listing()})
         if path == "/api/claims":
@@ -268,7 +271,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/agents":
             if (q.get("reload") or [""])[0] in ("1", "true", "yes"):
                 registry.load()      # 用户刚改了 data/agents.d：重读一遍，不用重启服务器
-            return self._json(200, dict(registry.catalog(), default_dir=PROJECT, hosts=install.hosts_status(),
+            return self._json(200, dict(registry.catalog(), discovered_presets=registry.discover_hidden_presets(), default_dir=PROJECT, hosts=install.hosts_status(),
+                                        local_workspace=self._is_local_owner() and not bool(getattr(self, "_device_id", "")),
                                         owner_devices=devices.listing(getattr(self, "_device_id", "")),
                                         connections=connections.catalog(), members={s["id"]: members.broker.status(s["id"]) for s in registry.all_specs() if s["driver"] == "external" and s.get("kind") != "user"},
                                         mcp_url="http://127.0.0.1:%d/mcp" % PORT))
@@ -357,6 +361,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(error.code, {"error": str(error)})
             return self._json(200, {"ok": True, "token": result["token"], "device": result["device"]},
                               {"Set-Cookie": self._device_cookie_header(result["token"])})
+        if path == "/api/devices/restore":
+            data = self._read_json()
+            if data is None:
+                return
+            token = str(data.get("token") or "")
+            device = devices.verify(token)
+            if not device:
+                return self._json(401, {"error": "设备凭证无效或已撤销"})
+            return self._json(200, {"ok": True}, {"Set-Cookie": self._device_cookie_header(token)})
         if path == "/api/agents/add":         # 页面上"手动添加"，不让人碰 json
             data = self._read_json()
             if data is None:
@@ -388,6 +401,15 @@ class Handler(BaseHTTPRequestHandler):
                     keys.pop(pid, None)
                     write_json(path, keys)
             return self._json(200 if ok else 409, {"ok": ok, "error": msg})
+        if path == "/api/agents/restore":
+            data = self._read_json()
+            if data is None:
+                return
+            if not self._from_browser():
+                return self._json(403, {"error": USER_ONLY_MSG})
+            if not registry.restore_preset(str(data.get("id") or "")):
+                return self._json(404, {"error": "未找到已安装的程序，请重新检测"})
+            return self._json(200, {"ok": True})
         if path == "/api/agents/install":     # 页面上的"一键接入"，不让人碰命令行
             data = self._read_json()
             if data is None:
@@ -470,7 +492,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/devices/code":
             base = self._base_url(data.get("base")) or getattr(self.server, "lan_url", None) or ""
             result = devices.create_code(str(data.get("label") or ""))
-            return self._json(200, {"ok": True, "code": result["token"], "expires": result["expires"],
+            return self._json(200, {"ok": True, "id": result["id"], "code": result["token"], "expires": result["expires"],
                                     "url": (base.rstrip("/") + "/enroll#code=" + quote(result["token"])) if base else ""})
         if path == "/api/devices/revoke":
             try:
@@ -493,12 +515,16 @@ class Handler(BaseHTTPRequestHandler):
             pid = str(data.get("id") or "")
             return self._json(200, {"connection": connections.status(pid), "member": members.broker.status(pid)})
         if path == "/api/projects/new":
+            if not self._is_local_owner() or getattr(self, "_device_id", ""):
+                return self._json(403, {"error": "不能从其他设备指定这台电脑的文件夹；请在运行合拍的设备上创建项目。"})
             try:
                 p = projects.create(data.get("name"), data.get("workdir"))
                 return self._json(200, {"ok": True, "project": p})
             except ValueError as e:
                 return self._json(400, {"error": str(e)})
         if path == "/api/rooms/new":
+            if data.get("workdir") and (not self._is_local_owner() or getattr(self, "_device_id", "")):
+                return self._json(403, {"error": "不能从其他设备指定这台电脑的文件夹。"})
             ann = str(data.get("announcement", ""))
             if len(ann.encode("utf-8")) > MAX_ANN:
                 return self._json(413, {"error": "too large (max 16KB)"})

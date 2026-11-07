@@ -349,13 +349,37 @@ def tailscale_ipv4():
     return _tailscale_ip((result.stdout or "").split())
 
 
+def find_executable(name):
+    """Find a command using current paths, including newly installed Windows CLIs."""
+    import shutil
+    paths = [os.environ.get("PATH", "")]
+    if os.name == "nt":
+        # A running GUI application does not receive PATH changes made later.
+        try:
+            import winreg
+            for root, key in ((winreg.HKEY_CURRENT_USER, r"Environment"),
+                              (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")):
+                try:
+                    with winreg.OpenKey(root, key) as handle:
+                        paths.append(os.path.expandvars(winreg.QueryValueEx(handle, "Path")[0]))
+                except OSError:
+                    pass
+        except ImportError:
+            pass
+        home = os.path.expanduser("~")
+        paths.extend([os.path.join(home, ".local", "bin"),
+                      os.path.join(os.environ.get("APPDATA", ""), "npm"),
+                      os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Links")])
+    return shutil.which(name, path=os.pathsep.join(p for p in paths if p))
+
+
 def resolve_cmd(name):
     """命令的真身，返回参数列表的开头（找不到返回 None）。
     Windows 上 npm 装的 claude / codex 是 .cmd 外壳：经它起会过一道 cmd.exe，参数里的 | & < > ^（钩子配置、会议名）会被当成命令符号，
     2026-10-22 实测 --settings 里的 "Edit|Write" 被拆成了管道。所以能找到真身就直接起真身：
     外壳里写的是 node 脚本（codex.js）就用 node 跑它；写的是 .exe（claude.exe）就直接起它。"""
     import shutil
-    p = shutil.which(name)
+    p = find_executable(name)
     if not p:
         return None
     if os.name != "nt" or not p.lower().endswith((".cmd", ".bat")):

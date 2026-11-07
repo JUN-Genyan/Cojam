@@ -50,7 +50,6 @@ button:disabled{opacity:.45}button:focus-visible,a:focus-visible,input:focus-vis
 .workspace-emblem{width:29px;height:29px;display:grid;place-items:center;background:#ffffff0b;border:1px solid var(--line);border-radius:8px;font-family:Georgia,serif;font-size:17px;font-style:italic}
 #rooms .rh{font-size:11px;letter-spacing:.06em;font-weight:500;padding:0 10px 11px;color:var(--mut)}
 #rooms .rh button{background:none;border-color:transparent;color:var(--fg)}
-#rooms .rh #contactsManage{color:var(--mut);padding:0 4px}
 #rooms .rh #contactsAdd{background:var(--bar);border:1px solid var(--line);border-radius:8px;font-size:10px;line-height:24px;padding:0 7px}
 #contactCount{font-size:10px;color:var(--mut);letter-spacing:0;margin-left:3px}
 .contacts-section{padding-bottom:20px;margin-bottom:24px;border-bottom:1px solid var(--line)}

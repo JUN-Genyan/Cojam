@@ -472,7 +472,7 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
 <body>
 <div id="navShade"></div>
 <nav id="rooms" aria-label="联系人和项目"><div class="brand"><img src="/static/logo.svg" width="42" height="42" alt=""><span class="brand-word">cojam<small>合拍 · 让想法一起发生</small></span><button id="navClose" aria-label="关闭导航">×</button></div><label class="nav-search" for="navSearch"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="navSearch" type="search" placeholder="搜索项目或会话" autocomplete="off"><kbd aria-hidden="true">⌘ K</kbd></label>
-<section class="contacts-section"><div class="rh">联系人 <span id="contactCount"></span><button id="contactsManage" aria-label="管理联系人" title="管理联系人">⋯</button><button id="contactsAdd" aria-label="接入联系人">＋ 接入</button></div><ul id="contactList"></ul></section>
+<section class="contacts-section"><div class="rh">联系人 <span id="contactCount"></span><button id="contactsAdd" aria-label="接入联系人">＋ 接入</button></div><ul id="contactList"></ul></section>
 <section class="projects-section"><div class="rh">我的项目<button id="projectAdd" aria-label="新建项目">＋</button></div><ul class="rl" id="roomList"></ul></section><button id="rNew" class="nav-new">＋ 新建会话<span aria-hidden="true">↗</span></button><div class="nav-foot"><img src="/static/logo.svg" width="26" height="26" alt=""><span>本机会议室<small>由这台设备托管</small></span><button type="button" id="updateApp" title="检查并下载更新">更新</button><button type="button" id="quitApp" title="停止本机合拍服务">退出</button></div></nav>
 <header>
   <button id="navToggle" aria-label="打开联系人和项目">☰</button>
@@ -532,7 +532,7 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
 <script src="/static/qrcode.min.js"></script>
 <script src="/static/connections.js"></script>
 <script>
-(function(){const m=document.querySelector('meta[name=rt-token]'),t=m?m.content:'';if(!t)return;const f=window.fetch;window.fetch=function(u,o){o=o||{};const h=new Headers(o.headers||{});h.set('X-RT-Token',t);o.headers=h;return f.call(this,u,o)}})();
+(function(){const m=document.querySelector('meta[name=rt-token]'),t=m?m.content:'';if(!t)return;if(t.startsWith('dev_')){try{localStorage.setItem('cojam_owner_device_token',t)}catch(e){}}const f=window.fetch;window.fetch=function(u,o){o=o||{};const h=new Headers(o.headers||{});h.set('X-RT-Token',t);o.headers=h;return f.call(this,u,o)}})();
 // Each owner tab registers separately. A short grace period permits reload and tab handoff.
 function ownerTabId(search){
   try{
@@ -1448,7 +1448,7 @@ async function loadTools(a,x){
 setInterval(()=>{if(RID)poll()},1500);
 setInterval(pollRooms,3000);
 refreshContacts().catch(e=>console.error(e));
-setInterval(()=>refreshContacts().catch(()=>{}),10000);
+setInterval(()=>refreshContacts(undefined,true).catch(()=>{}),10000);
 if(RID)switchRoom(RID,true);else pickRoom();
 </script>
 <script src="/static/update.js"></script>

@@ -106,6 +106,15 @@ def enroll(token, label=""):
         return {"token": device_token, "device": public(row)}
 
 
+def code_status(code_id):
+    """Status for the authenticated issuing device; never return a secret."""
+    with LOCK:
+        record = next((row for row in _codes() if row.get("id") == code_id), None)
+        if record is None:
+            return None
+        return {"used": bool(record.get("used")), "expired": float(record.get("expires") or 0) < time.time()}
+
+
 def verify(token):
     text = str(token or "")
     if not text.startswith("dev_"):

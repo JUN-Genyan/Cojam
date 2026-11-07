@@ -1,7 +1,8 @@
-name: Release Cojam 2.6.3
+name: Release Cojam 2.6.4
 on:
   push:
     branches: ["codex/release-2-6-3"]
+    paths-ignore: ["website/update.json"]
 permissions:
   contents: write
 jobs:
@@ -27,6 +28,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s tests -p 'test_desktop_shell.py'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p 'test_devices.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p 'test_agents_registry.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build application
         run: |
           ./build_exe.ps1
@@ -43,7 +48,7 @@ jobs:
           $testDir = Join-Path $env:RUNNER_TEMP 'cojam-release-test'
           New-Item -ItemType Directory -Force -Path (Join-Path $testDir 'data') | Out-Null
           Set-Content -LiteralPath (Join-Path $testDir 'data/sentinel.txt') -Value 'keep' -Encoding utf8
-          $setup = (Resolve-Path 'dist/Cojam-Setup-2.6.3-test.exe').Path
+          $setup = (Resolve-Path 'dist/Cojam-Setup-2.6.4-test.exe').Path
           foreach ($attempt in 1..2) {
             $p = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',("/DIR=$testDir")) -Wait -PassThru -WindowStyle Hidden
             if ($p.ExitCode -ne 0) { throw "Test installation failed: $($p.ExitCode)" }
@@ -57,13 +62,13 @@ jobs:
         run: |
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" 'packaging/cojam-desktop.iss'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python packaging/make_update_manifest.py --notes '优化启动与接入流程，简化接入入口并改进联系人管理。'
+          python packaging/make_update_manifest.py --notes '改进本机程序检测、设备重连与接入体验，并限制远程工作目录选择。'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
-          name: cojam-2.6.3-windows
+          name: cojam-2.6.4-windows
           path: |
-            source/dist/Cojam-Setup-2.6.3.exe
+            source/dist/Cojam-Setup-2.6.4.exe
             source/dist/Cojam.exe
             source/website/update.json
           if-no-files-found: error
@@ -76,15 +81,15 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path '../site/downloads' | Out-Null
-          Copy-Item 'dist/Cojam-Setup-2.6.3.exe' '../site/downloads/Cojam-Setup-2.6.3.exe'
-          Copy-Item 'dist/Cojam.exe' '../site/downloads/Cojam-Portable-2.6.3.exe'
+          Copy-Item 'dist/Cojam-Setup-2.6.4.exe' '../site/downloads/Cojam-Setup-2.6.4.exe'
+          Copy-Item 'dist/Cojam.exe' '../site/downloads/Cojam-Portable-2.6.4.exe'
           Copy-Item 'website/update.json' '../site/update.json'
           Copy-Item 'website/index.html' '../site/index.html'
           git -C ../site config user.name 'github-actions[bot]'
           git -C ../site config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git -C ../site add index.html update.json downloads/Cojam-Setup-2.6.3.exe downloads/Cojam-Portable-2.6.3.exe
+          git -C ../site add index.html update.json downloads/Cojam-Setup-2.6.4.exe downloads/Cojam-Portable-2.6.4.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git -C ../site commit -m 'Publish Cojam 2.6.3 for Windows'
+          git -C ../site commit -m 'Publish Cojam 2.6.4 for Windows'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git -C ../site push origin HEAD:gh-pages
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -251,6 +251,27 @@ setTimeout(() => {
 
 
 class GuestWizard(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to test device restoration')
+    def test_remembered_device_restores_cookie_and_handles_revocation(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const html=fs.readFileSync('static/join.html','utf8');
+const source=html.match(/async function restoreOwnDevice\(\)\{[\s\S]*?\n  \}/)[0];
+async function run(revoked, acceptsCookie) {
+ let removed=false, redirected=false, requests=[]; const own='dev_abc';
+ const ctx=vm.createContext({saved:()=>own,save:()=>{removed=true},location:{hash:'',replace:()=>{redirected=true}},
+  fetch:async (url,options)=>{requests.push(url); if(url==='/api/devices/restore')return {status:revoked?401:200,ok:!revoked};
+   return {text:async()=>acceptsCookie?'<meta name="rt-token" content="dev_abc">':'join page'};}});
+ vm.runInContext(source,ctx); const result=await ctx.restoreOwnDevice(); return {result,removed,redirected,requests};
+}
+(async()=>{let a=await run(false,true);assert.equal(a.redirected,true);assert.equal(a.result,true);
+ a=await run(true,false);assert.equal(a.removed,true);assert.equal(a.redirected,false);
+ a=await run(false,false);assert.equal(a.redirected,false);assert.equal(a.removed,false);})().catch(e=>{console.error(e);process.exitCode=1});
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
     def test_invite_url_and_status_labels(self):
         root = Path(__file__).resolve().parents[1]
@@ -271,6 +292,24 @@ assert.equal(context.connectionInviteStatus({expires: 9999999999, guest_count: 0
 
 
 class LanInvite(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to test the device wizard')
+    def test_enrollment_completion_closes_wizard_after_refresh(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const js=fs.readFileSync('static/connections.js','utf8');
+const fn=js.match(/async function pollDeviceEnrollment\(w, id\) \{[\s\S]*?\n\}/)[0];
+let closed=0, refreshed=0, cleared=0, status={used:false};
+const ctx=vm.createContext({wizardCurrent:()=>true, clearInterval:()=>cleared++,
+ connectionGet:async()=>[true,status], refreshContacts:async()=>{refreshed++},hideModal:()=>closed++,encodeURIComponent});
+vm.runInContext(fn,ctx);
+(async()=>{const w={type:'mydevice',step:2,timer:1};await ctx.pollDeviceEnrollment(w,'code_x');
+ assert.equal(closed,0);status={used:true};await ctx.pollDeviceEnrollment(w,'code_x');
+ assert.equal(closed,1);assert.equal(refreshed,1);assert.equal(cleared,1)})().catch(e=>{console.error(e);process.exitCode=1});
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
     def test_my_device_can_enter_custom_tailscale_serve_address(self):
         root = Path(__file__).resolve().parents[1]
