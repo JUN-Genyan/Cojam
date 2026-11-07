@@ -54,7 +54,7 @@ def matching_backend():
             runtime = json.load(response)
         same = lambda a, b: os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
         return same(runtime.get("install", ""), ROOT) and same(runtime.get("data", ""), DATA)
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, RuntimeError):
         return False
 
 
