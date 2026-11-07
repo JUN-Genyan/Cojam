@@ -107,6 +107,34 @@ class DeviceCredentials(unittest.TestCase):
         self.assertIsNone(devices.verify(enrolled["token"]))
         self.assertEqual(devices.listing(), [])
 
+    def test_reenroll_same_client_replaces_record(self):
+        first = devices.enroll(devices.create_code("iPhone")["token"], "iPhone", "dc_same")
+        second = devices.enroll(devices.create_code("iPhone 新")["token"], "iPhone 新", "dc_same")
+        self.assertEqual(first["device"]["id"], second["device"]["id"])
+        self.assertIsNone(devices.verify(first["token"]))            # 旧凭证立即换新
+        self.assertIsNotNone(devices.verify(second["token"]))
+        saved = json.loads(Path(DATA, "devices.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(saved["devices"]), 1)                    # 同一台设备只有一条记录
+        self.assertEqual(saved["devices"][0]["label"], "iPhone 新")
+        self.assertEqual(devices.listing()[0]["label"], "iPhone 新")
+
+    def test_reenroll_same_client_revives_revoked_record(self):
+        first = devices.enroll(devices.create_code("iPad")["token"], "iPad", "dc_pad")
+        devices.revoke(first["device"]["id"])
+        second = devices.enroll(devices.create_code("iPad")["token"], "iPad", "dc_pad")
+        self.assertEqual(first["device"]["id"], second["device"]["id"])
+        self.assertEqual([d["id"] for d in devices.listing()], [first["device"]["id"]])
+
+    def test_different_clients_are_separate_devices(self):
+        devices.enroll(devices.create_code("iPhone")["token"], "iPhone", "dc_a")
+        devices.enroll(devices.create_code("Windows")["token"], "Windows", "dc_b")
+        self.assertEqual(len(devices.listing()), 2)
+
+    def test_enroll_without_client_id_appends(self):
+        devices.enroll(devices.create_code("a")["token"], "a")
+        devices.enroll(devices.create_code("b")["token"], "b")
+        self.assertEqual(len(devices.listing()), 2)
+
 
 class DeviceHTTP(unittest.TestCase):
     def make_device(self, label="我的手机"):
@@ -116,6 +144,17 @@ class DeviceHTTP(unittest.TestCase):
         status, body, headers = call("/api/devices/enroll", {"code": code, "label": label})
         self.assertEqual(status, 200)
         return body_json(body)["token"], body_json(body)["device"], headers
+
+    def test_enroll_route_dedupes_by_client_id(self):
+        ids = []
+        for _ in range(2):
+            status, body, _ = call("/api/devices/code", {"label": "iPhone", "base": "http://192.168.1.9:8766"}, token=web.RT_TOKEN)
+            self.assertEqual(status, 200)
+            code = body_json(body)["code"]
+            status, body, _ = call("/api/devices/enroll", {"code": code, "label": "iPhone", "client_id": "dc_http"})
+            self.assertEqual(status, 200)
+            ids.append(body_json(body)["device"]["id"])
+        self.assertEqual(ids[0], ids[1])
 
     def test_code_and_device_routes(self):
         token, device, headers = self.make_device()

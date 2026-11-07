@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """接更多 agent：注册表读配置、通用 cli 驱动、http 驱动、每场会议各自的参会者、没有会话的 AI 拿整份记录。"""
 import json, os, sys, tempfile, threading, time, unittest
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DATA = tempfile.mkdtemp(prefix="rt_reg_")
@@ -318,6 +319,71 @@ class PresetHiding(Base):
     def test_builtin_still_not_removable(self):
         ok, _ = registry.remove_agent("claude")
         self.assertFalse(ok)
+
+
+class ShortcutDetection(Base):
+    """桌面端应用靠开始菜单快捷方式检测：装在哪个盘都认（比如 Devin 装在 E:\\）。"""
+
+    def setUp(self):
+        super().setUp()
+        self.saved_dir = registry.PRESET_DIR
+        self.preset_dir = os.path.join(DATA, "presets")
+        os.makedirs(self.preset_dir, exist_ok=True)
+        for f in os.listdir(self.preset_dir):
+            os.remove(os.path.join(self.preset_dir, f))
+        menu = os.path.join(DATA, "menu", "Microsoft", "Windows", "Start Menu", "Programs", "Devin")
+        os.makedirs(menu, exist_ok=True)
+        open(os.path.join(menu, "Devin.lnk"), "w", encoding="utf-8").close()
+        self.hidden = os.path.join(DATA, "hidden_presets.json")
+        if os.path.exists(self.hidden):
+            os.remove(self.hidden)
+        os.environ.pop("ROUNDTABLE_NO_PRESETS", None)
+        registry.PRESET_DIR = self.preset_dir
+
+    def tearDown(self):
+        registry.PRESET_DIR = self.saved_dir
+        os.environ["ROUNDTABLE_NO_PRESETS"] = "1"
+        if os.path.exists(self.hidden):
+            os.remove(self.hidden)
+        super().tearDown()
+
+    @staticmethod
+    def _write_preset(name, obj):
+        with open(os.path.join(DATA, "presets", name), "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False)
+
+    def _load_with_fake_menu(self):
+        env = {"APPDATA": os.path.join(DATA, "menu"), "ProgramData": os.path.join(DATA, "no-common")}
+        with patch.dict(os.environ, env):
+            registry.load()
+
+    def test_start_menu_shortcut_counts_as_installed(self):
+        self._write_preset("devin.json", dict(CLI_CFG, id="devin", label="Devin", driver="external",
+                                              bin=[], detect=[os.path.join(DATA, "missing.exe")],
+                                              shortcuts=["Devin"]))
+        self._load_with_fake_menu()
+        spec = registry.get("devin")
+        self.assertTrue(spec["enabled"])
+        self.assertEqual(spec["driver"], "external")
+
+    def test_no_shortcut_and_no_path_stays_undetected(self):
+        self._write_preset("ghost.json", dict(CLI_CFG, id="ghostapp", label="Ghost", driver="external",
+                                              bin=[], detect=[os.path.join(DATA, "missing.exe")],
+                                              shortcuts=["Ghost"]))
+        self._load_with_fake_menu()
+        self.assertFalse(registry.get("ghostapp")["enabled"])
+
+    def test_hidden_external_preset_is_discoverable_again(self):
+        self._write_preset("devin.json", dict(CLI_CFG, id="devin", label="Devin", driver="external",
+                                              bin=[], shortcuts=["Devin"]))
+        registry._set_hidden(["devin"])
+        self._load_with_fake_menu()
+        self.assertNotIn("devin", registry.SPECS)
+        with patch.dict(os.environ, {"APPDATA": os.path.join(DATA, "menu"), "ProgramData": os.path.join(DATA, "no-common")}):
+            found = [row["id"] for row in registry.discover_hidden_presets()]
+            self.assertIn("devin", found)       # 「重新检索」能找回删掉的会外参与者
+            self.assertTrue(registry.restore_preset("devin"))
+        self.assertIn("devin", registry.SPECS)
 
 
 if __name__ == "__main__":

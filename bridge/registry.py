@@ -61,11 +61,34 @@ def builtin():
     ]
 
 
+def _start_menu_dirs():
+    """开始菜单的「程序」目录（当前用户 + 所有用户），检测桌面端装没装用。"""
+    roots = [os.path.join(os.environ.get(key) or "", "Microsoft", "Windows", "Start Menu", "Programs")
+             for key in ("APPDATA", "ProgramData")]
+    return [root for root in roots if root and os.path.isdir(root)]
+
+
+def _shortcut_present(name):
+    """开始菜单里有没有这个应用的快捷方式。装在哪个盘、哪个目录都认。"""
+    wanted = (str(name).strip() + ".lnk").lower()
+    for base in _start_menu_dirs():
+        for root, _, files in os.walk(base):
+            if wanted in (f.lower() for f in files):
+                return True
+    return False
+
+
 def _detected(spec):
-    """detect 里列的路径有一个存在就算装了（展开 %VAR% 和 ~）。"""
+    """detect 里列的路径有一个存在就算装了（展开 %VAR% 和 ~）；shortcuts 认开始菜单快捷方式。"""
     for p in spec.get("detect") or []:
         try:
             if os.path.exists(os.path.expandvars(os.path.expanduser(p))):
+                return True
+        except Exception:
+            pass
+    for name in spec.get("shortcuts") or []:
+        try:
+            if _shortcut_present(name):
                 return True
         except Exception:
             pass
@@ -129,6 +152,7 @@ def _norm(raw, idx=0):
         "kind": "user" if raw.get("kind") == "user" else "agent",
         "bin": _as_list(raw.get("bin")),
         "detect": _as_list(raw.get("detect")),
+        "shortcuts": _as_list(raw.get("shortcuts")),
         "args": arg,
         "prompt": str(raw.get("prompt") or ("stdin" if driver == "claude" else "arg")).strip().lower(),
         "images": _as_list(raw.get("images")),
@@ -334,7 +358,7 @@ def discover_hidden_presets():
             try:
                 for raw in _read_file(path):
                     spec = _norm(raw)
-                    if spec["id"] in hidden and spec["id"] not in SPECS and spec["enabled"] and spec["driver"] in ("cli", "claude", "codex"):
+                    if spec["id"] in hidden and spec["id"] not in SPECS and spec["enabled"] and spec["driver"] in ("cli", "claude", "codex", "external"):
                         found.append(public(spec))
             except (OSError, ValueError, TypeError):
                 continue

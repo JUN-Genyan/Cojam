@@ -27,10 +27,16 @@ const code = params.get('code') || '';
 const el = id => document.getElementById(id);
 function defaultName() {
   const ua = navigator.userAgent;
-  const device = /iPhone/i.test(ua) ? 'iPhone' : /iPad/i.test(ua) ? 'iPad' : /Android/i.test(ua) ? 'Android'
+  return /iPhone/i.test(ua) ? 'iPhone' : /iPad/i.test(ua) ? 'iPad' : /Android/i.test(ua) ? 'Android'
     : /Macintosh|Mac OS X/i.test(ua) ? 'Mac' : /Windows/i.test(ua) ? 'Windows' : '新设备';
-  const browser = /Edg\//i.test(ua) ? 'Edge' : /Chrome\//i.test(ua) ? 'Chrome' : /Safari\//i.test(ua) ? 'Safari' : '浏览器';
-  return device + ' · ' + browser;
+}
+function clientId() {
+  // 同一浏览器的持久设备号：重复接入时主机端覆盖旧记录，不新增一条设备
+  try {
+    let v = localStorage.getItem('cojam_device_id');
+    if (!v) { v = 'dc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12); localStorage.setItem('cojam_device_id', v); }
+    return v;
+  } catch (e) { return ''; }
 }
 el('name').value = defaultName();
 el('address').textContent = '当前地址：' + location.origin + '。以后请固定用这个地址打开；换地址需要重新生成接入码。';
@@ -47,7 +53,7 @@ el('join').onclick = async () => {
     const response = await fetch('/api/devices/enroll', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({code, label})
+      body: JSON.stringify({code, label, client_id: clientId()})
     });
     const data = await response.json();
     if (!response.ok) throw Error(data.error || '接入失败');

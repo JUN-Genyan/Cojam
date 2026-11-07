@@ -44,6 +44,75 @@ def confirm_close(base, token, ask=None):
     return (ask or show_confirm)(BUSY_TEXT)
 
 
+def _system_dark():
+    """Windows 应用主题是否为深色；页面的 prefers-color-scheme 跟随同一个设置。"""
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                             r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        try:
+            return winreg.QueryValueEx(key, "AppsUseLightTheme")[0] == 0
+        finally:
+            winreg.CloseKey(key)
+    except OSError:
+        return False
+
+
+def _colorref(hex_color):
+    """'#1b1b1e' → COLORREF（DWM 要 BGR 字节序）。"""
+    text = str(hex_color).lstrip("#")
+    r, g, b = int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16)
+    return ctypes.c_uint((b << 16) | (g << 8) | r)
+
+
+def _window_hwnd():
+    """找本进程里标题为主窗口的那个句柄；找不到返回 None。"""
+    import ctypes.wintypes as wt
+    user32 = ctypes.windll.user32
+    found = []
+    pid = os.getpid()
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
+    def collect(hwnd, _):
+        if user32.IsWindowVisible(hwnd):
+            length = user32.GetWindowTextLengthW(hwnd)
+            title = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, title, length + 1)
+            owner = wt.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+            if title.value == TITLE and owner.value == pid:
+                found.append(hwnd)
+        return True
+
+    user32.EnumWindows(collect, 0)
+    return found[0] if found else None
+
+
+def tint_title_bar(_window=None):
+    """Windows 11：标题栏 / 边框 / 标题文字染成与应用一致的深浅主题色。
+
+    与 index.html 的 --bar/--fg/--line 一一对应；旧系统不支持这些属性时静默忽略。
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        hwnd = _window_hwnd()
+        if not hwnd:
+            return
+        dark = _system_dark()
+        dwm = ctypes.windll.dwmapi
+
+        def paint(attribute, value):
+            dwm.DwmSetWindowAttribute(hwnd, attribute, ctypes.byref(value), 4)
+
+        paint(20, ctypes.c_uint(1 if dark else 0))             # 深色标题按钮
+        paint(35, _colorref("#1b1b1e" if dark else "#ffffff"))  # 标题栏 = --bar
+        paint(36, _colorref("#ececf1" if dark else "#18181b"))  # 标题文字 = --fg
+        paint(34, _colorref("#2c2c31" if dark else "#e7e7ea"))  # 窗口边框 = --line
+    except Exception:
+        pass
+
+
 class DesktopApi:
     """Native actions exposed only to the desktop window."""
     def __init__(self, webview):
@@ -70,6 +139,7 @@ def open_window(url, on_closing, module=None):
     window = webview.create_window(TITLE, url, width=1280, height=860, min_size=(960, 640), js_api=api)
     api._window = window
     window.events.closing += on_closing
+    window.events.shown += tint_title_bar
     kwargs = {}
     try:
         if "open_external_links_in_browser" in inspect.signature(webview.start).parameters:

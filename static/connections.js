@@ -7,7 +7,7 @@ async function checkConnectionBackend(signal) {
     if (!response.ok) throw Error();
     info = await response.json();
   } catch (e) { if (signal && signal.aborted) throw e; throw Error('无法连接合拍后台，请重新打开合拍后重试。'); }
-  if (info.app !== 'AI Bridge' || info.version !== '2.6.5' || info.api_revision !== 2)
+  if (info.app !== 'AI Bridge' || info.version !== '2.6.6' || info.api_revision !== 2)
     throw Error('界面与后台版本不一致。请重新打开最新的合拍 Cojam，再刷新此页面。');
   return info;
 }
@@ -246,9 +246,10 @@ function renderConnectionSetup(w) {
       + '<h4>邀请与游客</h4><div id="connInviteList">正在读取…</div>';
   } else if (w.type === 'local') {
     const local = [...CONTACTS, ...((agCat && agCat.discovered_presets) || [])].filter(a => ['cli', 'claude', 'codex'].includes(a.driver) && a.enabled);
+    const outside = CONTACTS.filter(a => a.driver === 'external' && a.enabled);
     w.localChoice = w.localChoice || (local.find(a => a.enabled) || {}).id || '__custom__';
     if (w.localChoice !== '__custom__' && !local.some(a => a.id === w.localChoice)) w.localChoice = (local[0] || {}).id || '__custom__';
-    content += '<p class="hint">自动检测运行合拍的设备上的程序；安装或卸载后可重新检索。</p><label>选择程序<select id="connLocal">' + local.map(a => '<option value="' + esc(a.id) + '"' + (w.localChoice === a.id ? ' selected' : '') + '>' + esc(a.label) + ' · 已检测到</option>').join('') + '<option value="__custom__"' + (w.localChoice === '__custom__' ? ' selected' : '') + '>自定义 CLI 程序…</option></select></label><button id="connRescan">重新检索已安装程序</button><div id="connCustom"' + (w.localChoice === '__custom__' ? '' : ' hidden') + '>' + connectionNameFields(w.localChoice === '__custom__' ? w : {...w, saved: false}) + '<label>命令或可执行文件路径<input id="connCommand" placeholder="my-agent 或完整程序路径" value="' + esc(w.form.command || '') + '"></label><label>调用参数（JSON 数组）<textarea id="connArgs">' + esc(w.form.args || '["-p", "{prompt}"]') + '</textarea></label></div><button id="connCheck" class="pri">检测并验证程序</button><p class="hint">仅运行 --version，不调用模型；登录和额度在首次回复时确认。</p>';
+    content += '<p class="hint">自动检测运行合拍的设备上的程序；安装或卸载后可重新检索。</p><label>选择程序<select id="connLocal">' + local.map(a => '<option value="' + esc(a.id) + '"' + (w.localChoice === a.id ? ' selected' : '') + '>' + esc(a.label) + ' · 已检测到</option>').join('') + '<option value="__custom__"' + (w.localChoice === '__custom__' ? ' selected' : '') + '>自定义 CLI 程序…</option></select></label><button id="connRescan">重新检索已安装程序</button>' + (outside.length ? '<p class="hint">已检测到会外参与者应用：' + outside.map(a => esc(a.label)).join('、') + '。会议室不直接运行它们：在应用里通过 MCP / HTTP 配合联系人接入密钥参与，或改用「其他设备上的 Harness」方式接入。</p>' : '') + '<div id="connCustom"' + (w.localChoice === '__custom__' ? '' : ' hidden') + '>' + connectionNameFields(w.localChoice === '__custom__' ? w : {...w, saved: false}) + '<label>命令或可执行文件路径<input id="connCommand" placeholder="my-agent 或完整程序路径" value="' + esc(w.form.command || '') + '"></label><label>调用参数（JSON 数组）<textarea id="connArgs">' + esc(w.form.args || '["-p", "{prompt}"]') + '</textarea></label></div><button id="connCheck" class="pri">检测并验证程序</button><p class="hint">仅运行 --version，不调用模型；登录和额度在首次回复时确认。</p>';
   } else {
     content += connectionNameFields(w);
     if (w.type === 'http') {

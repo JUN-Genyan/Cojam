@@ -356,7 +356,8 @@ class Handler(BaseHTTPRequestHandler):
             if data is None:
                 return
             try:
-                result = devices.enroll(str(data.get("code") or ""), str(data.get("label") or ""))
+                result = devices.enroll(str(data.get("code") or ""), str(data.get("label") or ""),
+                                        str(data.get("client_id") or ""))
             except devices.DeviceError as error:
                 return self._json(error.code, {"error": str(error)})
             return self._json(200, {"ok": True, "token": result["token"], "device": result["device"]},

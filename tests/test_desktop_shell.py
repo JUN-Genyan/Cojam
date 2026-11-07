@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Desktop shell backend: discovery, token, owner-tab heartbeat and busy detection."""
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -215,6 +217,7 @@ class FakeEvent:
 class FakeEvents:
     def __init__(self):
         self.closing = FakeEvent()
+        self.shown = FakeEvent()
 
 
 class FakeWindow:
@@ -262,6 +265,7 @@ class WindowAndFlow(unittest.TestCase):
         self.assertEqual((fake.created["width"], fake.created["height"]), (1280, 860))
         self.assertEqual(fake.created["min_size"], (960, 640))
         self.assertEqual(fake.window.events.closing.items, [handler])
+        self.assertEqual(fake.window.events.shown.items, [shell_main.tint_title_bar])
         self.assertTrue(fake.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"])
         self.assertEqual(fake.started, {})
 
@@ -418,6 +422,36 @@ class FindCore(unittest.TestCase):
     def test_packaged_mode_without_core(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertIsNone(backend.find_core(frozen=True, executable=str(Path(tmp) / "CojamDesktop.exe")))
+
+
+class TitleBarTint(unittest.TestCase):
+    def test_colorref_uses_bgr_order(self):
+        self.assertEqual(shell_main._colorref("#1b1b1e").value, 0x001E1B1B)
+        self.assertEqual(shell_main._colorref("#ececf1").value, 0x00F1ECEC)
+        self.assertEqual(shell_main._colorref("#ffffff").value, 0x00FFFFFF)
+
+    def test_tint_is_noop_without_window_handle(self):
+        with patch.object(shell_main, "_window_hwnd", return_value=None):
+            shell_main.tint_title_bar()          # 找不到窗口时静默跳过
+
+    @unittest.skipUnless(sys.platform == "win32", "DWM attributes are Windows only")
+    def test_tint_paints_theme_colors(self):
+        seen = []
+
+        class FakeDwm:
+            def DwmSetWindowAttribute(self, hwnd, attribute, value, size):
+                seen.append((attribute, ctypes.cast(value, ctypes.POINTER(ctypes.c_uint)).contents.value))
+                return 0
+
+        fake = types.SimpleNamespace(dwmapi=FakeDwm())
+        for dark, expect in ((True, {20: 1, 35: 0x001E1B1B, 36: 0x00F1ECEC, 34: 0x00312C2C}),
+                             (False, {20: 0, 35: 0x00FFFFFF, 36: 0x001B1818, 34: 0x00EAE7E7})):
+            seen[:] = []
+            with patch.object(shell_main, "_window_hwnd", return_value=1234), \
+                    patch.object(shell_main, "_system_dark", return_value=dark), \
+                    patch.object(shell_main.ctypes, "windll", fake):
+                shell_main.tint_title_bar()
+            self.assertEqual(dict(seen), expect)
 
 
 if __name__ == "__main__":
