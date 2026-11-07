@@ -2,7 +2,7 @@
   "app": "Cojam",
   "version": "2.6.3",
   "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.3.exe",
-  "sha256": "1c48f54567b5373feb0ccf7278eb9e15cafa98facc2180bede20cb62f3864a73",
-  "size": 27704504,
+  "sha256": "6bcc6272294df18e519ee75506b92560ce828f3d04039d10969223c6707126e9",
+  "size": 27706299,
   "notes": "优化启动与接入流程，简化接入入口并改进联系人管理。"
 }
