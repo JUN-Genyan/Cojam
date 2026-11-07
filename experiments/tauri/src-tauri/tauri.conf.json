@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Cojam Tauri Experiment",
+  "version": "0.1.0",
+  "identifier": "com.cojam.desktop.experiment",
+  "build": { "frontendDist": "../placeholder" },
+  "app": { "windows": [], "security": { "csp": null } },
+  "bundle": { "active": false, "icon": ["icons/icon.ico"] }
+}

@@ -1,0 +1,27 @@
+name: Tauri experiment (Windows)
+on:
+  push:
+    branches: ["codex/tauri-experiment"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test isolated launcher
+        run: python -m unittest discover -s tests -p test_tauri_experiment.py
+      - name: Build experimental window
+        working-directory: experiments/tauri/src-tauri
+        run: cargo build --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cojam-tauri-experiment-window
+          path: experiments/tauri/src-tauri/target/release/cojam-tauri-experiment.exe
+          if-no-files-found: error
