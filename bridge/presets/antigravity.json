@@ -14,7 +14,12 @@
     "%LOCALAPPDATA%\\Programs\\Antigravity\\resources\\bin\\language_server.exe"
   ],
   "shortcuts": ["Antigravity"],
-  "note": "本机 CLI（Antigravity 自带的 agy）：会议室直接叫它，非交互跑一轮。读模式用 --mode plan（只读），干活模式用 --mode accept-edits --dangerously-skip-permissions。会话 id 取自 JSON 输出的 conversation_id，续接用 --conversation。",
+  "env": {
+    "SSH_CONNECTION": "",
+    "SSH_CLIENT": "",
+    "SSH_TTY": ""
+  },
+  "note": "本机 CLI（Antigravity 自带的 agy）：会议室直接叫它，非交互跑一轮。读模式用 --mode plan（只读），干活模式用 --mode accept-edits --dangerously-skip-permissions。会话 id 取自 JSON 输出的 conversation_id，续接用 --conversation。清空 SSH_* 是因为 agy 一看到 SSH 环境变量就改用文件令牌、读不到 Windows 已登录的凭据（从 SSH 会话里启动会议室时会认证失败）。",
   "args": {
     "base": [],
     "read": ["--mode", "plan"],

@@ -414,6 +414,8 @@ class AntigravityCli(Base):
         self.assertIn("--mode", spec["args"]["work"])
         self.assertTrue(spec["caps"]["handoff"])
         self.assertIn("--conversation", spec["handoff"])
+        # agy 看到 SSH_* 会改用文件令牌，读不到 Windows 已登录的凭据
+        self.assertEqual(spec["env"].get("SSH_CONNECTION"), "")
 
     def test_parses_agy_json_output(self):
         spec = self._load()

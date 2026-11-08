@@ -301,7 +301,7 @@
 | id | 命令参数来源 | 实测 |
 |---|---|---|
 | `opencode` | 照本机 `opencode run --help` 抄的，会话 id 从 JSON 每行取（跑通过） | 文本事件没跑通（免费额度用完），可能要用 doctor 微调 `parse.text` |
-| `antigravity` | Antigravity 自带的 `agy` CLI v1.4.12：`-p` 非交互、`--output-format json` 取 `response` / `conversation_id`、`--conversation` 续接 | 已实测讨论、续接、干活三种模式 |
+| `antigravity` | Antigravity 自带的 `agy` CLI v1.4.12：`-p` 非交互、`--output-format json` 取 `response` / `conversation_id`、`--conversation` 续接；预置里清空 `SSH_*`，否则 agy 会改用文件令牌、读不到 Windows 已登录的凭据 | 已实测讨论、续接、干活三种模式 |
 | `cursor` | 照本机 `cursor-agent --help` 抄的 | 没登录，JSON 形状没验到 |
 | `gemini` | 照 gemini-cli 的 headless 文档 | 没实测 |
 | `qwen` | gemini-cli 的分支，同款参数 | 没实测 |
