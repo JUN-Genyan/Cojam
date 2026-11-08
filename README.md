@@ -27,7 +27,7 @@
 - **下载版**：运行 Windows 桌面安装程序，安装后打开合拍；也可使用单文件浏览器版。桌面窗口版需要 `Cojam.exe` 和 `CojamCore.exe` 同目录。应用内「更新」可检查并下载安装程序，由用户手动运行。
 - **macOS 桌面版**：可从源码启动，或在 Mac 上构建独立应用包；依赖、数据目录与签名说明见 [macOS 使用说明](docs/MACOS.md)。
 - 源码版：双击 `start.bat` 或 `open.pyw`（都在后台开，不弹终端窗口；没开就开、开了就直接打开网页）。要看日志或前台运行：`python roundtable.py`（或 `python -m bridge`）。地址 http://127.0.0.1:8765 。
-- 接别的工具（Antigravity / Cursor / Claude Code / Codex）一条命令：`Cojam.exe install antigravity`（源码版 `python roundtable.py install ...`）。见"接更多 AI"。
+- Antigravity 装好后会自动作为本机 AI 出现（会议室直接调用它自带的 `agy` CLI）。给别的工具接 MCP 可用一条命令：`Cojam.exe install cursor`（源码版 `python roundtable.py install ...`）。见"接更多 AI"。
 - 第一次打开，从左侧创建项目和联系人，再在项目下新建会话。
 - 新建项目时，Windows 独立桌面窗口可点击「选择文件夹」打开系统选择器；浏览器或远程访问需手动填写运行 Cojam 的主机上的文件夹路径。
 - 会议记录、附件都存在本文件夹的 `data\`（不进 git）。
@@ -78,11 +78,11 @@
 
 会议室里有谁，由**注册表**决定，不用改代码：
 
-- **装了什么就有什么**：除了 `claude`、`codex`，仓库自带 gemini / opencode / crush / aider / qwen / cursor 的预置。命令在 PATH 里就算"启用"，没装就不出现。
+- **装了什么就有什么**：除了 `claude`、`codex`，仓库自带 gemini / opencode / crush / aider / qwen / cursor / antigravity 的预置。命令在 PATH（或常见安装目录，如 Antigravity 的 `~/.gemini/bin`）里就算"启用"，没装就不出现。
 - **写配置**：`data\agents.d\<名字>.json`（一个 agent 一个文件），或 `data\agents.json` 里写 `{"agents": [...]}`。存的是纯 JSON，改完不用重启服务器。
 - **自己的 harness**：让它监听一个 HTTP 端口（`driver: "http"`），会议室每轮把话 POST 过去，它回 `{"text": "..."}` 就行。协议很短，见文档。
 - **外部主动接入**：先创建联系人、邀请进会话、生成接入密钥；带 `Authorization: Bearer <密钥>` 请求 `/api/external/rooms`，取得会话 ID 后通过 `/api/post` 或 `/mcp` 发言。不能匿名报到或自行加入。见 [接入说明](docs/CONTACTS.md)。
-- **接现成的 IDE**：`Cojam.exe install antigravity` / `cursor` / `claude` / `codex`，一条命令写进它的 MCP 配置（先备份），重启那个工具就有工具可用了。
+- **接现成的 IDE**：`Cojam.exe install cursor` / `claude` / `codex`，一条命令写进它的 MCP 配置（先备份），重启那个工具就有工具可用了。Antigravity 平时不用这一步（它的 `agy` CLI 会被自动发现）；`install antigravity` 只用于让 Antigravity 的 IDE agent 自己经 MCP 发言。
 - **先验一遍**：`python -m bridge.doctor` 列出读到的 agent 和哪份配置读坏了；`python -m bridge.doctor gemini` 真跑一次，把回复、会话 id、报错都打出来——不用开会，也不占会议室。
 - **每场会议各自选人**：顶部"AI 成员"里勾上谁参加这场会议。新会议默认 claude + codex（两个都没装就放启用的全部）。被移出去的 AI 会话还留着，重新勾上就接得上；@ 一个不在会里的 AI，不会顺手把别人叫起来。
 - **界面上添加联系人**：左侧「⋯」管理全局联系人，「＋ 接入」添加并验证连接；添加后不会自动加入当前会话。右侧「成员与权限」配置当前会话的成员。

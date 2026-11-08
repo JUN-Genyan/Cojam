@@ -386,5 +386,79 @@ class ShortcutDetection(Base):
         self.assertIn("devin", registry.SPECS)
 
 
+class AntigravityCli(Base):
+    """Antigravity 自带的 agy CLI：自动发现、JSON 输出解析、会话续接、交给终端。"""
+
+    def _load(self):
+        saved = os.environ.pop("ROUNDTABLE_NO_PRESETS", None)
+        find = lambda n: "/opt/agy" if os.path.basename(n).lower().startswith("agy") else None
+        try:
+            with patch.object(common, "find_executable", side_effect=find), \
+                 patch.object(registry, "find_executable", side_effect=find):
+                registry.load()
+        finally:
+            if saved is not None:
+                os.environ["ROUNDTABLE_NO_PRESETS"] = saved
+        return registry.get("antigravity")
+
+    def test_preset_is_a_local_cli_agent(self):
+        spec = self._load()
+        self.assertIsNotNone(spec)
+        self.assertEqual(spec["driver"], "cli")
+        self.assertTrue(spec["enabled"])
+        with patch.object(common, "find_executable", return_value="/opt/agy"):
+            self.assertEqual(registry.exe_of(spec), ["/opt/agy"])
+        self.assertEqual(spec["args"]["new"], ["-p", "{prompt}", "--output-format", "json"])
+        self.assertEqual(spec["args"]["resume"][:2], ["--conversation", "{session}"])
+        self.assertIn("--mode", spec["args"]["read"])
+        self.assertIn("--mode", spec["args"]["work"])
+        self.assertTrue(spec["caps"]["handoff"])
+        self.assertIn("--conversation", spec["handoff"])
+
+    def test_parses_agy_json_output(self):
+        spec = self._load()
+        text, sess = drivers._parse(
+            spec, '{"conversation_id": "9efc7920-ded1-4417-aeb5-1447d41b3713",'
+                  ' "status": "SUCCESS", "response": "OK\\n"}')
+        self.assertEqual(text, "OK")
+        self.assertEqual(sess, "9efc7920-ded1-4417-aeb5-1447d41b3713")
+
+
+class ExecutableSearch(unittest.TestCase):
+    """bin 里可以直接写绝对路径 / 环境变量；Antigravity 的 agy 在 ~/.gemini/bin 也能找到。"""
+
+    def test_finds_cli_in_gemini_bin(self):
+        home = tempfile.mkdtemp(prefix="cojam_home_")
+        bindir = os.path.join(home, ".gemini", "bin")
+        os.makedirs(bindir)
+        name = "cojam-agy-test" + (".exe" if os.name == "nt" else "")
+        path = os.path.join(bindir, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("")
+        os.chmod(path, 0o755)
+        env = {"HOME": home, "USERPROFILE": home, "PATH": ""}
+        with patch.dict(os.environ, env):
+            found = common.find_executable(name)
+        self.assertEqual(os.path.normcase(found or ""), os.path.normcase(path))
+
+    def test_absolute_path_is_found_without_path(self):
+        directory = tempfile.mkdtemp(prefix="cojam_abs_")
+        exe = os.path.join(directory, "cojam-abs-test" + (".exe" if os.name == "nt" else ""))
+        with open(exe, "w", encoding="utf-8") as f:
+            f.write("")
+        os.chmod(exe, 0o755)
+        with patch.dict(os.environ, {"PATH": ""}):
+            self.assertEqual(common.find_executable(exe), exe)
+
+    @unittest.skipUnless(os.name == "nt", "Windows 环境变量写法")
+    def test_expands_environment_variable(self):
+        home = tempfile.mkdtemp(prefix="cojam_env_")
+        exe = os.path.join(home, "cojam-env-test.exe")
+        with open(exe, "w", encoding="utf-8") as f:
+            f.write("")
+        with patch.dict(os.environ, {"USERPROFILE": home, "PATH": ""}):
+            self.assertEqual(common.find_executable("%USERPROFILE%\\cojam-env-test.exe"), exe)
+
+
 if __name__ == "__main__":
     unittest.main()

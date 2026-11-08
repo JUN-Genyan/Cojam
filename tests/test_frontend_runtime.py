@@ -323,10 +323,12 @@ const context = vm.createContext({URL, uiIcon:()=>'', esc:s=>s,
   fetch:async()=>({ok:true,json:async()=>({account:{},devices:[]})})});
 vm.runInContext(fs.readFileSync('static/connections.js','utf8'), context);
 (async()=>{
-  const w={base:'http://100.64.0.5:8767',info:{tailscale_url:'http://100.64.0.5:8767'},form:{}};
+  const w={base:'http://100.64.0.5:8767',info:{lan_url:'http://192.168.1.5:8766',tailscale_url:'http://100.64.0.5:8767'},form:{}};
   await context.renderDeviceSetup(w);
   const select=node('connDeviceBase'), custom=node('connDeviceCustomBase');
   assert.match(select.innerHTML, /自定义 HTTPS 地址/);
+  assert.ok(select.innerHTML.indexOf('192.168.1.5:8766') < select.innerHTML.indexOf('100.64.0.5:8767'));
+  assert.match(node('connDeviceBaseHint').textContent, /只有这台电脑能打开/);
   select.value='__custom__'; select.onchange();
   assert.equal(custom.hidden,false);
   custom.value='https://host.example.ts.net/'; custom.oninput();
@@ -353,10 +355,13 @@ assert.equal(context.connectionDefaultBase('external', {lan_url: lan}, origin), 
 assert.equal(context.connectionDefaultBase('http', {lan_url: lan}, origin), origin);
 assert.equal(context.connectionDefaultBase('user', {}, origin), origin);
 assert.equal(context.connectionDefaultBase('mydevice',
-  {tailscale_url: 'http://100.64.0.5:8767', lan_url: lan}, origin),
-  'http://100.64.0.5:8767');
+  {tailscale_url: 'http://100.64.0.5:8767', lan_url: lan}, origin), lan);   // 同一 WiFi 默认局域网
+assert.equal(context.connectionDefaultBase('mydevice',
+  {tailscale_url: 'http://100.64.0.5:8767'}, origin), 'http://100.64.0.5:8767');
 assert.equal(context.connectionDefaultBase('mydevice', {lan_url: lan}, origin), lan);
 assert.equal(context.connectionDefaultBase('mydevice', {}, origin), origin);
+assert.equal(context.connectionDefaultBase('mydevice',
+  {lan_url: lan, tailscale_url: 'http://100.64.0.5:8767'}, 'http://100.64.0.5:8767'), 'http://100.64.0.5:8767');
 const remote = 'https://bridge.example.test';
 for (const type of ['user', 'external', 'mydevice'])
   assert.equal(context.connectionDefaultBase(type, {lan_url: lan, tailscale_url: 'http://100.64.0.5:8767'}, remote), remote);

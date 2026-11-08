@@ -44,7 +44,7 @@
 
 | 工具 | 写到哪 | 备注 |
 |---|---|---|
-| Google Antigravity | `~/.gemini/config/mcp_config.json` | 格式是从它自己的可执行文件里扒出来的：`mcpServers` + Streamable HTTP 的 `url` |
+| Google Antigravity | `~/.gemini/config/mcp_config.json` | 格式是从它自己的可执行文件里扒出来的：`mcpServers` + Streamable HTTP 的 `url`。平时不用这一步：Antigravity 的 `agy` CLI 会被自动发现并作为本机 Agent 调用；这里只用于让 Antigravity 的 IDE agent 自己经 MCP 发言 |
 | Cursor | `~/.cursor/mcp.json` | |
 | Claude Code | 由 `claude mcp add` 写 | 不手改它的配置 |
 | Codex | `~/.codex/config.toml` | 加一段 `[mcp_servers.ai-bridge]` |
@@ -114,14 +114,14 @@
 
 | 顺序 | 位置 | 用途 |
 |---|---|---|
-| 1 | `bridge\presets\*.json` | 仓库自带的内置预置（gemini、opencode、crush、aider、qwen、cursor） |
+| 1 | `bridge\presets\*.json` | 仓库自带的内置预置（gemini、opencode、crush、aider、qwen、cursor、antigravity） |
 | 2 | `<数据目录>\agents.d\*.json` | 自己加的，一个 agent 一个文件 |
 | 3 | `<数据目录>\agents.json` | 一个文件写几个：`{"agents": [ … ]}` |
 | 4 | 环境变量 `ROUNDTABLE_AGENTS` | 指向一个目录或一个文件（调试、覆盖用） |
 
 数据目录默认是项目里的 `data\`（可用 `ROUNDTABLE_LOG_DIR` 改）。
 
-**启用规则**：配置里没写 `enabled` 时，看 `bin` 里的命令在不在 PATH 里。装了就是启用，没装就不出现。
+**启用规则**：配置里没写 `enabled` 时，看 `bin` 里的命令在不在 PATH 里，也会找常见安装目录（如 Antigravity 的 `~/.gemini/bin`）。`bin` 里可以直接写绝对路径或带环境变量的路径（如 `%USERPROFILE%\.gemini\bin\agy.exe`）。装了就是启用，没装就不出现。
 所以把预置文件全拷进仓库也不会冒出七个用不了的 agent。
 
 改完不用重启服务器：点开会议室的"参会者"，或者 `GET /api/agents` 看新配置有没有读到。
@@ -301,6 +301,7 @@
 | id | 命令参数来源 | 实测 |
 |---|---|---|
 | `opencode` | 照本机 `opencode run --help` 抄的，会话 id 从 JSON 每行取（跑通过） | 文本事件没跑通（免费额度用完），可能要用 doctor 微调 `parse.text` |
+| `antigravity` | Antigravity 自带的 `agy` CLI v1.4.12：`-p` 非交互、`--output-format json` 取 `response` / `conversation_id`、`--conversation` 续接 | 已实测讨论、续接、干活三种模式 |
 | `cursor` | 照本机 `cursor-agent --help` 抄的 | 没登录，JSON 形状没验到 |
 | `gemini` | 照 gemini-cli 的 headless 文档 | 没实测 |
 | `qwen` | gemini-cli 的分支，同款参数 | 没实测 |

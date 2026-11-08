@@ -352,7 +352,13 @@ def tailscale_ipv4():
 def find_executable(name):
     """Find a command using current paths, including newly installed Windows CLIs."""
     import shutil
-    paths = [os.environ.get("PATH", "")]
+    name = os.path.expandvars(os.path.expanduser(str(name or "").strip()))
+    if not name:
+        return None
+    if os.path.dirname(name) and os.path.isfile(name):   # 配置里写的是绝对路径
+        return name
+    paths = [os.environ.get("PATH", ""),
+             os.path.join(os.path.expanduser("~"), ".gemini", "bin")]   # Antigravity CLI（agy / agy.exe）
     if os.name == "nt":
         # A running GUI application does not receive PATH changes made later.
         try:

@@ -11,15 +11,22 @@ async function checkConnectionBackend(signal) {
     throw Error('界面与后台版本不一致。请重新打开最新的合拍 Cojam，再刷新此页面。');
   return info;
 }
+function hostFromUrl(value) {
+  try { return new URL(value).hostname.replace(/^\[|\]$/g, '').toLowerCase(); } catch (e) { return ''; }
+}
+function isLoopbackHost(host) {
+  return ['127.0.0.1', 'localhost', '::1'].includes(host);
+}
 function connectionDefaultBase(type, info, origin) {
   if (!['user', 'external', 'mydevice'].includes(type)) return origin;
-  try {
-    const host = new URL(origin).hostname.replace(/^\[|\]$/g, '').toLowerCase();
-    // When already using a remote address, it is the only address known to
-    // work from this device; replacing it with the server's LAN breaks tunnels.
-    if (!['127.0.0.1', 'localhost', '::1'].includes(host)) return origin;
-  } catch (e) { return origin; }
-  if (type === 'mydevice') return (info && info.tailscale_url) || (info && info.lan_url) || origin;
+  const host = hostFromUrl(origin);
+  if (!host) return origin;
+  // When already using a remote address, it is the only address known to
+  // work from this device; replacing it with the server's LAN breaks tunnels.
+  if (!isLoopbackHost(host)) return origin;
+  // 在本机打开页面时给别的设备生成地址：同一个 WiFi 最常用，默认局域网。
+  // 没有局域网地址（或对方在外部网络）才用 Tailscale。
+  if (type === 'mydevice') return (info && info.lan_url) || (info && info.tailscale_url) || origin;
   return (info && info.lan_url) || origin;
 }
 function connectionBaseWarning(base) {
@@ -55,18 +62,23 @@ async function renderDeviceSetup(w) {
   const custom = document.getElementById('connDeviceCustomBase');
   const hint = document.getElementById('connDeviceBaseHint');
   const options = [];
-  if (w.info && w.info.tailscale_url) options.push([w.info.tailscale_url, 'Tailscale（完整界面）']);
-  if (w.info && w.info.lan_url) options.push([w.info.lan_url, '局域网']);
-  options.push([location.origin, '当前地址']);
+  if (w.info && w.info.lan_url) options.push([w.info.lan_url, '局域网（同一个 WiFi）']);
+  if (w.info && w.info.tailscale_url) options.push([w.info.tailscale_url, 'Tailscale（对方也登录同一 Tailscale）']);
+  options.push([location.origin, '当前地址（仅这台电脑）']);
   select.innerHTML = options.map(([value, label]) => '<option value="' + esc(value) + '">' + esc(label) + '</option>').join('')
     + '<option value="__custom__">自定义 HTTPS 地址</option>';
   const known = options.some(([value]) => value === w.base);
   select.value = known ? w.base : '__custom__';
   custom.value = known ? '' : w.base;
   custom.hidden = known;
+  // 页面开在本机回环地址时，8765 只有这台电脑能打开；设备链接换成
+  // 局域网（8766）或 Tailscale（8767）是正常的，不说清楚会以为出了错。
+  const localOpen = isLoopbackHost(hostFromUrl(location.origin));
   const showHint = () => {
     const issue = connectionBaseWarning(w.base);
-    hint.textContent = issue || '用要接入的设备扫描二维码或打开链接。只发给可信设备。';
+    hint.textContent = issue || (localOpen
+      ? '本机界面用的 ' + new URL(location.origin).host + ' 只有这台电脑能打开；手机 / 其他设备请选局域网地址（同一个 WiFi），人在外面时选 Tailscale。'
+      : '用要接入的设备扫描二维码或打开链接。只发给可信设备。');
     hint.classList.toggle('warn', !!issue);
   };
   select.onchange = () => {
@@ -131,6 +143,9 @@ async function generateDeviceCode(w) {
     const box = document.getElementById('connDeviceResult');
     box.innerHTML = '<div class="connection-evidence success"><b>✓ 接入码已生成</b>'
       + '<p>10 分钟内有效，只能使用一次。用要接入的设备扫描二维码或打开链接。</p></div>'
+      + (isLoopbackHost(hostFromUrl(location.origin))
+        ? '<p class="hint">链接里的地址和你在本机用的 ' + esc(new URL(location.origin).host) + ' 不同是正常的：本机入口只给这台电脑用，其他设备走局域网或 Tailscale 入口。</p>'
+        : '')
       + (issue ? '<p class="hint connection-base-warning">' + esc(issue) + ' 先换一个设备能打开的地址。</p>'
                : '<div id="connQr" class="connection-qr" aria-label="设备接入二维码"></div>')
       + '<input id="connDeviceUrl" readonly aria-label="设备接入链接"><button id="connDeviceCopy">复制接入链接</button>';
