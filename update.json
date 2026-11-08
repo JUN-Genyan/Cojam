@@ -1,8 +1,8 @@
 {
   "app": "Cojam",
-  "version": "2.6.8",
-  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.8.exe",
-  "sha256": "fc7db690e4469fcf89c508e994546b3fc5f77d6cae5e4db33c822115eecf1408",
-  "size": 27727317,
-  "notes": "Antigravity 装好后会自动作为本机 AI 出现，会议室可直接调用；设备接入向导默认给出局域网地址。"
+  "version": "2.6.9",
+  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.9.exe",
+  "sha256": "9686f45d80ecded53c1c2d9bdd63986321c931e614a68dacd3ea691949045a1f",
+  "size": 27733157,
+  "notes": "新增可撤销的长期个人接入链接，改善设备重连和本机 Agent 检测。"
 }
