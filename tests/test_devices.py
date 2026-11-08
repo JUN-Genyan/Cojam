@@ -73,6 +73,17 @@ class DeviceCredentials(unittest.TestCase):
         saved = json.loads(Path(DATA, "account.json").read_text(encoding="utf-8"))
         self.assertEqual(saved["id"], first["id"])
 
+    def test_reusable_device_link_survives_time_and_is_revocable(self):
+        with patch.object(devices.time, 'time', return_value=100000):
+            link = devices.create_link('iPhone')
+        token, device = link['token'], link['device']
+        self.assertNotIn(token, Path(DATA, 'devices.json').read_text(encoding='utf-8'))
+        with patch.object(devices.time, 'time', return_value=100000 + 86400 * 60):
+            self.assertEqual(devices.verify(token)['id'], device['id'])
+            self.assertEqual(devices.verify(token)['id'], device['id'])
+        devices.revoke(device['id'])
+        self.assertIsNone(devices.verify(token))
+
     def test_code_is_one_time_and_creates_a_device(self):
         code = devices.create_code("我的手机")
         self.assertRegex(code["token"], r"^code_[0-9a-f]{24}\.")
@@ -137,6 +148,22 @@ class DeviceCredentials(unittest.TestCase):
 
 
 class DeviceHTTP(unittest.TestCase):
+    def test_reusable_link_across_two_browsers_and_revocation(self):
+        from urllib.parse import urlsplit, parse_qs
+        self.assertEqual(call('/api/devices/link', {'label':'iPhone', 'base':'http://192.168.1.9:8766'})[0], 403)
+        status, body, _ = call('/api/devices/link', {'label':'iPhone', 'base':'http://192.168.1.9:8766'}, token=web.RT_TOKEN)
+        self.assertEqual(status, 200)
+        link = body_json(body)
+        token = parse_qs(urlsplit(link['url']).fragment)['device'][0]
+        for _ in range(2):
+            status, _, headers = call('/api/devices/restore', {'token':token})
+            self.assertEqual(status, 200)
+            self.assertIn('cojam_device=', headers['Set-Cookie'])
+            self.assertEqual(call('/api/rooms', token=token)[0], 200)
+        self.assertEqual(call('/api/devices/revoke', {'id':link['id']}, token=web.RT_TOKEN)[0], 200)
+        self.assertEqual(call('/api/devices/restore', {'token':token})[0], 401)
+        self.assertEqual(call('/api/rooms', token=token)[0], 403)
+
     def make_device(self, label="我的手机"):
         status, body, _ = call("/api/devices/code", {"label": label, "base": "http://192.168.1.9:8766"}, token=web.RT_TOKEN)
         self.assertEqual(status, 200)

@@ -105,6 +105,27 @@ class Registry(Base):
 
 
 class CliDriver(Base):
+    def test_qoder_cli_preset_detects_only_the_actual_cli(self):
+        from pathlib import Path
+        preset = json.loads((Path(__file__).resolve().parents[1] / 'bridge' / 'presets' / 'qodercli.json').read_text(encoding='utf-8'))
+        with patch.object(registry, 'find_executable', return_value=None):
+            self.assertFalse(registry._norm(preset)['enabled'])
+        with patch.object(registry, 'find_executable', return_value='qodercli.exe'):
+            spec = registry._norm(preset)
+        self.assertTrue(spec['enabled'])
+        self.assertIn('performance', spec['models'])
+        self.assertIn('high', spec['efforts'])
+
+    def test_optional_model_and_effort_reach_cli_only_when_selected(self):
+        cfg = dict(CLI_CFG, args={"new": [FAKE, "{prompt}"],
+                                   "model": ["--model", "{model}"],
+                                   "effort": ["--reasoning-effort", "{effort}"]})
+        spec = registry._norm(cfg)
+        args, _ = drivers._compose(spec, {"model": "performance", "effort": "high"}, None, [], "discuss", "hello")
+        self.assertEqual(args, ["--model", "performance", "--reasoning-effort", "high", FAKE, "hello"])
+        args, _ = drivers._compose(spec, {"model": "", "effort": ""}, None, [], "discuss", "hello")
+        self.assertEqual(args, [FAKE, "hello"])
+
     def test_roundtrip_and_session_reuse(self):
         write_cfg("good.json", CLI_CFG)
         registry.load()
@@ -334,6 +355,10 @@ class ShortcutDetection(Base):
         menu = os.path.join(DATA, "menu", "Microsoft", "Windows", "Start Menu", "Programs", "Devin")
         os.makedirs(menu, exist_ok=True)
         open(os.path.join(menu, "Devin.lnk"), "w", encoding="utf-8").close()
+        self.real_shortcut_target_exists = registry._shortcut_target_exists
+        shortcut = patch.object(registry, "_shortcut_target_exists", return_value=True)
+        shortcut.start()
+        self.addCleanup(shortcut.stop)
         self.hidden = os.path.join(DATA, "hidden_presets.json")
         if os.path.exists(self.hidden):
             os.remove(self.hidden)
@@ -372,6 +397,25 @@ class ShortcutDetection(Base):
                                               shortcuts=["Ghost"]))
         self._load_with_fake_menu()
         self.assertFalse(registry.get("ghostapp")["enabled"])
+
+    def test_stale_shortcut_does_not_count_as_installed(self):
+        self._write_preset("devin.json", dict(CLI_CFG, id="devin", driver="external",
+                                              bin=[], shortcuts=["Devin"]))
+        with patch.object(registry, "_shortcut_target_exists", return_value=False):
+            self._load_with_fake_menu()
+        self.assertFalse(registry.get("devin")["enabled"])
+
+    def test_resolved_shortcut_rechecks_removed_target(self):
+        link = os.path.join(DATA, "test-target.lnk")
+        target = os.path.join(DATA, "test-target.exe")
+        with open(link, "w", encoding="utf-8") as file:
+            file.write("link")
+        with open(target, "w", encoding="utf-8") as file:
+            file.write("program")
+        with patch.object(registry, "_shortcut_target", return_value=target):
+            self.assertTrue(self.real_shortcut_target_exists(link))
+            os.remove(target)
+            self.assertFalse(self.real_shortcut_target_exists(link))
 
     def test_hidden_external_preset_is_discoverable_again(self):
         self._write_preset("devin.json", dict(CLI_CFG, id="devin", label="Devin", driver="external",

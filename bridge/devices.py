@@ -80,6 +80,20 @@ def create_code(label="新设备", ttl=CODE_TTL):
         return {"id": record_id, "token": record_id + "." + secret, "expires": expires, "label": clean_label}
 
 
+def create_link(label="我的设备"):
+    """Create a revocable, reusable owner credential; plaintext is returned once."""
+    with LOCK:
+        now = int(time.time())
+        token = "dev_" + secrets.token_urlsafe(32)
+        row = {"id": "dev_" + secrets.token_hex(12), "label": _clean(label, "我的设备"),
+               "secret_hash": _digest(token), "account_id": account()["id"],
+               "created": now, "last_seen": 0, "revoked": False}
+        rows = _devices()
+        rows.append(row)
+        _save("devices.json", {"devices": rows})
+        return {"token": token, "device": public(row)}
+
+
 def enroll(token, label="", client_id=""):
     record_id, _, secret = str(token or "").partition(".")
     with LOCK:

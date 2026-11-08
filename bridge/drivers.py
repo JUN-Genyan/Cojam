@@ -55,6 +55,10 @@ def _compose(spec, base_ctx, session_id, images, mode, prompt):
     a = spec["args"]
     seq = list(a["base"])
     seq += list(a["work"] if mode == "work" else a["read"])
+    if base_ctx.get("model"):
+        seq += list(a.get("model") or [])
+    if base_ctx.get("effort"):
+        seq += list(a.get("effort") or [])
     seq += list(a["resume"] if session_id else a["new"])
     out = []
     if images and spec["images"]:

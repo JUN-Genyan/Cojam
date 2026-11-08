@@ -25,6 +25,7 @@ button:disabled{opacity:.5;cursor:not-allowed}#error{color:#fca5a5;min-height:1.
 <script>
 const params = new URLSearchParams(location.hash.slice(1));
 const code = params.get('code') || '';
+const deviceLink = params.get('device') || '';
 const el = id => document.getElementById(id);
 function defaultName() {
   const ua = navigator.userAgent;
@@ -41,7 +42,7 @@ function clientId() {
 }
 el('name').value = defaultName();
 el('address').textContent = '当前地址：' + location.origin + '。以后请固定用这个地址打开；换地址需要重新生成接入码。';
-if (!code) {
+if (!code && !deviceLink) {
   el('join').disabled = true;
   el('error').textContent = '接入码无效，请让主机重新生成。';
 }
@@ -66,6 +67,18 @@ async function alreadyEnrolled() {
   return false;
 }
 (async () => {
+  if (deviceLink) {
+    el('join').disabled = true;
+    el('address').textContent = '正在接入…';
+    try {
+      const response = await fetch('/api/devices/restore', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({token:deviceLink})});
+      if (!response.ok) throw Error(response.status === 401 ? '此设备链接已撤销，请联系屋主。' : '接入失败，请稍后重试。');
+      try { localStorage.setItem('cojam_owner_device_token', deviceLink); } catch(e) {}
+      location.replace('/');
+    } catch(e) { el('error').textContent=e.message; el('address').textContent=''; }
+    return;
+  }
   if (!await alreadyEnrolled()) return;
   if (code) {
     el('error').textContent = '';

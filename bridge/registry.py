@@ -16,9 +16,9 @@ r"""参与者注册表：会议室里能有哪些 AI、每一个怎么叫。
 
 加载后 common.AIS 会被原地改成当前启用的 id 列表（别的模块 import 到的是同一个 list 对象，所以不用改 import）。
 """
-import glob, json, os, re, shutil, threading
+import glob, json, os, re, shutil, subprocess, threading
 
-from .common import LOG_DIR, find_executable, read_json, resolve_cmd, write_json
+from .common import LOG_DIR, NO_WINDOW, find_executable, read_json, resolve_cmd, write_json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRESET_DIR = os.path.join(HERE, "presets")
@@ -68,21 +68,62 @@ def _start_menu_dirs():
     return [root for root in roots if root and os.path.isdir(root)]
 
 
+_shortcut_targets = {}
+_shortcut_targets_lock = threading.Lock()
+
+
+def _shortcut_target(path, modified_ns, size):
+    """Resolve a Windows shortcut without launching its target; cache only its path."""
+    if os.name != "nt":
+        return ""
+    key = (path, modified_ns, size)
+    with _shortcut_targets_lock:
+        if key in _shortcut_targets:
+            return _shortcut_targets[key]
+    quoted = path.replace("'", "''")
+    script = ("[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; "
+              "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('" + quoted + "'); "
+              "[Console]::Out.Write($s.TargetPath)")
+    exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    try:
+        result = subprocess.run([exe, "-NoProfile", "-NonInteractive", "-Command", script],
+                                capture_output=True, timeout=4, **NO_WINDOW)
+        target = result.stdout.decode("utf-8", "replace").strip() if result.returncode == 0 else ""
+        if target:
+            with _shortcut_targets_lock:
+                if len(_shortcut_targets) >= 128:
+                    _shortcut_targets.clear()
+                _shortcut_targets[key] = target
+        return target
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _shortcut_target_exists(path):
+    try:
+        stat = os.stat(path)
+        target = _shortcut_target(path, stat.st_mtime_ns, stat.st_size)
+        return bool(target and os.path.isfile(os.path.expandvars(target)))
+    except OSError:
+        return False
+
+
 def _shortcut_present(name):
-    """开始菜单里有没有这个应用的快捷方式。装在哪个盘、哪个目录都认。"""
+    """A shortcut counts only while its target exists, including custom install drives."""
     wanted = (str(name).strip() + ".lnk").lower()
     for base in _start_menu_dirs():
         for root, _, files in os.walk(base):
-            if wanted in (f.lower() for f in files):
-                return True
+            for filename in files:
+                if filename.lower() == wanted and _shortcut_target_exists(os.path.join(root, filename)):
+                    return True
     return False
 
 
 def _detected(spec):
-    """detect 里列的路径有一个存在就算装了（展开 %VAR% 和 ~）；shortcuts 认开始菜单快捷方式。"""
+    """检测实际程序文件或指向现存程序的快捷方式。"""
     for p in spec.get("detect") or []:
         try:
-            if os.path.exists(os.path.expandvars(os.path.expanduser(p))):
+            if os.path.isfile(os.path.expandvars(os.path.expanduser(p))):
                 return True
         except Exception:
             pass
@@ -132,7 +173,7 @@ def _norm(raw, idx=0):
 
     args = raw.get("args") if isinstance(raw.get("args"), dict) else {}
     arg = {}
-    for k in ("base", "read", "work", "new", "resume"):
+    for k in ("base", "read", "work", "new", "resume", "model", "effort"):
         arg[k] = _as_list(args.get(k))
 
     parse = raw.get("parse") if isinstance(raw.get("parse"), dict) else {}

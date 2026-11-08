@@ -1,4 +1,4 @@
-name: Release Cojam 2.6.8
+name: Release Cojam 2.6.9
 on:
   push:
     branches: ["codex/release-2-6-3"]
@@ -30,6 +30,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s tests -p 'test_devices.py'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p 'test_invites.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s tests -p 'test_agents_registry.py'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s tests -p 'test_updater.py'
@@ -52,27 +54,32 @@ jobs:
           $testDir = Join-Path $env:RUNNER_TEMP 'cojam-release-test'
           New-Item -ItemType Directory -Force -Path (Join-Path $testDir 'data') | Out-Null
           Set-Content -LiteralPath (Join-Path $testDir 'data/sentinel.txt') -Value 'keep' -Encoding utf8
-          $setup = (Resolve-Path 'dist/Cojam-Setup-2.6.8-test.exe').Path
+          $deviceFile = Join-Path $testDir 'data/devices.json'
+          Set-Content -LiteralPath $deviceFile -Value '{"devices":[{"id":"dev_active","secret_hash":"active","revoked":false},{"id":"dev_blocked","secret_hash":"blocked","revoked":true}]}' -Encoding utf8
+          $deviceHash = (Get-FileHash -LiteralPath $deviceFile).Hash
+          $setup = (Resolve-Path 'dist/Cojam-Setup-2.6.9-test.exe').Path
           foreach ($attempt in 1..2) {
             $p = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',("/DIR=$testDir")) -Wait -PassThru -WindowStyle Hidden
             if ($p.ExitCode -ne 0) { throw "Test installation failed: $($p.ExitCode)" }
             if ((Get-FileHash (Join-Path $testDir 'Cojam.exe')).Hash -ne (Get-FileHash 'dist/CojamDesktop.exe').Hash) { throw 'Desktop executable mismatch' }
             if ((Get-FileHash (Join-Path $testDir 'CojamCore.exe')).Hash -ne (Get-FileHash 'dist/Cojam.exe').Hash) { throw 'Core executable mismatch' }
             if (-not (Test-Path (Join-Path $testDir 'data/sentinel.txt'))) { throw 'Data lost on installation' }
+            if ((Get-FileHash -LiteralPath $deviceFile).Hash -ne $deviceHash) { throw 'Device credentials or revocation state changed on installation' }
           }
           $p = Start-Process -FilePath (Join-Path $testDir 'unins000.exe') -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru -WindowStyle Hidden
           if ($p.ExitCode -ne 0 -or -not (Test-Path (Join-Path $testDir 'data/sentinel.txt'))) { throw 'Uninstall failed or lost data' }
+          if ((Get-FileHash -LiteralPath $deviceFile).Hash -ne $deviceHash) { throw 'Device credentials or revocation state changed on uninstall' }
       - name: Build production installer and manifest
         run: |
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" 'packaging/cojam-desktop.iss'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python packaging/make_update_manifest.py --notes 'Antigravity 装好后会自动作为本机 AI 出现，会议室可直接调用；设备接入向导默认给出局域网地址。'
+          python packaging/make_update_manifest.py --notes '新增可撤销的长期个人接入链接，改善设备重连和本机 Agent 检测。'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
-          name: cojam-2.6.8-windows
+          name: cojam-2.6.9-windows
           path: |
-            source/dist/Cojam-Setup-2.6.8.exe
+            source/dist/Cojam-Setup-2.6.9.exe
             source/dist/Cojam.exe
             source/website/update.json
           if-no-files-found: error
@@ -87,15 +94,15 @@ jobs:
           New-Item -ItemType Directory -Force -Path '../site/downloads' | Out-Null
           # 只保留当前版本：历史安装包会让 Pages 构建因站点过大而超时。
           Get-ChildItem '../site/downloads' -File | Remove-Item -Force
-          Copy-Item 'dist/Cojam-Setup-2.6.8.exe' '../site/downloads/Cojam-Setup-2.6.8.exe'
-          Copy-Item 'dist/Cojam.exe' '../site/downloads/Cojam-Portable-2.6.8.exe'
+          Copy-Item 'dist/Cojam-Setup-2.6.9.exe' '../site/downloads/Cojam-Setup-2.6.9.exe'
+          Copy-Item 'dist/Cojam.exe' '../site/downloads/Cojam-Portable-2.6.9.exe'
           Copy-Item 'website/update.json' '../site/update.json'
           Copy-Item 'website/index.html' '../site/index.html'
           git -C ../site config user.name 'github-actions[bot]'
           git -C ../site config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git -C ../site add -A index.html update.json downloads
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git -C ../site commit -m 'Publish Cojam 2.6.8 for Windows'
+          git -C ../site commit -m 'Publish Cojam 2.6.9 for Windows'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git -C ../site push origin HEAD:gh-pages
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
