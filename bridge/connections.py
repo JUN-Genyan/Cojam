@@ -73,7 +73,7 @@ def status(pid):
     valid = evidence.get("signature") == _signature(spec)
     ready = valid and evidence.get("ok") is True
     return {"state": "ready" if ready else "failed" if valid else "unchecked", "has_key": bool(digest),
-            "label": "回调已验证" if ready and spec["driver"] == "http" else "程序验证通过" if ready else "验证失败" if valid else "未验证",
+            "label": "回调已验证" if ready and spec["driver"] == "http" else "程序可启动" if ready else "验证失败" if valid else "未验证",
             "checked_at": evidence.get("checked_at") if valid else None, "detail": evidence.get("detail", "") if valid else ""}
 
 

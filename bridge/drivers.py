@@ -190,6 +190,8 @@ def call_http(pid, spec, prompt, session_id, images, mode, room):
     if room is not None:
         from .access import permissions
         body["permissions"] = permissions(room, pid)
+    model, effort = room.effective_models(pid) if room is not None else tuple(spec["default"])
+    body["model"], body["effort"] = model, effort
     headers = {"Content-Type": "application/json"}
     headers.update(spec.get("headers") or {})
     if spec.get("token"):

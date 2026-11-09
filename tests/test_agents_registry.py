@@ -105,6 +105,29 @@ class Registry(Base):
 
 
 class CliDriver(Base):
+    def test_model_controls_match_driver_arguments_and_model_specific_efforts(self):
+        from bridge import agents
+        write_cfg('plain.json', dict(CLI_CFG, models=['ignored-model'], efforts=['high']))
+        registry.load()
+        plain = agents.model_capabilities('fake')
+        self.assertFalse(plain['model_supported'])
+        self.assertFalse(plain['effort_supported'])
+        self.assertEqual(plain['models'], [])
+        cfg = dict(CLI_CFG, models=['fast', 'reasoning'], efforts=['low', 'high'],
+                   model_efforts={'fast': [], 'reasoning': ['low', 'high']},
+                   args={'model': ['--model', '{model}'], 'effort': ['--effort', '{effort}'], 'new': [FAKE, '{prompt}']})
+        write_cfg('plain.json', cfg)
+        registry.load()
+        caps = agents.model_capabilities('fake')
+        self.assertTrue(caps['model_supported'])
+        self.assertEqual(caps['efforts_by_model']['fast'], [])
+        self.assertEqual(caps['efforts_by_model']['reasoning'], ['low', 'high'])
+
+    def test_codex_catalog_can_explicitly_disable_reasoning(self):
+        from bridge import agents
+        with patch.object(agents, 'codex_catalog', return_value=[('fast', [])]):
+            self.assertEqual(agents.effort_options('codex', 'fast'), [])
+
     def test_qoder_cli_preset_detects_only_the_actual_cli(self):
         from pathlib import Path
         preset = json.loads((Path(__file__).resolve().parents[1] / 'bridge' / 'presets' / 'qodercli.json').read_text(encoding='utf-8'))
@@ -170,7 +193,7 @@ class HttpDriver(Base):
         srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         try:
-            write_cfg("h.json", {"id": "h", "driver": "http", "label": "H",
+            write_cfg("h.json", {"id": "h", "driver": "http", "label": "H", "default": ["service-model", "high"],
                                  "endpoint": "http://127.0.0.1:%d/bridge" % srv.server_address[1]})
             registry.load()
             ok, text, sid, _ = drivers.call("h", "你好", "h-1", (), "discuss", None)
@@ -180,6 +203,7 @@ class HttpDriver(Base):
             self.assertEqual(got_body["speaker"], "h")
             self.assertEqual(got_body["session"], "h-1")
             self.assertIn("prompt", got_body)
+            self.assertEqual((got_body['model'], got_body['effort']), ('service-model', 'high'))
         finally:
             srv.shutdown()
 
@@ -209,6 +233,22 @@ class Participants(Base):
     def test_new_room_defaults_to_claude_codex(self):
         r = R.rooms.create("新会", "", self.wd)
         self.assertEqual(r.ais, ["claude", "codex"])
+
+    def test_room_rejects_settings_the_cli_cannot_transmit(self):
+        r = R.rooms.create('模型能力', '', self.wd)
+        r.set_participants(['fake'])
+        self.assertFalse(r.set_models('fake', 'invented', '')[0])
+        self.assertFalse(r.set_models('fake', '', 'high')[0])
+        self.assertTrue(r.set_models('fake', '', '')[0])
+        self.assertFalse(r.model_info('fake')['model_supported'])
+
+    def test_room_does_not_inherit_an_effort_unsupported_by_new_model(self):
+        from bridge import agents
+        r = R.rooms.create('模型默认', '', self.wd)
+        with patch.object(agents, 'codex_catalog', return_value=[('fast', [])]):
+            self.assertTrue(r.set_models('codex', 'fast', '')[0])
+            self.assertEqual(r.effective_models('codex'), ('fast', ''))
+            self.assertEqual(r.model_info('codex')['efforts_by_model']['fast'], [])
 
     def test_only_participants_get_called(self):
         r = R.rooms.create("选人", "", self.wd)

@@ -1,11 +1,11 @@
 ﻿#define MyAppName "合拍 Cojam"
-#define MyAppVersion "2.6.10"
+#define MyAppVersion "2.6.11"
 #ifdef TEST_BUILD
 #define MyAppId "{{E49FBE28-CC82-4E08-B5CD-E48A2C894472}"
-#define OutputName "Cojam-Setup-2.6.10-test"
+#define OutputName "Cojam-Setup-2.6.11-test"
 #else
 #define MyAppId "{{856A26B5-6DDE-40EC-A6B0-2CDE2C62A58E}"
-#define OutputName "Cojam-Setup-2.6.10"
+#define OutputName "Cojam-Setup-2.6.11"
 #endif
 [Setup]
 AppId={#MyAppId}

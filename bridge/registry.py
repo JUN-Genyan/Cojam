@@ -207,6 +207,8 @@ def _norm(raw, idx=0):
         "context": str(raw.get("context") or "delta").strip().lower(),
         "models": _as_list(raw.get("models")),
         "efforts": _as_list(raw.get("efforts")),
+        "model_efforts": {str(k): _as_list(v) for k, v in (raw.get("model_efforts") or {}).items()}
+                         if isinstance(raw.get("model_efforts"), dict) else {},
         "default": _as_list(raw.get("default"))[:2] or ["", ""],
         "caps": caps,
         "handoff": str(raw.get("handoff") or ""),

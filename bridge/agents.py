@@ -93,10 +93,14 @@ def effort_options(ai, model=None):
     if ai == "claude":
         return list(CLAUDE_EFFORTS)
     if ai != "codex":
-        return list((registry.get(ai) or {}).get("efforts") or [])
+        spec = registry.get(ai) or {}
+        per_model = spec.get("model_efforts") or {}
+        if model in per_model:
+            return list(per_model[model])
+        return list(spec.get("efforts") or [])
     cur = model or ROOM_DEFAULTS["codex"][0]
     for slug, lv in codex_catalog():
-        if slug == cur and lv:
+        if slug == cur:
             return lv
     c = codex_cfg()
     v = c.get("enabled-reasoning-efforts")
@@ -117,6 +121,38 @@ def model_options(ai):
     if d and d not in out:
         out.insert(0, d)
     return out
+
+
+def model_capabilities(ai):
+    """Only offer settings that the active driver can actually transmit."""
+    spec = registry.get(ai) or {}
+    driver = spec.get("driver")
+    builtin = ai in ("claude", "codex")
+    args = spec.get("args") or {}
+    templates = [value for values in args.values() for value in values]
+    remote = driver in ("http", "external")
+    model = builtin or any("{model}" in value for value in templates) or (remote and bool(spec.get("models")))
+    effort = builtin or any("{effort}" in value for value in templates) or (remote and bool(spec.get("efforts") or spec.get("model_efforts")))
+    default_model = ROOM_DEFAULTS[ai][0]
+    if ai == "codex":
+        catalog = codex_catalog()
+        models = list(dict.fromkeys(([default_model] if default_model else []) + [slug for slug, _ in catalog]))
+        effort_map = dict(catalog)
+        if default_model not in effort_map:
+            effort_map[default_model] = effort_options(ai, default_model)
+    else:
+        models = model_options(ai) if model else []
+        effort_map = {value: effort_options(ai, value) for value in dict.fromkeys([default_model] + models)} if effort else {}
+    if not model:
+        note = "模型由 Agent 自己管理；当前接入方式未提供切换能力。"
+    elif ai == "codex":
+        note = "模型与思考强度来自这台设备上的 Codex 模型缓存；账户权限以实际调用为准。"
+    elif builtin:
+        note = "可选择常用模型，也可填写模型 ID；账户权限以实际调用为准。"
+    else:
+        note = "选项来自此 Agent 的接入配置；账户权限以实际调用为准。"
+    return {"model_supported": bool(model), "effort_supported": bool(effort),
+            "models": models, "efforts_by_model": effort_map, "note": note}
 
 
 # ===================== 这场会议的 MCP / 插件 / 技能 =====================

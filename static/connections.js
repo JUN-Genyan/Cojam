@@ -7,7 +7,7 @@ async function checkConnectionBackend(signal) {
     if (!response.ok) throw Error();
     info = await response.json();
   } catch (e) { if (signal && signal.aborted) throw e; throw Error('无法连接合拍后台，请重新打开合拍后重试。'); }
-  if (info.app !== 'AI Bridge' || info.version !== '2.6.10' || info.api_revision !== 2)
+  if (info.app !== 'AI Bridge' || info.version !== '2.6.11' || info.api_revision !== 2)
     throw Error('界面与后台版本不一致。请重新打开最新的合拍 Cojam，再刷新此页面。');
   return info;
 }
@@ -267,10 +267,13 @@ function renderConnectionSetup(w) {
       + '<button id="connGuestGenerate" class="pri">生成邀请</button><div id="connGuestResult"></div>'
       + '<h4>邀请与游客</h4><div id="connInviteList">正在读取…</div>';
   } else if (w.type === 'local') {
-    const local = [...CONTACTS, ...((agCat && agCat.discovered_presets) || [])].filter(a => ['cli', 'claude', 'codex'].includes(a.driver) && a.enabled);
+    const local = localAgentChoices();
     const outside = [...CONTACTS, ...((agCat && agCat.discovered_presets) || [])].filter(a => a.driver === 'external' && a.kind !== 'user' && a.enabled);
     w.localChoice = w.localChoice || (local.find(a => a.enabled) || {}).id || '__custom__';
-    if (w.localChoice !== '__custom__' && !local.some(a => a.id === w.localChoice)) w.localChoice = (local[0] || {}).id || '__custom__';
+    if (w.localChoice !== '__custom__' && !local.some(a => a.id === w.localChoice)) {
+      w.localChoice = (local[0] || {}).id || '__custom__';
+      w.id = ''; w.saved = false; w.status = null;
+    }
     content += '<p class="hint">自动检测运行合拍的设备上的程序；安装或卸载后可重新检索。</p><label>选择程序<select id="connLocal">' + local.map(a => '<option value="' + esc(a.id) + '"' + (w.localChoice === a.id ? ' selected' : '') + '>' + esc(a.label) + ' · 已检测到</option>').join('') + '<option value="__custom__"' + (w.localChoice === '__custom__' ? ' selected' : '') + '>自定义 CLI 程序…</option></select></label><button id="connRescan">重新检索已安装程序</button>' + (outside.length ? '<p class="hint">已检测到桌面应用。选择配置接入；桌面应用本身不能由会议室直接调用。</p>' + outside.map(a => '<button type="button" data-external-agent="' + esc(a.id) + '">配置 ' + esc(a.label) + '</button>').join('') : '') + '<div id="connCustom"' + (w.localChoice === '__custom__' ? '' : ' hidden') + '>' + connectionNameFields(w.localChoice === '__custom__' ? w : {...w, saved: false}) + '<label>命令或可执行文件路径<input id="connCommand" placeholder="my-agent 或完整程序路径" value="' + esc(w.form.command || '') + '"></label><label>调用参数（JSON 数组）<textarea id="connArgs">' + esc(w.form.args || '["-p", "{prompt}"]') + '</textarea></label></div><button id="connCheck" class="pri">检测并验证程序</button><p class="hint">仅运行 --version，不调用模型；登录和额度在首次回复时确认。</p>';
   } else {
     content += connectionNameFields(w);
@@ -308,14 +311,26 @@ function renderConnectionSetup(w) {
     document.getElementById('connRescan').onclick = async () => {
       if (w.busy) return;
       setConnectionBusy(w, true);
-      try { await refreshContacts(w.controller.signal, true); if (wizardCurrent(w)) { w.id=''; w.saved=false; w.localChoice=''; w.status=null; renderConnectionWizard(); } }
+      captureConnectionForm(w);
+      const button = document.getElementById('connRescan');
+      button.textContent = '正在检索…';
+      try {
+        await refreshContacts(w.controller.signal, true);
+        if (wizardCurrent(w)) {
+          w.status = (agCat.connections || {})[w.id] || null;
+          renderConnectionWizard();
+          wizardError('');
+          const help = document.getElementById('connProgramHelp');
+          if (help) help.textContent = '检索完成。列表已更新，可选择程序继续接入。';
+        }
+      }
       catch (e) { if (wizardCurrent(w)) wizardError('检索失败，请检查后台后重试。'); }
       finally { if (wizardCurrent(w)) setConnectionBusy(w, false); }
     };
-    const selected = connectionContact(w) || CONTACTS.find(a => a.id === w.localChoice);
+    const selected = [...CONTACTS, ...(agCat.discovered_presets || [])].find(a => a.id === w.localChoice);
     const help = document.createElement('p');
     help.id = 'connProgramHelp'; help.className = 'hint';
-    help.textContent = selected && !selected.enabled ? '尚未找到 ' + selected.label + '。如果已安装，请重启应用以更新 PATH，或选择“自定义 CLI 程序”填写完整路径。也可先选择标有“已检测到”的程序。' : '';
+    help.textContent = !localAgentChoices().length ? '没有检测到可调用的 CLI。安装后点“重新检索”，或填写完整程序路径。' : selected ? '已检测到 ' + selected.label + '。检查程序启动后，即可选择加入的会话。' : '';
     document.getElementById('connLocal').parentElement.after(help);
     document.getElementById('connLocal').onchange = async e => {
       if (w.busy) return;
@@ -356,6 +371,10 @@ function renderConnectionSetup(w) {
   if (w.token) renderConnectionCredentials(w);
   updateConnectionEvidence(w);
   if (w.type === 'external' && w.id) w.timer = setInterval(() => pollConnectionEvidence(w), 2000);
+}
+function localAgentChoices() {
+  return [...new Map([...CONTACTS, ...((agCat && agCat.discovered_presets) || [])]
+    .filter(a => ['cli', 'claude', 'codex'].includes(a.driver) && a.enabled).map(a => [a.id, a])).values()];
 }
 function captureConnectionForm(w) {
   const value = id => { const e = document.getElementById(id); return e ? e.value.trim() : undefined; };
