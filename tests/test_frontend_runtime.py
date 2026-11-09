@@ -167,6 +167,32 @@ setTimeout(() => {
 
 
 class GuestIdentity(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to test guest reconnection')
+    def test_temporary_unauthorized_response_preserves_credential_and_recovers(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const source=fs.readFileSync('static/join.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+const storage={cojam_guest_token:'guest-token',cojam_guest_last_room:'room-2'},elements={},timers=[];
+const node=id=>elements[id]||(elements[id]={value:'',textContent:'',disabled:false,hidden:false,
+ children:[],replaceChildren(){this.children=[]},append(v){this.children.push(v)},
+ classList:{toggle(){}},scrollTop:0,scrollHeight:0});
+let available=false;
+const ctx=vm.createContext({URL,URLSearchParams,document:{getElementById:node,createElement:()=>node('child'+Math.random())},
+ location:{hash:'',pathname:'/join',search:''},history:{replaceState(){}},setInterval(fn){timers.push(fn)},
+ localStorage:{getItem:k=>storage[k]||null,setItem:(k,v)=>storage[k]=v,removeItem:k=>delete storage[k]},
+ fetch:async(url)=>{if(url==='/')return {text:async()=> 'guest page'};
+ if(url==='/api/external/rooms')return available?{ok:true,json:async()=>({contact:{label:'访客'},rooms:[{id:'room-2',title:'会话'}]})}:{ok:false,status:401,json:async()=>({error:'暂时无法验证'})};
+ if(url.startsWith('/api/external/messages'))return {ok:true,json:async()=>({messages:[],next:0,permissions:{post:true}})};
+ throw Error('unexpected '+url)}});
+vm.runInContext(source,ctx);
+setTimeout(()=>{try{assert.equal(storage.cojam_guest_token,'guest-token');assert.match(node('error').textContent,/无法验证/);
+ available=true;timers[1]();setTimeout(()=>{try{assert.equal(node('title').textContent,'会话');assert.equal(storage.cojam_guest_token,'guest-token')}
+ catch(e){console.error(e);process.exitCode=1}},30)}catch(e){console.error(e);process.exitCode=1}},30);
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to test restoring a guest room')
     def test_reopening_remembered_guest_restores_last_room(self):
         root = Path(__file__).resolve().parents[1]

@@ -1,4 +1,4 @@
-name: Release Cojam 2.6.9
+name: Release Cojam 2.6.10
 on:
   push:
     branches: ["codex/release-2-6-3"]
@@ -57,7 +57,7 @@ jobs:
           $deviceFile = Join-Path $testDir 'data/devices.json'
           Set-Content -LiteralPath $deviceFile -Value '{"devices":[{"id":"dev_active","secret_hash":"active","revoked":false},{"id":"dev_blocked","secret_hash":"blocked","revoked":true}]}' -Encoding utf8
           $deviceHash = (Get-FileHash -LiteralPath $deviceFile).Hash
-          $setup = (Resolve-Path 'dist/Cojam-Setup-2.6.9-test.exe').Path
+          $setup = (Resolve-Path 'dist/Cojam-Setup-2.6.10-test.exe').Path
           foreach ($attempt in 1..2) {
             $p = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',("/DIR=$testDir")) -Wait -PassThru -WindowStyle Hidden
             if ($p.ExitCode -ne 0) { throw "Test installation failed: $($p.ExitCode)" }
@@ -73,13 +73,13 @@ jobs:
         run: |
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" 'packaging/cojam-desktop.iss'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python packaging/make_update_manifest.py --notes '新增可撤销的长期个人接入链接，改善设备重连和本机 Agent 检测。'
+          python packaging/make_update_manifest.py --notes '改善游客凭证验证失败后的重连处理。'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
-          name: cojam-2.6.9-windows
+          name: cojam-2.6.10-windows
           path: |
-            source/dist/Cojam-Setup-2.6.9.exe
+            source/dist/Cojam-Setup-2.6.10.exe
             source/dist/Cojam.exe
             source/website/update.json
           if-no-files-found: error
@@ -94,15 +94,15 @@ jobs:
           New-Item -ItemType Directory -Force -Path '../site/downloads' | Out-Null
           # 只保留当前版本：历史安装包会让 Pages 构建因站点过大而超时。
           Get-ChildItem '../site/downloads' -File | Remove-Item -Force
-          Copy-Item 'dist/Cojam-Setup-2.6.9.exe' '../site/downloads/Cojam-Setup-2.6.9.exe'
-          Copy-Item 'dist/Cojam.exe' '../site/downloads/Cojam-Portable-2.6.9.exe'
+          Copy-Item 'dist/Cojam-Setup-2.6.10.exe' '../site/downloads/Cojam-Setup-2.6.10.exe'
+          Copy-Item 'dist/Cojam.exe' '../site/downloads/Cojam-Portable-2.6.10.exe'
           Copy-Item 'website/update.json' '../site/update.json'
           Copy-Item 'website/index.html' '../site/index.html'
           git -C ../site config user.name 'github-actions[bot]'
           git -C ../site config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git -C ../site add -A index.html update.json downloads
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git -C ../site commit -m 'Publish Cojam 2.6.9 for Windows'
+          git -C ../site commit -m 'Publish Cojam 2.6.10 for Windows'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git -C ../site push origin HEAD:gh-pages
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
