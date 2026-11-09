@@ -295,7 +295,7 @@ class Members(unittest.TestCase):
             self.assertEqual(len([m for m in r.messages if m['text']=='@用户 worker replied']),2)
             self.assertEqual(r.meta['member-a_session'],'local-session')
             self.assertNotIn(self.keys['member-a'],(root/'connector.log').read_text(encoding='utf-8',errors='replace'))
-            self.assertNotIn('prompt',Path(support.DATA,'member_tasks.json').read_text())
+            self.assertNotIn('prompt',Path(support.DATA,'member_tasks.json').read_text(encoding='utf-8'))
             # Cancellation must terminate the local call and free the connector
             # for another task, without recording the stopped task's reply.
             r.handle_message('你','@member-a stop-long')
