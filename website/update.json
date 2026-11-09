@@ -1,8 +1,8 @@
 {
   "app": "Cojam",
-  "version": "2.6.9",
-  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.9.exe",
-  "sha256": "9686f45d80ecded53c1c2d9bdd63986321c931e614a68dacd3ea691949045a1f",
-  "size": 27733157,
-  "notes": "新增可撤销的长期个人接入链接，改善设备重连和本机 Agent 检测。"
+  "version": "2.6.10",
+  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.10.exe",
+  "sha256": "f371b9535ca072a752864339e8e81aac7b8a5666a2e838bacda6cff6ef9b7011",
+  "size": 27732061,
+  "notes": "改善游客凭证验证失败后的重连处理。"
 }
