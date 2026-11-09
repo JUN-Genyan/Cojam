@@ -1,8 +1,8 @@
 {
   "app": "Cojam",
-  "version": "2.6.10",
-  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.10.exe",
-  "sha256": "f371b9535ca072a752864339e8e81aac7b8a5666a2e838bacda6cff6ef9b7011",
-  "size": 27732061,
-  "notes": "改善游客凭证验证失败后的重连处理。"
+  "version": "2.6.11",
+  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.11.exe",
+  "sha256": "82b6bb81c50101e781ee98f85b60fffc30b6cba3d3066513b9df8fa7e07a953c",
+  "size": 27738233,
+  "notes": "优化 Agent 接入与模型设置：模型和思考强度联动、保存反馈、扫描保留选择，并修复 HTTP Harness 参数传递。"
 }
