@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """会议目录的增删、归档、回收站；模型设置；命令行；身份规则。"""
 import os, sys, json, tempfile, subprocess, threading, urllib.request, urllib.error, unittest, shutil, time
+from unittest.mock import patch
 from urllib.parse import quote
 
 TMP = tempfile.mkdtemp(prefix="rt_test_")
 os.environ["ROUNDTABLE_LOG_DIR"] = os.path.join(TMP, "rt")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from bridge import room as R, agents, common, web
+from bridge import room as R, agents, common, web, registry
 
 # 假项目仓库（refs 测试用）
 REPO = os.path.join(TMP, "repo")
@@ -55,6 +56,12 @@ def status_of(mid):
 
 class T(unittest.TestCase):
     def setUp(self):
+        real_find = registry.find_executable
+        detector = patch.object(registry, 'find_executable',
+            side_effect=lambda name: ('test-' + name) if name in ('claude', 'codex') else real_find(name))
+        detector.start()
+        self.addCleanup(detector.stop)
+        registry.load()
         reset()
 
     def test_new_keeps_old_open(self):
@@ -222,7 +229,7 @@ class T(unittest.TestCase):
         self.assertEqual(call("POST", "/api/trash/purge", {})[0], 200)
         self.assertFalse(os.path.exists(os.path.join(common.TRASH_DIR, a.id)))
         refs = subprocess.run(["git", "-C", REPO, "for-each-ref", "--format=%(refname)", "refs/roundtable"],
-                              capture_output=True, text=True).stdout.split()
+                              capture_output=True, text=True, encoding="utf-8").stdout.split()
         self.assertEqual(refs, [other])   # 别的会议的不动
 
     def test_trash_name_collision_keeps_ref_name(self):
