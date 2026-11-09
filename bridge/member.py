@@ -373,7 +373,13 @@ def main(argv=None):
     key = os.environ.get("AI_BRIDGE_TOKEN") or getpass.getpass("成员接入密钥：")
     root = configure_state(args.state_dir)
     client = Client(args.server, key, workdir=args.workdir, allow_work=args.allow_work)
-    executor = LocalExecutor(client, args.agent, args.workdir, root)
+    try:
+        executor = LocalExecutor(client, args.agent, args.workdir, root)
+    except Exception as error:
+        # The GUI shows this text too; keep the command-line connector
+        # diagnosable when it is started by a service or a packaged script.
+        print("成员连接启动失败：%s" % error, file=sys.stderr)
+        return 2
     try:
         client.run(executor)
     except KeyboardInterrupt:

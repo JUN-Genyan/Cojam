@@ -337,7 +337,11 @@ class Members(unittest.TestCase):
         log=open(root/'connector.log','wb')
         process=subprocess.Popen([sys.executable,'-m','bridge.member','--server',support.BASE,'--agent','fake','--workdir',str(wd),'--state-dir',str(state)],cwd=bundle,env=env,stdout=log,stderr=log)
         try:
-            wait_until(lambda:members.broker.status('member-a')['automatic'],timeout=12)
+            try:
+                wait_until(lambda:members.broker.status('member-a')['automatic'],timeout=12)
+            except AssertionError as error:
+                log.flush()
+                raise AssertionError((root/'connector.log').read_text(encoding='utf-8',errors='replace')) from error
             for n in range(2):
                 r.handle_message('你','@member-a task %s' % n)
                 wait_until(lambda:not r.busy_for(),timeout=15)
