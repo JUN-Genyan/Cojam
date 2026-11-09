@@ -89,7 +89,7 @@ class Connections(unittest.TestCase):
         self.assertEqual(call('/mcp', msg, self.bot_key)[0], 200)
         state = connections.status('remote-bot')
         self.assertEqual((state['state'], state['channel'], state['client']), ('connected','mcp','Test Harness'))
-        self.assertNotIn(self.bot_key, Path(DATA, 'connections.json').read_text())
+        self.assertNotIn(self.bot_key, Path(DATA, 'connections.json').read_text(encoding='utf-8'))
         self.assertNotIn('digest', state)
 
     def test_invalid_key_does_not_change_state(self):
