@@ -280,7 +280,7 @@ class Members(unittest.TestCase):
         fake=root/'fake.py'
         fake.write_text("import json,sys,os,time\nfrom pathlib import Path\np=Path('member-marker.txt');p.write_text(p.read_text()+'x' if p.exists() else 'x')\nPath('prompt.txt').write_text(sys.argv[1],encoding='utf-8')\nPath('credential.txt').write_text(os.environ.get('AI_BRIDGE_TOKEN',''))\nif 'stop-long' in sys.argv[1] and not Path('slept.once').exists():\n Path('slept.once').write_text('started');time.sleep(20)\nprint(json.dumps({'reply':'@用户 worker replied','sid':'local-session'}))\n",encoding='utf-8')
         (configs/'fake.json').write_text(json.dumps({'id':'fake','driver':'cli','bin':[sys.executable],'args':{'base':[str(fake),'{prompt}']},'parse':{'type':'json','text':'reply','session':'sid'}}),encoding='utf-8')
-        env=dict(os.environ,AI_BRIDGE_TOKEN=self.keys['member-a'],ROUNDTABLE_NO_PRESETS='1')
+        env=dict(os.environ,AI_BRIDGE_TOKEN=self.keys['member-a'],ROUNDTABLE_NO_PRESETS='1',PYTHONIOENCODING='cp1252')
         log=open(root/'connector.log','wb')
         process=subprocess.Popen([sys.executable,'-m','bridge.member','--server',support.BASE,'--agent','fake','--workdir',str(wd),'--state-dir',str(state)],env=env,stdout=log,stderr=log)
         try:
