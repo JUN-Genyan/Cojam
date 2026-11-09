@@ -200,7 +200,11 @@ class LocalExecutor:
         os.environ.pop("AI_BRIDGE_TOKEN", None)
         self.root = configure_state(state_dir)
         from . import agents, registry, room as R, web
-        registry.load()
+        # A remote member must become reachable promptly.  Publish commands
+        # that are immediately visible to this process, then perform the
+        # slower package/desktop discovery in the background.
+        registry.load(fast=True)
+        registry.request_scan()
         spec = registry.get(agent)
         if not spec or not spec["enabled"] or spec["driver"] == "external":
             raise ValueError("本机没有可调用的 %s，请先安装并登录，或导入 CLI / HTTP 驱动配置" % agent)
