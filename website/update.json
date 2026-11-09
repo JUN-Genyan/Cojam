@@ -1,7 +1,7 @@
 {
   "app": "Cojam",
-  "version": "2.6.11",
-  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.11.exe",
+  "version": "2.6.12",
+  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.12.exe",
   "sha256": "82b6bb81c50101e781ee98f85b60fffc30b6cba3d3066513b9df8fa7e07a953c",
   "size": 27738233,
   "notes": "优化 Agent 接入与模型设置：模型和思考强度联动、保存反馈、扫描保留选择，并修复 HTTP Harness 参数传递。"
