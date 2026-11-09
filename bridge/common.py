@@ -350,40 +350,16 @@ def tailscale_ipv4():
 
 
 def find_executable(name):
-    """Find a command using current paths, including newly installed Windows CLIs."""
+    """Resolve against live platform paths and package-manager installation roots."""
+    from .discovery import executables
     import shutil
-    name = os.path.expandvars(os.path.expanduser(str(name or "").strip()))
-    if not name:
-        return None
-    if os.path.dirname(name) and os.path.isfile(name):   # 配置里写的是绝对路径
-        return name
-    home = os.path.expanduser("~")
-    paths = [os.environ.get("PATH", ""),
-             os.path.join(home, ".gemini", "bin"),
-             os.path.join(home, ".local", "bin"),
-             os.path.join(home, ".cargo", "bin"),
-             os.path.join(home, ".bun", "bin"),
-             os.path.join(home, ".opencode", "bin"),
-             os.path.join(home, ".cursor", "bin")]
-    if os.name == "nt":
-        # A running GUI application does not receive PATH changes made later.
-        try:
-            import winreg
-            for root, key in ((winreg.HKEY_CURRENT_USER, r"Environment"),
-                              (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")):
-                try:
-                    with winreg.OpenKey(root, key) as handle:
-                        paths.append(os.path.expandvars(winreg.QueryValueEx(handle, "Path")[0]))
-                except OSError:
-                    pass
-        except ImportError:
-            pass
-        paths.extend([os.path.join(home, "scoop", "shims"),
-                      os.path.join(home, ".qoder", "bin", "qodercli"),
-                      os.path.join(os.environ.get("APPDATA", ""), "npm"),
-                      os.path.join(os.environ.get("LOCALAPPDATA", ""), "pnpm"),
-                      os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Links")])
-    return shutil.which(name, path=os.pathsep.join(p for p in paths if p))
+    direct = os.path.expandvars(os.path.expanduser(str(name or '').strip()))
+    hit = shutil.which(direct)
+    from .discovery import shim_target
+    if hit and os.path.isfile(os.path.realpath(hit)) and shim_target(hit) is not False:
+        return os.path.realpath(hit)
+    found = executables(name)
+    return found[0] if found else None
 
 
 def resolve_cmd(name):
@@ -395,15 +371,27 @@ def resolve_cmd(name):
     p = find_executable(name)
     if not p:
         return None
-    if os.name != "nt" or not p.lower().endswith((".cmd", ".bat")):
+    if p.lower().endswith(('.js', '.cjs', '.mjs')):
+        node = find_executable('node')
+        return [node, p] if node else None
+    if os.name != "nt" or not p.lower().endswith((".cmd", ".bat", ".ps1")):
         return [p]
+    from .discovery import shim_target
+    target = shim_target(p)
+    if isinstance(target, str):
+        if target.lower().endswith(('.js','.cjs','.mjs')):
+            node = os.path.join(os.path.dirname(p), 'node.exe')
+            node = node if os.path.isfile(node) else find_executable('node')
+            return [node, target] if node else None
+        if target.lower().endswith('.exe'):
+            return [target]
     try:
         with open(p, encoding="utf-8", errors="replace") as f:
             txt = f.read()
     except OSError:
         return [p]
     d = os.path.dirname(p)
-    m = re.search(r'"%dp0%\\([^"]+?\.js)"', txt, re.I)
+    m = re.search(r'"%dp0%\\([^"]+?\.[cm]?js)"', txt, re.I)
     if m:
         js = os.path.join(d, m.group(1))
         node = os.path.join(d, "node.exe")

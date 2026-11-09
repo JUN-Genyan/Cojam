@@ -1034,7 +1034,7 @@ function openAi(a){
   const spec=agentMeta(a)||{};
   if(!['claude','codex'].includes(spec.driver)&&!x.handoff){
     h+='<div class="btns"><button type="button" id="aClose">关闭</button></div>';
-    showModal(h);bindModelSettings(a,mo,anyBusy);
+    showModal(h);bindModelSettings(a,mo,anyBusy);loadModelCatalog(a,anyBusy);
     document.getElementById('aClose').onclick=hideModal;
     return;
   }
@@ -1052,6 +1052,7 @@ function openAi(a){
   showModal(h);
   loadTools(a,x);
   bindModelSettings(a,mo,anyBusy);
+  loadModelCatalog(a,anyBusy);
   document.getElementById('aClose').onclick=hideModal;
   document.getElementById('aCompact').onclick=async()=>{
     if(!confirm('压缩 '+a+' 的上下文？压完它只记要点。'+(x.busy?'\n\n它手上有活，会等这一轮说完再压。':'')))return;

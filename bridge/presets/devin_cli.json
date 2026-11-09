@@ -1,0 +1,57 @@
+{
+  "id": "devin_cli",
+  "label": "Devin CLI",
+  "driver": "cli",
+  "adapter": "devin_cli",
+  "bin": [
+    "devin",
+    "~/.devin/bin/devin"
+  ],
+  "verified": false,
+  "note": "使用已经安装的 Devin CLI，和 Devin 桌面应用分别检测。实际能力按安装版本读取。",
+  "args": {
+    "model": [
+      "--model",
+      "{model}"
+    ],
+    "new": [
+      "--print",
+      "{prompt}"
+    ],
+    "read": [
+      "--permission-mode",
+      "normal"
+    ],
+    "work": [
+      "--permission-mode",
+      "accept-edits"
+    ]
+  },
+  "context": "full",
+  "parse": {
+    "type": "text"
+  },
+  "models": [],
+  "efforts": [],
+  "default": [
+    "",
+    ""
+  ],
+  "discovery": {
+    "app_names": [
+      "Devin"
+    ],
+    "bundled_commands": [
+      "devin"
+    ],
+    "paths": {
+      "darwin": [
+        "/Applications/Devin.app/Contents/Resources/app/bin/devin",
+        "~/Applications/Devin.app/Contents/Resources/app/bin/devin"
+      ],
+      "linux": [
+        "/opt/devin/resources/app/bin/devin"
+      ]
+    }
+  }
+}

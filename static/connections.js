@@ -44,7 +44,7 @@ const CONNECTION_TYPES = {
   user: ['其他用户', '生成邀请票；对方打开链接领取身份，只进指定会话。同一设备之后仍是同一个人。', uiIcon('user')]
 };
 function stopConnectionWizard() {
-  if (connectionWizard) { clearInterval(connectionWizard.timer); if (connectionWizard.controller) connectionWizard.controller.abort(); connectionWizard.token = ''; }
+  if (connectionWizard) { clearInterval(connectionWizard.timer); clearTimeout(connectionWizard.catalogTimer); if (connectionWizard.controller) connectionWizard.controller.abort(); connectionWizard.token = ''; }
   connectionWizard = null;
 }
 function connectionModalChanged() {
@@ -229,6 +229,7 @@ function wizardFrame(w, content) {
 function renderConnectionWizard() {
   const w = connectionWizard; if (!w) return;
   clearInterval(w.timer);
+  clearTimeout(w.catalogTimer);
   if (w.step === 1) {
     const choices = w.chooseAI ? ['local','external','http'].map(id => [id, CONNECTION_TYPES[id]]) : [
       ['user', ['邀请其他人', '生成邀请链接，让朋友加入指定会话。', uiIcon('user')]],
@@ -293,6 +294,11 @@ function renderConnectionSetup(w) {
     content += '<div id="connEvidence" class="connection-evidence" aria-live="polite"></div><div class="btns connection-actions"><button id="connBack">更换接入方式</button><button id="connLater">稍后验证，先分配会话</button><button id="connNext" class="pri" disabled>下一步：会话与权限</button></div>';
   }
   wizardFrame(w, content);
+  if (['http','external'].includes(w.type) && w.id) {
+    const modelsBox = document.createElement('div'); modelsBox.id = 'connModels';
+    document.getElementById('connEvidence').before(modelsBox);
+    loadConnectionModels(w);
+  }
   document.getElementById('connBack').onclick = () => startConnectionWizard();
   if (document.getElementById('connLater')) document.getElementById('connLater').onclick = () => advanceConnection(w);
   document.getElementById('connNext').onclick = () => advanceConnection(w);
@@ -321,7 +327,7 @@ function renderConnectionSetup(w) {
           renderConnectionWizard();
           wizardError('');
           const help = document.getElementById('connProgramHelp');
-          if (help) help.textContent = '检索完成。列表已更新，可选择程序继续接入。';
+          if (help) help.textContent = agCat.scanning ? '正在后台检索其他安装入口；已发现的程序可以先接入。' : '检索完成。列表已更新，可选择程序继续接入。';
         }
       }
       catch (e) { if (wizardCurrent(w)) wizardError('检索失败，请检查后台后重试。'); }
@@ -338,6 +344,10 @@ function renderConnectionSetup(w) {
       w.saved = !!w.id; w.status = (agCat.connections || {})[w.id] || null; w.form = {}; renderConnectionWizard();
     };
     if (w.localChoice !== '__custom__') { w.id = w.localChoice; w.saved = true; w.status = (agCat.connections || {})[w.id] || w.status; }
+    const modelsBox = document.createElement('div'); modelsBox.id = 'connModels';
+    document.getElementById('connCheck').before(modelsBox);
+    if (w.id) loadConnectionModels(w);
+    if (agCat.scanning) connectionScanUpdated(true);
   }
   if (w.type === 'user') {
     renderGuestSetup(w);
@@ -376,6 +386,59 @@ function localAgentChoices() {
   return [...new Map([...CONTACTS, ...((agCat && agCat.discovered_presets) || [])]
     .filter(a => ['cli', 'claude', 'codex'].includes(a.driver) && a.enabled).map(a => [a.id, a])).values()];
 }
+function connectionScanUpdated(scanning) {
+  const w = connectionWizard;
+  if (!w || !wizardCurrent(w) || w.type !== 'local' || w.step !== 2) return;
+  if (scanning) {
+    w.scanPending = true;
+    const help = document.getElementById('connProgramHelp');
+    if (help) help.textContent = '正在后台检索其他安装入口；已发现的程序可以先接入。';
+  } else if (w.scanPending && !w.busy) {
+    w.scanPending = false;
+    captureConnectionForm(w);
+    const draft = document.getElementById('modelSettings');
+    if (draft && draft.modelDirty && draft.modelDirty() && draft.modelTouched !== false) w.modelSettings = draft.modelDraft();
+    renderConnectionWizard();
+    const help = document.getElementById('connProgramHelp');
+    if (help) help.textContent = '检索完成。列表已更新，原有选择和输入已保留。';
+  }
+}
+async function loadConnectionModels(w, refresh = false) {
+  const id = w.id, target = w.target && w.target !== '__new__' ? w.target : RID;
+  const sequence = (w.catalogSeq || 0) + 1; w.catalogSeq = sequence;
+  clearTimeout(w.catalogTimer);
+  const current = () => wizardCurrent(w) && w.catalogSeq === sequence && w.id === id && [2,3].includes(w.step);
+  const box = document.getElementById('connModels'); if (!box || !id) return;
+  try {
+    if (refresh) {
+      await post('/api/agents/models/refresh', {ai:id, room:target || ''});
+    }
+    const [ok, result] = await connectionGet('/api/agents/models?ai='+encodeURIComponent(id)+(target?'&room='+encodeURIComponent(target):''));
+    if (!ok) throw Error(result.error || '读取模型失败');
+    if (!current() || document.getElementById('connModels') !== box) return;
+    const old = document.getElementById('modelSettings');
+    if (old && old.modelDirty && old.modelDirty() && old.modelTouched !== false) {
+      w.modelSettings = old.modelDraft();
+      return;
+    }
+    const catalog = result.catalog, selected = w.modelSettings && w.modelSettings.ai === id ? w.modelSettings : result.settings || {};
+    const rows = catalog.entries || [];
+    const info = {...selected, catalog, model:selected.model || '', effort:selected.effort || '',
+      models:rows.map(row=>row.id), model_supported:catalog.model_supported,
+      efforts_by_model:Object.fromEntries(rows.map(row=>[row.id,['effort','variant'].includes(row.reasoning.kind)?row.reasoning.options:[]])),
+      effort_supported:rows.some(row=>['effort','variant'].includes(row.reasoning.kind)), note:catalog.detail || '', label:'待加入会话后生效'};
+    box.innerHTML = (result.installations.length > 1 ? '<label>调用的安装版本<select id="connInstallation">'+result.installations.map(row=>'<option value="'+esc(row.id)+'"'+(row.selected?' selected':'')+'>'+esc(row.path)+'</option>').join('')+'</select></label>' : '') + modelSettingsMarkup(info, w.busy);
+    bindModelSettings(id, info, w.busy, {isCurrent:current, refresh:()=>loadConnectionModels(w,true), savedMessage:'已暂存，保存并加入会话后生效。',
+      onSave:async settings=>{ w.modelSettings = settings; return [true,{}]; }});
+    const installation = document.getElementById('connInstallation');
+    if (installation) installation.onchange = async () => {
+      const [saved, data] = await post('/api/agents/installation',{ai:id,installation:installation.value});
+      if (!saved) return wizardError(data.error || '切换安装失败');
+      if (current()) { w.modelSettings = null; loadConnectionModels(w); }
+    };
+    if (catalog.refreshing) w.catalogTimer = setTimeout(()=>{ if(current()) loadConnectionModels(w); },1500);
+  } catch(error) { if(current()) box.textContent = error.message || '读取模型目录失败'; }
+}
 function captureConnectionForm(w) {
   const value = id => { const e = document.getElementById(id); return e ? e.value.trim() : undefined; };
   for (const [field, id] of Object.entries({label:'connName', id:'connId', command:'connCommand', args:'connArgs', endpoint:'connEndpoint', serviceKey:'connServiceKey', deviceName:'connDeviceName'})) {
@@ -408,6 +471,7 @@ function setConnectionBusy(w, busy) {
   mbox.querySelectorAll('button,input,select,textarea').forEach(e => { if (e.id !== 'connClose') e.disabled = busy; });
   if (!busy) updateConnectionEvidence(w);
   const assign = document.getElementById('connAssign'); if (assign) assign.disabled = busy || !!w.loadingAssignment;
+  if (!busy && w.scanPending && !agCat.scanning) connectionScanUpdated(false);
 }
 async function checkConnection(w) {
   if (w.busy) return; wizardError(''); setConnectionBusy(w, true);
@@ -605,6 +669,8 @@ function renderConnectionCredentials(w) {
   }
 }
 async function advanceConnection(w) {
+  const draft = document.getElementById('modelSettings');
+  if (draft && draft.modelDraft && draft.modelDirty && draft.modelDirty() && draft.modelTouched !== false) w.modelSettings = draft.modelDraft();
   if (w.type === 'user') { hideModal(); refreshContacts(); loadState(); return; }
   if (w.type === 'mydevice') {
     wizardError('');
@@ -633,6 +699,8 @@ function renderConnectionAssignment(w) {
   document.getElementById('connSaveOnly').onclick = () => { w.assigned = false; w.step = 4; renderConnectionWizard(); };
   document.getElementById('connAssign').onclick = () => assignConnection(w);
   updateConnectionAssignment(w);
+  const modelsBox = document.createElement('div'); modelsBox.id = 'connModels';
+  document.getElementById('connPermissions').before(modelsBox);
 }
 async function updateConnectionAssignment(w) {
   const seq = (w.assignmentSeq || 0) + 1; w.assignmentSeq = seq;
@@ -646,10 +714,13 @@ async function updateConnectionAssignment(w) {
     if (!wizardCurrent(w) || w.assignmentSeq !== seq || w.step !== 3) return;
     w.permissions = (state.permissions || {})[w.id] || {read:true,post:true,trigger:true,board:false,files:false,work:false};
     w.loadingAssignment = false; document.getElementById('connPermissions').innerHTML = renderPermissionChoices(w); save.disabled = w.busy;
+    loadConnectionModels(w);
   } catch (e) { if (wizardCurrent(w) && w.assignmentSeq === seq) wizardError(e.message); }
 }
 async function assignConnection(w) {
   if (w.busy) return;
+  const draft = document.getElementById('modelSettings');
+  if (draft && draft.modelDraft && draft.modelDirty && draft.modelDirty() && draft.modelTouched !== false) w.modelSettings = draft.modelDraft();
   w.permissions = Object.fromEntries([...mbox.querySelectorAll('[data-connection-permission]')].map(i => [i.dataset.connectionPermission, i.checked]));
   const roomTitle = document.getElementById('connRoomTitle').value.trim() || '与' + (connectionContact(w) || {}).label + '协作';
   const projectName = document.getElementById('connProjectName').value.trim(), workdir = document.getElementById('connWorkdir').value.trim();
@@ -667,6 +738,10 @@ async function assignConnection(w) {
       if (wizardCurrent(w)) { const select = document.getElementById('connRoom'); select.add(new Option(roomTitle, j.id)); select.value = j.id; }
     }
     const [ok, j] = await post('/api/r/' + encodeURIComponent(w.target) + '/invite', {contact: w.id, permissions: w.permissions}); if (!ok) throw Error(j.error || '邀请失败');
+    if (w.modelSettings && w.modelSettings.ai === w.id) {
+      const [saved, result] = await post('/api/r/'+encodeURIComponent(w.target)+'/models',w.modelSettings);
+      if (!saved) throw Error('已加入会话，但模型设置未保存：'+(result.error || '请刷新目录重试'));
+    }
     await pollRooms(); await refreshContacts(); if (!wizardCurrent(w)) return;
     w.assigned = true; w.status = (agCat.connections || {})[w.id] || w.status; w.step = 4; renderConnectionWizard();
   } catch (e) { if (wizardCurrent(w)) wizardError(e.message); }

@@ -42,3 +42,4 @@
  #navToggle,#navClose{display:block}#rooms{display:block;position:fixed;top:0;left:0;bottom:0;width:min(300px,88vw);z-index:61;background:var(--side);padding:16px 12px;overflow:auto;transform:translateX(-105%);transition:transform .2s}body.nav-open #rooms{transform:none}body.nav-open #navShade{display:block;position:fixed;inset:0;background:#0007;z-index:60}#contactList{max-height:28vh}.perm-grid{grid-template-columns:repeat(2,minmax(0,1fr))}#mbox{max-width:95vw}
 }
 
+#connectionWizard #modelSettings label[hidden],#modelSettings label[hidden]{display:none!important}

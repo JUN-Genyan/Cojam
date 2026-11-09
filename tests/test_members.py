@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import unittest
+import zipfile
 from unittest.mock import patch
 
 import test_contacts_access as support
@@ -101,6 +102,52 @@ class Members(unittest.TestCase):
         self.reply('member-a',a2,'@用户 讨论完成')
         wait_until(lambda: not r.busy_for())
         self.assertEqual([m['speaker'] for m in r.messages if m['speaker'] != '系统'],['你','member-a','member-b','member-a'])
+
+    def test_capabilities_are_bound_to_worker_identity_and_refresh(self):
+        from bridge import model_catalog
+        first = {'model_supported':True, 'status':'ready', 'entries':[{'id':'device-a-model','reasoning':{'kind':'effort','options':['high']}}], 'token':'do-not-publish'}
+        second = {'model_supported':True, 'status':'ready', 'entries':[{'id':'device-b-model','reasoning':{'kind':'none'}}]}
+        self.connect('member-a', capabilities=first)
+        self.connect('member-b', capabilities=second)
+        self.assertEqual(model_catalog.get('member-a', support.DATA)['entries'][0]['id'], 'device-a-model')
+        self.assertEqual(model_catalog.get('member-b', support.DATA)['entries'][0]['id'], 'device-b-model')
+        self.assertNotIn('do-not-publish',json.dumps(members.broker.capabilities('member-a')))
+        model_catalog.get('member-a',support.DATA,refresh=True)
+        status, response=self.op('member-a','receive',{'worker':'worker','timeout':0})
+        self.assertTrue(response['refresh_catalog'])
+        self.op('member-a','heartbeat',{'worker':'worker','capabilities':first})
+        self.assertFalse(members.broker.capabilities('member-a')['refreshing'])
+        access.credential('member-a')
+        self.assertIsNone(members.broker.capabilities('member-a'))
+
+    def test_large_catalog_advertisement_does_not_hit_message_body_limit(self):
+        entries=[{'id':'model-'+str(index),'label':'Model '+str(index)+' x'*100,'reasoning':{'kind':'effort','options':['low','medium','high']}} for index in range(512)]
+        status,data=self.op('member-a','connect',{'worker':'worker','device':'test','capabilities':{'model_supported':True,'entries':entries}})
+        self.assertEqual(status,200,data)
+        self.assertEqual(len(members.broker.capabilities('member-a')['entries']),512)
+
+    def test_legacy_connector_has_no_invented_host_model_catalog(self):
+        self.connect('member-a')
+        self.assertIsNone(members.broker.capabilities('member-a'))
+        from bridge import model_catalog
+        directory=model_catalog.get('member-a',support.DATA)
+        self.assertEqual(directory['entries'],[])
+        self.assertFalse(directory['model_supported'])
+
+    def test_full_model_settings_include_explicit_reset(self):
+        r=self.room(['member-a'])
+        self.connect('member-a',capabilities={'model_supported':True,'entries':[{'id':'remote-model','reasoning':{'kind':'none'}}]})
+        self.assertTrue(r.set_models('member-a','remote-model','')[0])
+        r.handle_message('你','@member-a first')
+        task=self.receive('member-a')
+        self.assertEqual(task['model_settings']['model'],'remote-model')
+        self.reply('member-a',task,'done');wait_until(lambda:not r.busy_for())
+        self.assertTrue(r.set_models('member-a','','')[0])
+        r.handle_message('你','@member-a reset')
+        task=self.receive('member-a')
+        self.assertEqual(task['model_settings']['model'],'')
+        self.assertEqual(task['model_settings']['reasoning'],{})
+        self.reply('member-a',task,'done');wait_until(lambda:not r.busy_for())
 
     def test_same_brand_on_different_devices_remains_distinct(self):
         registry.save_agent({'id':'member-a','label':'我的 Codex','driver':'external','enabled':True})
@@ -281,8 +328,14 @@ class Members(unittest.TestCase):
         fake.write_text("import json,sys,os,time\nfrom pathlib import Path\np=Path('member-marker.txt');p.write_text(p.read_text()+'x' if p.exists() else 'x')\nPath('prompt.txt').write_text(sys.argv[1],encoding='utf-8')\nPath('credential.txt').write_text(os.environ.get('AI_BRIDGE_TOKEN',''))\nif 'stop-long' in sys.argv[1] and not Path('slept.once').exists():\n Path('slept.once').write_text('started');time.sleep(20)\nprint(json.dumps({'reply':'@用户 worker replied','sid':'local-session'}))\n",encoding='utf-8')
         (configs/'fake.json').write_text(json.dumps({'id':'fake','driver':'cli','bin':[sys.executable],'args':{'base':[str(fake),'{prompt}']},'parse':{'type':'json','text':'reply','session':'sid'}}),encoding='utf-8')
         env=dict(os.environ,AI_BRIDGE_TOKEN=self.keys['member-a'],ROUNDTABLE_NO_PRESETS='1',PYTHONIOENCODING='cp1252')
+        from bridge.member_package import build
+        bundle=root/'bundle'
+        with zipfile.ZipFile(build()) as archive:
+            archive.extractall(bundle)
+        self.assertFalse((bundle/'index.html').exists())
+        self.assertTrue((bundle/'bridge'/'model_catalog.py').is_file())
         log=open(root/'connector.log','wb')
-        process=subprocess.Popen([sys.executable,'-m','bridge.member','--server',support.BASE,'--agent','fake','--workdir',str(wd),'--state-dir',str(state)],env=env,stdout=log,stderr=log)
+        process=subprocess.Popen([sys.executable,'-m','bridge.member','--server',support.BASE,'--agent','fake','--workdir',str(wd),'--state-dir',str(state)],cwd=bundle,env=env,stdout=log,stderr=log)
         try:
             wait_until(lambda:members.broker.status('member-a')['automatic'],timeout=12)
             for n in range(2):

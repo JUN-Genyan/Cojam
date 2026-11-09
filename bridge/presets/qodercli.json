@@ -4,20 +4,77 @@
   "letter": "Q",
   "color": "#8257ed",
   "driver": "cli",
-  "bin": ["qodercli", "~/.qoder/bin/qodercli/qodercli", "~/.qoder/bin/qodercli/qodercli.exe"],
+  "bin": [
+    "qodercli",
+    "qoder",
+    "~/.qoder/bin/qodercli/qodercli",
+    "~/.qoder/bin/qodercli/qodercli.exe"
+  ],
   "verified": false,
   "note": "需要独立安装 Qoder CLI 并登录。模型列表列出常用档位；具体模型及 reasoning effort 以 Qoder 当前账户支持为准。",
   "args": {
-    "read": ["--permission-mode", "plan"],
-    "work": ["--permission-mode", "accept_edits"],
-    "model": ["--model", "{model}"],
-    "effort": ["--reasoning-effort", "{effort}"],
-    "new": ["--print", "{prompt}"]
+    "read": [
+      "--permission-mode",
+      "plan"
+    ],
+    "work": [
+      "--permission-mode",
+      "accept_edits"
+    ],
+    "model": [
+      "--model",
+      "{model}"
+    ],
+    "effort": [
+      "--reasoning-effort",
+      "{effort}"
+    ],
+    "new": [
+      "--print",
+      "{prompt}"
+    ]
   },
   "prompt": "arg",
-  "parse": {"type": "text"},
+  "parse": {
+    "type": "text"
+  },
   "context": "full",
-  "models": ["auto", "ultimate", "performance", "efficient"],
-  "efforts": ["low", "medium", "high", "xhigh", "max"],
-  "default": ["", ""]
+  "models": [
+    "auto",
+    "ultimate",
+    "performance",
+    "efficient"
+  ],
+  "efforts": [],
+  "default": [
+    "",
+    ""
+  ],
+  "adapter": "qodercli",
+  "discovery": {
+    "commands": [],
+    "packages": [
+      "@qoder-ai/qodercli"
+    ],
+    "app_names": [
+      "Qoder",
+      "Qoder CN"
+    ],
+    "bundled_commands": [
+      "qodercli",
+      "qoder"
+    ],
+    "paths": {
+      "darwin": [
+        "/Applications/Qoder.app/Contents/Resources/app/bin/qodercli",
+        "/Applications/Qoder.app/Contents/Resources/app/bin/qoder",
+        "~/Applications/Qoder.app/Contents/Resources/app/bin/qodercli",
+        "~/Applications/Qoder.app/Contents/Resources/app/bin/qoder"
+      ],
+      "linux": [
+        "/opt/qoder/resources/app/bin/qodercli",
+        "/opt/qoder/resources/app/bin/qoder"
+      ]
+    }
+  }
 }

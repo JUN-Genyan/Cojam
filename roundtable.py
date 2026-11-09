@@ -70,6 +70,12 @@ def main():
         for s in registry.all_specs():
             print("%-12s %-8s %s" % (s["id"], s["driver"], "启用" if s["enabled"] else "没启用"))
         raise SystemExit(0)
+    # Publish the PATH-visible agents straight away.  The detailed discovery
+    # (Start Menu shortcuts, package managers and alternate install roots) is
+    # intentionally asynchronous so opening the desktop app cannot hang.
+    from bridge import registry
+    registry.load(fast=True)
+    registry.request_scan()
     from bridge.web import main as run
     run()
 

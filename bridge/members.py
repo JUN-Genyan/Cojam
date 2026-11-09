@@ -63,6 +63,8 @@ class Broker:
         worker = str(data.get("worker") or "")
         if not ID.fullmatch(worker):
             raise MemberError("worker 必须是 1–80 位字母数字、横线或下划线", 400)
+        from .model_catalog import sanitize
+        capabilities = sanitize(data.get('capabilities'))
         with self.condition:
             old = self.workers.get(pid)
             if old and old["digest"] == fingerprint(key) and old["id"] != worker and time.time() - old["seen"] < WORKER_TTL:
@@ -74,9 +76,27 @@ class Broker:
             self.workers[pid] = {"id": worker, "digest": fingerprint(key), "seen": time.time(),
                                  "device": str(data.get("device") or "未命名设备")[:80],
                                  "workdir": str(data.get("workdir") or "成员自己的工作文件夹")[:500],
-                                 "allow_work": data.get("allow_work") is True}
+                                 "allow_work": data.get("allow_work") is True,
+                                 'capabilities':capabilities, 'refresh_catalog':False}
             self.condition.notify_all()
         return {"ok": True, "member": pid, "protocol": 1, "heartbeat_interval": 10}
+
+    def capabilities(self, pid):
+        digest = current_digest(pid)
+        with self.condition:
+            worker = self.workers.get(pid)
+            if not worker or worker['digest'] != digest or time.time() - worker['seen'] >= WORKER_TTL:
+                return None
+            import copy
+            result = copy.deepcopy(worker.get('capabilities'))
+            if result:
+                result['refreshing'] = worker.get('refresh_catalog', False)
+            return result
+
+    def request_catalog_refresh(self, pid):
+        with self.condition:
+            if pid in self.workers:
+                self.workers[pid]['refresh_catalog'] = True
 
     def status(self, pid):
         digest = current_digest(pid)
@@ -120,7 +140,9 @@ class Broker:
                                 "goal": room.goal(), "prompt": prompt, "session": session or "", "mode": mode,
                                 "board": [dict(b) for b in room.meta.get("board", [])],
                                 "permissions": access.permissions(room, pid), "model": room.own_models(pid)[0],
-                                "effort": room.own_models(pid)[1], "execution": {"location": "member", "workdir": status["workdir"]}}}
+                                "effort": room.own_models(pid)[1],
+                                'model_settings':dict((room.meta.get('models') or {}).get(pid) or {'model':'', 'effort':'', 'reasoning':{}}),
+                                "execution": {"location": "member", "workdir": status["workdir"]}}}
             self.tasks[tid] = task
             self._state(task, "queued")
         end = now + timeout_for(mode)[1]
@@ -132,6 +154,8 @@ class Broker:
                     result = task["result"]
                     if not valid:
                         return False, "成员权限或任务已变更，已丢弃迟到的回复", session, []
+                    if result.get('model_execution'):
+                        room.meta.setdefault('model_execution', {})[pid] = result['model_execution']
                     return result["ok"], result["text"], result.get("session") or session, []
                 if task["state"] in ("cancelled", "failed"):
                     return False, task["reason"] or "成员任务已取消", session, []
@@ -183,17 +207,22 @@ class Broker:
                     if task["state"] == "queued":
                         task.update(worker=w["id"], lease=secrets.token_urlsafe(24))
                         self._state(task, "claimed")
-                    return {"task": dict(task["payload"], lease=task["lease"])}
+                    return {"task": dict(task["payload"], lease=task["lease"]), 'refresh_catalog':w.get('refresh_catalog', False)}
             with self.condition:
                 remaining = end - time.time()
                 if remaining <= 0:
-                    return {"task": None}
+                    return {"task": None, 'refresh_catalog':w.get('refresh_catalog', False)}
                 self.condition.wait(min(.5, remaining))
 
     def heartbeat(self, pid, key, data):
+        from .model_catalog import sanitize
+        capabilities = sanitize(data.get('capabilities'))
         with self.condition:
             w = self._registered(pid, data.get("worker"), key)
             w["seen"] = time.time()
+            if capabilities:
+                w['capabilities'] = capabilities
+                w['refresh_catalog'] = capabilities.get('status') == 'loading'
         if data.get("task"):
             task = self._task(pid, key, data)
             return {"ok": True, "state": task["state"]}
@@ -206,6 +235,12 @@ class Broker:
         if len(data["text"].encode()) > 48 * 1024 or len(str(data.get("session") or "")) > 200:
             raise MemberError("回复或 session 过长", 413)
         result = {"ok": data["ok"], "text": data["text"], "session": str(data.get("session") or "")}
+        execution = data.get('model_execution')
+        if isinstance(execution, dict):
+            from .model_catalog import ID as MODEL_ID
+            reported = execution.get('reported')
+            if isinstance(reported, str) and MODEL_ID.fullmatch(reported):
+                result['model_execution'] = {'requested':task['payload'].get('model') or '', 'reported':reported, 'confirmed':True}
         with self.condition:
             if task["state"] == "completed":
                 if task["result"] != result:

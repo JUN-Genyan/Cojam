@@ -21,6 +21,16 @@ CODEX_HOME = os.environ.get("CODEX_HOME") or os.path.join(HOME, ".codex")
 CODEX_CONFIG = os.path.join(CODEX_HOME, "config.toml")
 
 
+def _command(ai):
+    """Keep native drivers on the same installation selected in onboarding."""
+    selected = registry._selected_installations().get(ai)
+    if isinstance(selected, str) and os.path.isfile(selected):
+        resolved = resolve_cmd(selected)
+        if resolved:
+            return resolved
+    return resolve_cmd(ai)
+
+
 def bridge_url(path=""):
     return "http://127.0.0.1:%d%s" % (PORT, path)
 
@@ -276,7 +286,7 @@ def _plugin_has_hooks(path):
 
 def claude_plugins(wd):
     """这个文件夹里 claude 能用的插件：[{id, enabled（用户平时开没开）, hooks, synced}]。用 claude plugin list --json（准），不行就读文件。"""
-    exe = resolve_cmd("claude")
+    exe = _command("claude")
     if exe:
         try:
             r = run_cmd(exe + ["plugin", "list", "--json"], "", wd, timeout=60)
@@ -555,7 +565,7 @@ def call_ai(ai, prompt, session_id=None, images=(), mode=None, room=None):
     """返回 (ok, text, session_id, edits)。session_id 为空 = 新建会话，返回新会话 id。mode 缺省取这场会议的模式。
     edits = 这个 AI 自己的写文件操作记录 [{path, op}]（干活模式靠它认定"这一步改了什么"）；失败/超时也尽量带上。"""
     edits, res = [], {}
-    exe = resolve_cmd(ai)
+    exe = _command(ai)
     if not exe:
         return False, "找不到 %s 命令" % ai, session_id, edits
     if mode is None:
@@ -658,7 +668,7 @@ def compact_native(ai, sid, room=None):
             raise
     if ai != "claude":
         return False
-    exe = resolve_cmd("claude")
+    exe = _command("claude")
     if not exe:
         return False
     before = claude_boundaries(sid)
@@ -729,7 +739,7 @@ def codex_policy(mode):
 
 def codex_launch(room, mode):
     """这场会议的 app-server 启动参数：返回 (命令行, 额外环境变量)。同样的参数 = 同一份配置，不用重起。"""
-    exe = resolve_cmd("codex")
+    exe = _command("codex")
     if not exe:
         raise RuntimeError("找不到 codex 命令")
     cfg = room.meta["tools"]["codex"] if room is not None else default_tools("codex")

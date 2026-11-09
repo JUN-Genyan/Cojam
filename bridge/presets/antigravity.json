@@ -6,14 +6,18 @@
   "driver": "cli",
   "bin": [
     "agy",
-    "%USERPROFILE%\\.gemini\\bin\\agy.exe"
+    "%USERPROFILE%\\.gemini\\bin\\agy.exe",
+    "%LOCALAPPDATA%/agy/bin/agy.exe",
+    "~/.local/bin/agy"
   ],
   "detect": [
     "%USERPROFILE%\\.gemini\\bin\\agy.exe",
     "%LOCALAPPDATA%\\Programs\\antigravity\\resources\\bin\\language_server.exe",
     "%LOCALAPPDATA%\\Programs\\Antigravity\\resources\\bin\\language_server.exe"
   ],
-  "shortcuts": ["Antigravity"],
+  "shortcuts": [
+    "Antigravity"
+  ],
   "env": {
     "SSH_CONNECTION": "",
     "SSH_CLIENT": "",
@@ -22,10 +26,37 @@
   "note": "本机 CLI（Antigravity 自带的 agy）：会议室直接叫它，非交互跑一轮。读模式用 --mode plan（只读），干活模式用 --mode accept-edits --dangerously-skip-permissions。会话 id 取自 JSON 输出的 conversation_id，续接用 --conversation。清空 SSH_* 是因为 agy 一看到 SSH 环境变量就改用文件令牌、读不到 Windows 已登录的凭据（从 SSH 会话里启动会议室时会认证失败）。",
   "args": {
     "base": [],
-    "read": ["--mode", "plan"],
-    "work": ["--mode", "accept-edits", "--dangerously-skip-permissions"],
-    "new": ["-p", "{prompt}", "--output-format", "json"],
-    "resume": ["--conversation", "{session}", "-p", "{prompt}", "--output-format", "json"]
+    "read": [
+      "--mode",
+      "plan"
+    ],
+    "work": [
+      "--mode",
+      "accept-edits",
+      "--dangerously-skip-permissions"
+    ],
+    "new": [
+      "-p",
+      "{prompt}",
+      "--output-format",
+      "json"
+    ],
+    "resume": [
+      "--conversation",
+      "{session}",
+      "-p",
+      "{prompt}",
+      "--output-format",
+      "json"
+    ],
+    "model": [
+      "--model",
+      "{model}"
+    ],
+    "effort": [
+      "--effort",
+      "{effort}"
+    ]
   },
   "prompt": "arg",
   "images": [],
@@ -44,5 +75,10 @@
   "caps": {
     "handoff": true
   },
-  "handoff": "agy --conversation {session}"
+  "handoff": "agy --conversation {session}",
+  "adapter": "antigravity",
+  "discovery": {
+    "commands": [],
+    "packages": []
+  }
 }

@@ -30,6 +30,10 @@
       "--resume",
       "{session}",
       "{prompt}"
+    ],
+    "model": [
+      "--model",
+      "{model}"
     ]
   },
   "prompt": "arg",
@@ -49,5 +53,33 @@
     "images": false,
     "handoff": false,
     "tools": false
+  },
+  "adapter": "cursor",
+  "discovery": {
+    "commands": [
+      "agent"
+    ],
+    "packages": [
+      "@cursor/agent"
+    ],
+    "app_names": [
+      "Cursor"
+    ],
+    "bundled_commands": [
+      "cursor-agent",
+      "agent"
+    ],
+    "paths": {
+      "darwin": [
+        "/Applications/Cursor.app/Contents/Resources/app/bin/cursor-agent",
+        "/Applications/Cursor.app/Contents/Resources/app/bin/agent",
+        "~/Applications/Cursor.app/Contents/Resources/app/bin/cursor-agent",
+        "~/Applications/Cursor.app/Contents/Resources/app/bin/agent"
+      ],
+      "linux": [
+        "/opt/cursor/resources/app/bin/cursor-agent",
+        "/opt/cursor/resources/app/bin/agent"
+      ]
+    }
   }
 }

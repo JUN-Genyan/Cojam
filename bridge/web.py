@@ -8,7 +8,7 @@ import hmac, json, mimetypes, os, re, secrets, socket, sys, threading, webbrowse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import access, agents, common, connections, devices, install, invites, mcp, members, projects, registry, room as R
+from . import access, agents, common, connections, devices, install, invites, mcp, members, projects, registry, model_catalog, room as R
 from .common import (AIS, EXTERNAL_SPEAKERS, HERE, HOST, MAX_ANN, MAX_BODY, MAX_UPLOAD, MEET_DIR, PORT, PROJECT,
                      in_dir, kind_of)
 from .guard import USER, guard
@@ -48,9 +48,9 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return -1
 
-    def _read_json(self):
+    def _read_json(self, limit=MAX_BODY):
         n = self._length()
-        if n < 0 or n > MAX_BODY:
+        if n < 0 or n > limit:
             self._json(413, {"error": "too large"})
             return None
         try:
@@ -270,12 +270,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"claims": guard.listing()})
         if path == "/api/agents":
             if (q.get("reload") or [""])[0] in ("1", "true", "yes"):
-                registry.load()      # 用户刚改了 data/agents.d：重读一遍，不用重启服务器
-            return self._json(200, dict(registry.catalog(), discovered_presets=registry.discover_hidden_presets(), default_dir=PROJECT, hosts=install.hosts_status(),
+                registry.request_scan()
+            return self._json(200, dict(registry.catalog(), scanning=registry.scanning(), discovered_presets=registry.discover_hidden_presets(), default_dir=PROJECT, hosts=install.hosts_status(),
                                         local_workspace=self._is_local_owner() and not bool(getattr(self, "_device_id", "")),
                                         owner_devices=devices.listing(getattr(self, "_device_id", "")),
                                         connections=connections.catalog(), members={s["id"]: members.broker.status(s["id"]) for s in registry.all_specs() if s["driver"] == "external" and s.get("kind") != "user"},
                                         mcp_url="http://127.0.0.1:%d/mcp" % PORT))
+        if path == '/api/agents/models':
+            ai = (q.get('ai') or [''])[0]
+            if not registry.get(ai):
+                return self._json(404, {'error':'联系人不存在'})
+            target = R.rooms.get((q.get('room') or [''])[0]) if q.get('room') else None
+            if q.get('room') and target is None:
+                return self._json(404, {'error':'会话不存在，请重新选择'})
+            cwd = target.workdir() if target else PROJECT
+            catalog = model_catalog.get(ai, cwd)
+            return self._json(200, {'catalog':catalog, 'installations':registry.installations_of(registry.get(ai)),
+                                    'settings':target.model_info(ai) if target and ai in target.ais else {}})
         if path in ("/api/state", "/api/messages"):   # 老页面（服务器换了新版、页面还没刷新）：按最近打开的那场回
             rid = R.last_room()
             r = R.rooms.get(rid) if rid else None
@@ -290,6 +301,12 @@ class Handler(BaseHTTPRequestHandler):
             if r is None:
                 return self._json(404, {"error": "没有这场会议（可能删了）", "gone": True})
             act = m.group(2)
+            if act == 'models/catalog':
+                ai = (q.get('ai') or [''])[0]
+                if ai not in r.ais:
+                    return self._json(400, {'error':'此成员未加入会话'})
+                catalog = model_catalog.get(ai, r.workdir())
+                return self._json(200, dict(r.model_info(ai), **model_catalog.legacy(catalog)))
             if act == "messages":
                 return self._json(200, r.messages_since(_int(q, "since")))
             if act == "state":
@@ -313,7 +330,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/post":
             return self._external_post()
         if path.startswith("/api/external/member/"):
-            data = self._read_json()
+            data = self._read_json(limit=1024*1024 if path.rsplit('/',1)[-1] in ('connect','heartbeat') else MAX_BODY)
             if data is None:
                 return
             key = self._bearer()
@@ -544,6 +561,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, {"ok": True, "connection": connections.check(str(data.get("id") or ""))})
             except ValueError as e:
                 return self._json(400, {"error": str(e)})
+        if path in ('/api/agents/models/refresh', '/api/agents/installation'):
+            ai = str(data.get('ai') or '')
+            spec = registry.get(ai)
+            if not spec:
+                return self._json(404, {'error':'联系人不存在'})
+            try:
+                if path.endswith('/installation'):
+                    if any(room.busy_for(ai) for room in R.rooms.all()):
+                        return self._json(409, {'error':'此成员正在执行任务，结束后再更换安装'})
+                    registry.select_installation(ai, str(data.get('installation') or ''))
+                target = R.rooms.get(str(data.get('room') or '')) if data.get('room') else None
+                return self._json(202, {'catalog':model_catalog.get(ai, target.workdir() if target else PROJECT, refresh=True)})
+            except ValueError as error:
+                return self._json(400, {'error':str(error)})
         if path == "/api/contacts/status":
             pid = str(data.get("id") or "")
             return self._json(200, {"connection": connections.status(pid), "member": members.broker.status(pid)})
@@ -662,8 +693,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200 if ok else 409, {"ok": ok, "error": msg, "plan": plan})
             ok, msg = r.undo_step(seq)
             return self._json(200 if ok else 409, {"ok": ok, "error": msg})
+        if act == 'models/refresh':
+            ai = str(data.get('ai') or '')
+            if ai not in r.ais:
+                return self._json(400, {'error':'此成员未加入会话'})
+            return self._json(202, {'catalog':model_catalog.get(ai, r.workdir(), refresh=True)})
         if act == "models":
-            ok, msg, changed = r.set_models(str(data.get("ai", "")), str(data.get("model") or ""), str(data.get("effort") or ""))
+            ok, msg, changed = r.set_models(str(data.get("ai", "")), str(data.get("model") or ""), str(data.get("effort") or ""), data.get('reasoning'))
             return self._json(200 if ok else 409, {"ok": ok, "error": msg, "model_changed": changed})
         if act == "tools":
             ok, msg = r.set_tools(str(data.get("ai", "")), data.get("tools"))
@@ -804,16 +840,17 @@ class ExclusiveServer(ThreadingHTTPServer):
     allow_reuse_address = os.name != "nt"   # Windows 的 SO_REUSEADDR 会允许重复绑定；别的系统上它只管 TIME_WAIT，留着
     daemon_threads = True
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, cache_ui=True, **kwargs):
         # Keep one UI/backend generation together until restart. Previously an
         # old process hot-served a new UI from disk and silently lost its APIs.
-        with open(INDEX, "rb") as f:
-            self.ui_index = f.read()
-        self.ui_assets = {}
-        for name in os.listdir(STATIC):
-            if name.endswith((".js", ".css", ".html", ".webmanifest")):
-                with open(os.path.join(STATIC, name), "rb") as f:
-                    self.ui_assets[name] = f.read()
+        self.ui_index, self.ui_assets = b'', {}
+        if cache_ui:
+            with open(INDEX, "rb") as f:
+                self.ui_index = f.read()
+            for name in os.listdir(STATIC):
+                if name.endswith((".js", ".css", ".html", ".webmanifest")):
+                    with open(os.path.join(STATIC, name), "rb") as f:
+                        self.ui_assets[name] = f.read()
         super().__init__(*args, **kwargs)
 
     def server_bind(self):

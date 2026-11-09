@@ -17,6 +17,14 @@
     "new": [
       "run",
       "{prompt}"
+    ],
+    "model": [
+      "--model",
+      "{model}"
+    ],
+    "effort": [
+      "--reasoning-effort",
+      "{effort}"
     ]
   },
   "prompt": "arg",
@@ -30,5 +38,11 @@
     "",
     ""
   ],
-  "caps": {}
+  "caps": {},
+  "adapter": "crush",
+  "options_position": "after_command",
+  "discovery": {
+    "commands": [],
+    "packages": []
+  }
 }

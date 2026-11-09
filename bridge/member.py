@@ -96,11 +96,15 @@ class Client:
             while not self.stop_event.is_set():
                 try:
                     if not connected:
-                        info = self.request("connect", {"device":self.device, "workdir":self.workdir, "allow_work":self.allow_work})
+                        capability = executor.catalog() if hasattr(executor, 'catalog') else None
+                        info = self.request("connect", {"device":self.device, "workdir":self.workdir, "allow_work":self.allow_work, 'capabilities':capability})
                         self.member = info["member"]
                         connected = True
                         self.emit("已加入会议室服务，等待分配给 %s 的任务。" % self.member)
                     result = self.request("receive", {"timeout":5}, timeout=10)
+                    if hasattr(executor, 'catalog'):
+                        capability = executor.catalog(refresh=result.get('refresh_catalog') is True)
+                        self.request('heartbeat', {'capabilities':capability}, timeout=10)
                     task = result.get("task")
                     if task:
                         self._execute(task, executor)
@@ -223,9 +227,13 @@ class LocalExecutor:
         except OSError:
             self.exclusive.close()
             raise ValueError("已有同一配置的成员连接端在运行，请先关闭它")
-        self.server = web.ExclusiveServer(("127.0.0.1", 0), web.Handler)
+        self.server = web.ExclusiveServer(("127.0.0.1", 0), web.Handler, cache_ui=False)
         agents.PORT = self.server.server_address[1]
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def catalog(self, refresh=False):
+        from . import model_catalog
+        return model_catalog.get(self.agent, self.workdir, refresh=refresh)
 
     def _room(self, task):
         from . import agents, registry, room as R
@@ -246,9 +254,16 @@ class LocalExecutor:
         r.meta.update(title=task.get("title") or "成员会话", announcement=task.get("goal") or "", workdir=self.workdir,
                       participants=[self.agent], permissions={self.agent:permissions}, board=task.get("board") or [],
                       mode="work" if task.get("mode") == "work" and permissions["work"] else "discuss")
-        for field in ("model", "effort"):
-            if task.get(field):
-                r.meta["models"][self.agent][field] = task[field]
+        settings = task.get('model_settings')
+        if isinstance(settings, dict):
+            # Empty values explicitly clear the previous task's overrides.
+            r.meta['models'][self.agent] = {'model':str(settings.get('model') or ''),
+                                           'effort':str(settings.get('effort') or ''),
+                                           'reasoning':settings.get('reasoning') or {}}
+        else:
+            for field in ("model", "effort"):
+                if task.get(field):
+                    r.meta["models"][self.agent][field] = task[field]
         r.save_meta()
         return r
 
@@ -272,6 +287,8 @@ class LocalExecutor:
             if len(text.encode()) > 47000:
                 text = text.encode()[:46500].decode("utf-8", "ignore") + "\n[回复过长，已截断]"
             answer = {"ok":bool(result[0]), "text":text, "session":str(result[2] or "")}
+            if (r.meta.get('model_execution') or {}).get(self.agent):
+                answer['model_execution'] = r.meta['model_execution'][self.agent]
             if result[0]:
                 r.meta[self.agent + "_session"] = result[2]
                 r.save_meta()

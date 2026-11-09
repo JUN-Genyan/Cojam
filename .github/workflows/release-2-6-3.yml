@@ -6,7 +6,10 @@ on:
 permissions:
   contents: write
 jobs:
+  compatibility:
+    uses: ./.github/workflows/harness-compatibility.yml
   release:
+    needs: compatibility
     runs-on: windows-latest
     timeout-minutes: 40
     defaults:
@@ -35,6 +38,10 @@ jobs:
           python -m unittest discover -s tests -p 'test_agents_registry.py'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s tests -p 'test_model_settings.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p 'test_harness_catalog.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p 'test_catalog_api.py'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s tests -p 'test_rt.py'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

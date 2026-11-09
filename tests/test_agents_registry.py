@@ -137,7 +137,7 @@ class CliDriver(Base):
             spec = registry._norm(preset)
         self.assertTrue(spec['enabled'])
         self.assertIn('performance', spec['models'])
-        self.assertIn('high', spec['efforts'])
+        self.assertEqual(spec['efforts'], [])  # reasoning comes from the per-model catalog
 
     def test_optional_model_and_effort_reach_cli_only_when_selected(self):
         cfg = dict(CLI_CFG, args={"new": [FAKE, "{prompt}"],

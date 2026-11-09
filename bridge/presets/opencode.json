@@ -11,9 +11,7 @@
   "args": {
     "base": [],
     "read": [],
-    "work": [
-      "--auto"
-    ],
+    "work": [],
     "new": [
       "run",
       "--format",
@@ -27,6 +25,14 @@
       "--format",
       "json",
       "{prompt}"
+    ],
+    "model": [
+      "--model",
+      "{model}"
+    ],
+    "effort": [
+      "--variant",
+      "{effort}"
     ]
   },
   "prompt": "arg",
@@ -55,5 +61,13 @@
     "handoff": true,
     "tools": false
   },
-  "handoff": "opencode run --session {session}"
+  "handoff": "opencode run --session {session}",
+  "adapter": "opencode",
+  "options_position": "after_command",
+  "discovery": {
+    "commands": [],
+    "packages": [
+      "opencode-ai"
+    ]
+  }
 }

@@ -7,6 +7,50 @@ import unittest
 
 @unittest.skipUnless(shutil.which('node'), 'Node is needed for frontend tests')
 class ModelSettings(unittest.TestCase):
+    def test_late_catalog_response_does_not_replace_new_room_or_drafts(self):
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const source=fs.readFileSync('static/model-settings.js','utf8');
+let pending=[],replaced=0;
+const box={modelDirty:()=>false,set outerHTML(v){replaced++}};
+const status={textContent:''};
+const ctx=vm.createContext({RID:'first',document:{getElementById:id=>id==='modelSettings'?box:status},
+ fetch:()=>new Promise(resolve=>pending.push(resolve)),api:()=>'/api/r/first/models/catalog',post:async()=>[true,{}],setTimeout:()=>{},esc:String});
+vm.runInContext(source,ctx);
+(async()=>{
+ const late=ctx.loadModelCatalog('agent',false);ctx.RID='second';
+ pending.shift()({ok:true,json:async()=>({catalog:{status:'ready',entries:[]}})});await late;assert.equal(replaced,0);
+ box.modelDirty=()=>true;
+ const update=ctx.loadModelCatalog('agent',false);
+ pending.shift()({ok:true,json:async()=>({catalog:{status:'ready',entries:[]}})});await update;
+ assert.equal(replaced,0);assert.match(status.textContent,/保留未保存设置/);
+})().catch(e=>{console.error(e);process.exitCode=1});
+'''
+        result = subprocess.run(['node','-e',script],cwd=Path(__file__).resolve().parents[1],capture_output=True,text=True,timeout=20)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+    def test_structured_budget_and_toggle_controls_are_saved(self):
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const source=fs.readFileSync('static/model-settings.js','utf8');
+const label={hidden:false};
+const boxes=Object.fromEntries(['modelSettings','mModel','mModelChoice','mCustomModel','mEffort','mSave','mReset','mHint','mCurrent','mEffortHint','mReasoningExtra','mBudget','mThinking'].map(id=>[id,{value:'',textContent:'',disabled:false,innerHTML:'',focus(){},closest(){return label}}]));
+let saved=[];
+const ctx=vm.createContext({RID:'room',S:{ais:{}},document:{getElementById:id=>boxes[id]},esc:String,api:()=>'/models',post:async(u,v)=>{saved.push(v);return [true,{}]},loadState:async()=>{}});
+vm.runInContext(source,ctx);
+(async()=>{
+ for(const kind of ['budget','toggle']){
+  const info={model:'m',effort:'',reasoning:{},model_supported:true,models:['m'],efforts_by_model:{m:[]},catalog:{entries:[{id:'m',reasoning:{kind,min:0,max:8192}}]}};
+  boxes.mModel.value='m';ctx.bindModelSettings('agent',info,false);
+  const input=boxes[kind==='budget'?'mBudget':'mThinking'];input.value=kind==='budget'?'2048':'false';input.oninput();
+  assert.equal(boxes.mSave.disabled,false);assert.equal(label.hidden,true);
+  await boxes.mSave.onclick();assert.equal(saved.at(-1).reasoning.kind,kind);assert.equal(saved.at(-1).reasoning.value,kind==='budget'?2048:false);
+ }
+})().catch(e=>{console.error(e);process.exitCode=1});
+'''
+        result = subprocess.run(['node','-e',script],cwd=Path(__file__).resolve().parents[1],capture_output=True,text=True,timeout=20)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
     def test_rescan_keeps_selected_agent_and_unsaved_form(self):
         script = r'''
 const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');

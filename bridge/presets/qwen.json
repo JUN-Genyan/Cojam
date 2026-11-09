@@ -20,6 +20,10 @@
       "{prompt}",
       "--output-format",
       "json"
+    ],
+    "model": [
+      "--model",
+      "{model}"
     ]
   },
   "prompt": "arg",
@@ -34,5 +38,12 @@
     "",
     ""
   ],
-  "caps": {}
+  "caps": {},
+  "adapter": "qwen",
+  "discovery": {
+    "commands": [],
+    "packages": [
+      "@qwen-code/qwen-code"
+    ]
+  }
 }

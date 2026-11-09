@@ -16,7 +16,7 @@ r"""参与者注册表：会议室里能有哪些 AI、每一个怎么叫。
 
 加载后 common.AIS 会被原地改成当前启用的 id 列表（别的模块 import 到的是同一个 list 对象，所以不用改 import）。
 """
-import glob, json, os, re, shutil, subprocess, threading
+import glob, hashlib, json, os, re, shutil, subprocess, sys, threading, time
 
 from .common import LOG_DIR, NO_WINDOW, find_executable, read_json, resolve_cmd, write_json
 
@@ -69,6 +69,7 @@ def _start_menu_dirs():
 
 
 _shortcut_targets = {}
+_shortcut_misses = {}
 _shortcut_targets_lock = threading.Lock()
 
 
@@ -80,22 +81,33 @@ def _shortcut_target(path, modified_ns, size):
     with _shortcut_targets_lock:
         if key in _shortcut_targets:
             return _shortcut_targets[key]
+        if time.monotonic() - _shortcut_misses.get(key, -1000) < 30:
+            return ''
     quoted = path.replace("'", "''")
     script = ("[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; "
               "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('" + quoted + "'); "
               "[Console]::Out.Write($s.TargetPath)")
     exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
     try:
-        result = subprocess.run([exe, "-NoProfile", "-NonInteractive", "-Command", script],
-                                capture_output=True, timeout=4, **NO_WINDOW)
+        from .discovery import PROBE_LIMIT
+        with PROBE_LIMIT:
+            result = subprocess.run([exe, "-NoProfile", "-NonInteractive", "-Command", script],
+                                    capture_output=True, timeout=4, **NO_WINDOW)
         target = result.stdout.decode("utf-8", "replace").strip() if result.returncode == 0 else ""
         if target:
             with _shortcut_targets_lock:
                 if len(_shortcut_targets) >= 128:
                     _shortcut_targets.clear()
                 _shortcut_targets[key] = target
+        else:
+            with _shortcut_targets_lock:
+                if len(_shortcut_misses) >= 128:
+                    _shortcut_misses.clear()
+                _shortcut_misses[key] = time.monotonic()
         return target
     except (OSError, subprocess.SubprocessError):
+        with _shortcut_targets_lock:
+            _shortcut_misses[key] = time.monotonic()
         return ""
 
 
@@ -146,7 +158,7 @@ def _as_list(v):
     return []
 
 
-def _norm(raw, idx=0):
+def _norm(raw, idx=0, scan=True):
     """把一段配置规整成能用的一版。字段不对就抛 ValueError（调用方决定是跳过还是报错）。"""
     if not isinstance(raw, dict):
         raise ValueError("配置得是一个对象")
@@ -172,8 +184,12 @@ def _norm(raw, idx=0):
         caps["handoff"] = False      # 非内置的要说清"在终端里怎么接着聊"，说不清就不给这个按钮
 
     args = raw.get("args") if isinstance(raw.get("args"), dict) else {}
+    discovery = raw.get('discovery') if isinstance(raw.get('discovery'), dict) else {}
+    discovery = {key:_as_list(discovery.get(key)) for key in ('commands','packages','app_names','bundled_commands','version_command','help_command')} | {
+        'paths':{str(platform):_as_list(paths) for platform, paths in (discovery.get('paths') or {}).items()}
+        if isinstance(discovery.get('paths'), dict) else {}}
     arg = {}
-    for k in ("base", "read", "work", "new", "resume", "model", "effort"):
+    for k in ("base", "read", "work", "new", "resume", "model", "effort", "thinking_budget", "thinking"):
         arg[k] = _as_list(args.get(k))
 
     parse = raw.get("parse") if isinstance(raw.get("parse"), dict) else {}
@@ -194,6 +210,12 @@ def _norm(raw, idx=0):
         "bin": _as_list(raw.get("bin")),
         "detect": _as_list(raw.get("detect")),
         "shortcuts": _as_list(raw.get("shortcuts")),
+        "discovery": discovery,
+        "adapter": str(raw.get("adapter") or ""),
+        "catalog_command": _as_list(raw.get("catalog_command")),
+        "capabilities_endpoint": str(raw.get("capabilities_endpoint") or ""),
+        "reasoning": raw.get("reasoning") if isinstance(raw.get("reasoning"), dict) else {},
+        "options_position": "after_command" if raw.get("options_position") == "after_command" else "before_command",
         "args": arg,
         "prompt": str(raw.get("prompt") or ("stdin" if driver == "claude" else "arg")).strip().lower(),
         "images": _as_list(raw.get("images")),
@@ -241,13 +263,27 @@ def _norm(raw, idx=0):
     if driver in ("cli", "claude", "codex"):
         # A saved contact or pairing is not evidence that its executable is
         # still installed. Keep its configuration, but recheck availability.
-        spec["enabled"] = ra is not False and any(find_executable(b) for b in spec["bin"])
+        extra_bins = _as_list(spec['discovery'].get('commands')) + _as_list((spec['discovery'].get('paths') or {}).get(sys.platform))
+        spec['bin'] = list(dict.fromkeys(spec['bin'] + extra_bins))
+        selected = _selected_installations().get(pid)
+        if isinstance(selected, str) and os.path.isfile(selected) and selected not in spec['bin']:
+            spec['bin'].append(selected)
+        # Desktop startup must never wait on registry, shortcut and package
+        # probing.  A cheap PATH-only picture is published immediately and a
+        # full bounded scan replaces it in the background.
+        spec["enabled"] = ra is not False and any(shutil.which(b) for b in spec["bin"]) if not scan else \
+            ra is not False and any(find_executable(b) for b in spec["bin"])
+        if scan and ra is not False and not spec['enabled'] and (spec['discovery'].get('packages') or spec['discovery'].get('app_names')):
+            from .discovery import installations
+            for installation in installations(spec):
+                spec['bin'].append(installation['path'])
+            spec['enabled'] = bool(any(find_executable(b) for b in spec['bin']))
     elif isinstance(ra, bool):
         spec["enabled"] = ra
     elif driver == "http":
         spec["enabled"] = True
     elif driver == "external":
-        spec["enabled"] = _detected(spec)     # 只有装了这个软件才出现
+        spec["enabled"] = _detected(spec) if scan else False  # shortcuts are resolved by the background scan
     else:
         spec["enabled"] = any(shutil.which(b) for b in spec["bin"]) if spec["bin"] else bool(spec["builtin"])
     return spec
@@ -307,32 +343,67 @@ def _set_hidden(ids):
 ERRORS = []     # 读配置时出的错，界面上能看（"加了一个但没生效"时好查）
 
 
-def load():
-    """重新读一遍所有配置，返回 id -> spec。读坏的跳过并记进 ERRORS，不影响别的。"""
-    global _loaded
+_load_sequence = 0
+_scan_running = False
+_discovered_hidden = []
+
+
+def load(fast=False):
+    """Build a new registry outside the read lock, then publish it atomically."""
+    global _loaded, _load_sequence, _discovered_hidden, SPECS
     with _locker():
-        ERRORS[:] = []
-        specs = {}
-        for i, s in enumerate(builtin()):
-            specs[s["id"]] = _norm(s, i)
-        hidden = _hidden_ids()
-        for where, files in _sources():
-            for path in files:
-                try:
-                    for i, raw in enumerate(_read_file(path)):
-                        spec = _norm(raw, len(specs))
-                        spec["source"] = raw.get("source") or os.path.basename(path)
-                        spec["user"] = (where == "agents.d")
-                        if where == "presets" and spec["id"] in hidden:
-                            continue    # 用户在界面上删掉的预置联系人，不再出现
-                        specs[spec["id"]] = spec
-                except Exception as e:
-                    ERRORS.append("%s：%s" % (os.path.basename(path), e))
-        SPECS.clear()
-        SPECS.update(specs)
-        _loaded = True
-        _sync_common()
+        _load_sequence += 1
+        sequence = _load_sequence
+    from .discovery import clear_path_cache
+    clear_path_cache()
+    errors, specs, discovered = [], {}, []
+    for i, raw in enumerate(builtin()):
+        specs[raw['id']] = _norm(raw, i, scan=not fast)
+    hidden = _hidden_ids()
+    for where, files in _sources():
+        for path in files:
+            try:
+                for raw in _read_file(path):
+                    spec = _norm(raw, len(specs), scan=not fast)
+                    spec['source'] = raw.get('source') or os.path.basename(path)
+                    spec['user'] = where == 'agents.d'
+                    if where == 'presets' and spec['id'] in hidden:
+                        if spec['enabled']:
+                            discovered.append(spec)
+                        continue
+                    specs[spec['id']] = spec
+            except Exception as error:
+                errors.append('%s：%s' % (os.path.basename(path), error))
+    with _locker():
+        if sequence == _load_sequence:
+            ERRORS[:] = errors
+            SPECS = specs
+            _discovered_hidden = discovered
+            _loaded = True
+            _sync_common()
         return dict(SPECS)
+
+
+def request_scan():
+    global _scan_running
+    with _locker():
+        if _scan_running:
+            return
+        _scan_running = True
+    with _shortcut_targets_lock:
+        _shortcut_misses.clear()
+    def scan():
+        global _scan_running
+        try:
+            load()
+        finally:
+            with _locker():
+                _scan_running = False
+    threading.Thread(target=scan, name='cojam-install-scan', daemon=True).start()
+
+
+def scanning():
+    return _scan_running
 
 
 def _sync_common():
@@ -391,21 +462,9 @@ def catalog():
 
 
 def discover_hidden_presets():
-    """Find installed presets hidden from contacts without changing pairings."""
-    hidden = set(_hidden_ids())
-    found = []
-    for where, paths in _sources():
-        if where != "presets":
-            continue
-        for path in paths:
-            try:
-                for raw in _read_file(path):
-                    spec = _norm(raw)
-                    if spec["id"] in hidden and spec["id"] not in SPECS and spec["enabled"] and spec["driver"] in ("cli", "claude", "codex", "external"):
-                        found.append(public(spec))
-            except (OSError, ValueError, TypeError):
-                continue
-    return found
+    """Use the same scan snapshot as contacts; polling never re-scans shortcuts."""
+    ensure()
+    return [public(spec) for spec in _discovered_hidden if spec['id'] not in SPECS]
 
 
 def restore_preset(pid):
@@ -461,8 +520,45 @@ def remove_agent(pid):
 
 def exe_of(spec):
     """这个 agent 的命令行真身（参数列表开头）；找不到返回 None。"""
-    for b in spec.get("bin") or []:
+    selected = _selected_installations().get(spec['id'])
+    for b in ([selected] if isinstance(selected, str) and os.path.isfile(selected) else []) + list(spec.get("bin") or []):
         got = resolve_cmd(b)
         if got:
             return got
     return None
+
+
+def installations_of(spec):
+    from .discovery import installations
+    rows = installations(spec)
+    selected = _selected_installations().get(spec['id'])
+    if isinstance(selected, str) and os.path.isfile(selected) and not any(row['path'] == selected for row in rows):
+        from .discovery import executables
+        for path in executables(selected):
+            rows.append({'id': hashlib.sha256(path.encode()).hexdigest()[:20], 'path': path})
+    effective = exe_of(spec)
+    for row in rows:
+        row['selected'] = row['path'] == selected if selected else bool(effective and row['path'] == effective[0])
+    if rows and not any(row['selected'] for row in rows):
+        rows[0]['selected'] = True
+    return rows
+
+
+def select_installation(pid, installation_id):
+    spec = get(pid)
+    if not spec or spec['driver'] not in ('claude', 'codex', 'cli'):
+        raise ValueError('此联系人不是本机可调用程序')
+    row = next((row for row in installations_of(spec) if row['id'] == installation_id), None)
+    if not row:
+        raise ValueError('安装入口已失效，请重新扫描')
+    with _locker():
+        path = os.path.join(LOG_DIR, 'harness_installations.json')
+        saved = _selected_installations()
+        saved[pid] = row['path']
+        write_json(path, saved)
+    return row
+
+
+def _selected_installations():
+    raw = read_json(os.path.join(LOG_DIR, 'harness_installations.json'))
+    return raw if isinstance(raw, dict) else {}

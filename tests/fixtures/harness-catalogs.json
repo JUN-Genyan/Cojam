@@ -1,0 +1,126 @@
+[
+  {
+    "adapter": "opencode",
+    "version": "1.x verbose shape",
+    "stdout": "provider/model\n{\"id\":\"model\",\"name\":\"Model\",\"variants\":{\"low\":{},\"high\":{}}}\n",
+    "models": [
+      "provider/model"
+    ],
+    "kind": "variant"
+  },
+  {
+    "adapter": "opencode",
+    "version": "2.x catalog shape",
+    "stdout": "{\"models\":[{\"id\":\"provider/model\",\"variants\":[{\"id\":\"deep\"}]}]}",
+    "models": [
+      "provider/model"
+    ],
+    "kind": "variant"
+  },
+  {
+    "adapter": "qodercli",
+    "version": "account JSON shape",
+    "stdout": "{\"models\":[{\"id\":\"performance\",\"supported_reasoning_levels\":[{\"effort\":\"high\"}]}]}",
+    "models": [
+      "performance"
+    ],
+    "kind": "effort"
+  },
+  {
+    "adapter": "cursor",
+    "version": "list-models text shape",
+    "stdout": "model-one  Model One\nmodel-two  Model Two\n",
+    "models": [
+      "model-one",
+      "model-two"
+    ]
+  },
+  {
+    "adapter": "antigravity",
+    "version": "models text shape",
+    "stdout": "model-high  Model (High)\nmodel-medium  Model (Medium)",
+    "models": [
+      "model-high",
+      "model-medium"
+    ]
+  },
+  {
+    "adapter": "aider",
+    "version": "list-models text shape",
+    "stdout": "Models matching search:\n- openai/model-one\n- anthropic/model-two\n",
+    "models": [
+      "openai/model-one",
+      "anthropic/model-two"
+    ]
+  },
+  {
+    "adapter": "crush",
+    "version": "non-TTY models shape",
+    "stdout": "openai/model-one\nanthropic/model-two\n",
+    "models": [
+      "openai/model-one",
+      "anthropic/model-two"
+    ]
+  },
+  {
+    "adapter": "devin_cli",
+    "version": "models list JSON shape",
+    "stdout": "{\"models\":[{\"id\":\"model-one\",\"name\":\"Model One\"}]}",
+    "models": [
+      "model-one"
+    ]
+  },
+  {
+    "adapter": "qwen",
+    "version": "provider settings shape",
+    "stdout": "[{\"id\":\"local-model\",\"generationConfig\":{\"extra_body\":{\"enable_thinking\":true}}}]",
+    "models": [
+      "local-model"
+    ],
+    "kind": "toggle"
+  },
+  {
+    "adapter": "gemini",
+    "version": "explicit budget metadata shape",
+    "stdout": "[{\"id\":\"configured-model\",\"reasoning\":{\"kind\":\"budget\",\"max\":8192}}]",
+    "models": [
+      "configured-model"
+    ],
+    "kind": "budget"
+  },
+  {
+    "adapter": "opencode",
+    "version": "2.2.5 observed API envelope",
+    "stdout": "{\"location\": {}, \"data\": [{\"id\": \"sample\", \"modelID\": \"sample\", \"providerID\": \"provider\", \"enabled\": true, \"variants\": [{\"id\": \"high\"}]}]}",
+    "models": [
+      "provider/sample"
+    ],
+    "kind": "variant"
+  },
+  {
+    "adapter": "antigravity",
+    "version": "1.5.3 observed TSV shape",
+    "stdout": "gemini-4-argon-medium\tGemini 4 Argon (Medium)\r\ngemini-4-argon-high\tGemini 4 Argon (High)\r\n",
+    "models": [
+      "gemini-4-argon-medium",
+      "gemini-4-argon-high"
+    ]
+  },
+  {
+    "adapter": "qodercli",
+    "version": "table with explicit identifier and efforts",
+    "stdout": "| ID | Name | Effort |\n| --- | --- | --- |\n| performance | Performance | low, high |\n",
+    "models": [
+      "performance"
+    ],
+    "kind": "effort"
+  },
+  {
+    "adapter": "devin_cli",
+    "version": "family-grouped JSON shape",
+    "stdout": "{\"families\": [{\"name\": \"Family\", \"models\": [{\"id\": \"family-model\", \"name\": \"Model\"}]}]}",
+    "models": [
+      "family-model"
+    ]
+  }
+]

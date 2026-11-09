@@ -57,7 +57,7 @@ def default_meta(title, ann, wd=None):
             "mode": "discuss", "mode_seen": {a: "discuss" for a in AIS},
             "step_seq": 0, "steps": {},
             "board": [], "board_seq": 0, "ctx": {a: None for a in AIS},
-            "models": {a: {"model": "", "effort": ""} for a in AIS},
+            "models": {a: {"model": "", "effort": "", "reasoning": {}} for a in AIS},
             "tools": {a: agents.default_tools(a) for a in AIS},
             "goal_synced": {"codex": None},
             "participants": registry.default_participants(),
@@ -80,9 +80,10 @@ def fix_meta(m):
         m["models"] = dict(d["models"])
     for a in AIS:
         if not isinstance(m["models"].get(a), dict):
-            m["models"][a] = {"model": "", "effort": ""}
+            m["models"][a] = {"model": "", "effort": "", "reasoning": {}}
         m["models"][a].setdefault("model", "")
         m["models"][a].setdefault("effort", "")
+        m["models"][a].setdefault("reasoning", {})
     if not isinstance(m.get("tools"), dict):
         m["tools"] = dict(d["tools"])
     for a in AIS:
@@ -550,7 +551,9 @@ class Room:
     # ---------- 模型 / effort ----------
     def own_models(self, ai):
         mo = (self.meta.get("models") or {}).get(ai) or {}
-        return (mo.get("model") or "").strip(), (mo.get("effort") or "").strip()
+        reasoning = mo.get('reasoning') or {}
+        effort = mo.get('effort') or (reasoning.get('value') if reasoning.get('kind') in ('effort','variant') else '') or ''
+        return (mo.get("model") or "").strip(), str(effort).strip()
 
     def effective_models(self, ai):
         """实际生效的 (模型, effort)：会议自己设了用自己的，没设用会议室默认 ROOM_DEFAULTS。"""
@@ -562,43 +565,57 @@ class Room:
 
     def model_label(self, ai):
         m, e = self.effective_models(ai)
+        controls = ((self.meta.get('models') or {}).get(ai) or {}).get('reasoning') or {}
+        if controls.get('kind') == 'budget':
+            return '%s · 思考预算 %s tokens' % (m or '默认', controls.get('value'))
+        if controls.get('kind') == 'toggle':
+            return '%s · 思考%s' % (m or '默认', '开启' if controls.get('value') else '关闭')
         return "%s · %s" % (m or "默认", e or "默认")
 
     def model_info(self, ai):
+        from . import model_catalog
         m, e = self.own_models(ai)
-        capabilities = agents.model_capabilities(ai)
+        capabilities = model_catalog.legacy(model_catalog.snapshot(ai, self.workdir()))
         effective_model = self.effective_models(ai)[0]
-        if capabilities["effort_supported"]:
+        if ai in ('claude','codex') and capabilities["effort_supported"]:
             capabilities["efforts_by_model"][effective_model] = agents.effort_options(ai, effective_model)
         label = self.model_label(ai) if capabilities["model_supported"] or capabilities["effort_supported"] else "由 Agent 自己管理"
         return {"model": m, "effort": e, "label": label, "default": " · ".join(agents.ROOM_DEFAULTS[ai]),
                 "default_model": agents.ROOM_DEFAULTS[ai][0],
                 "default_effort": agents.ROOM_DEFAULTS[ai][1],
-                "efforts": agents.effort_options(ai, effective_model) if capabilities["effort_supported"] else [],
+                "efforts": capabilities['efforts_by_model'].get(effective_model, []),
+                "reasoning": ((self.meta.get('models') or {}).get(ai) or {}).get('reasoning') or {},
+                'execution':(self.meta.get('model_execution') or {}).get(ai) or {},
                 **capabilities}
 
-    def set_models(self, ai, model, effort):
+    def set_models(self, ai, model, effort, reasoning=None):
         """改某个 AI 在这场会议的模型 / effort（空 = 用会议室默认）。返回 (ok, 错误, 是否换了模型)。"""
         if ai not in self.ais:
             return False, "未知 AI", False
         model, effort = (model or "").strip(), (effort or "").strip()
-        capabilities = agents.model_capabilities(ai)
+        from . import model_catalog
+        catalog = model_catalog.snapshot(ai, self.workdir())
+        capabilities = model_catalog.legacy(catalog)
         if model and not capabilities["model_supported"]:
             return False, "此 Agent 的接入方式尚不支持切换模型，请在 Agent 中设置", False
         if effort and not capabilities["effort_supported"]:
             return False, "此 Agent 的接入方式尚不支持设置思考强度", False
-        if model and not agents.MODEL_RE.match(model):
+        if model and not model_catalog.ID.fullmatch(model):
             return False, "模型名不合法", False
         cur_model = model or agents.ROOM_DEFAULTS[ai][0]
-        if effort and (not agents.EFFORT_RE.match(effort) or effort not in agents.effort_options(ai, cur_model)):
-            return False, "effort 不在可选范围内", False
+        if ai in ('claude','codex') and not model_catalog.entry(catalog, cur_model):
+            catalog['entries'].append(model_catalog.model(cur_model, controls=model_catalog.reasoning({'options':agents.effort_options(ai, cur_model)})))
+        error = model_catalog.validate(catalog, cur_model, effort, reasoning)
+        if error:
+            return False, error, False
         with self.lock:
             if self.busy_for():
                 return False, "AI 还在回复，等它们说完再改", False
             old_m, old_e = self.own_models(ai)
-            if (old_m, old_e) == (model, effort):
+            previous_reasoning = self.meta['models'].get(ai, {}).get('reasoning') or {}
+            if (old_m, old_e, previous_reasoning) == (model, effort, reasoning or {}):
                 return True, "", False
-            self.meta["models"][ai] = {"model": model, "effort": effort}
+            self.meta["models"][ai] = {"model": model, "effort": effort, "reasoning": reasoning or {}}
             self.save_meta()
             self.add_message("系统", "%s 换成了 %s" % (ai, self.model_label(ai)), quiet=True)
         return True, "", old_m != model
@@ -631,7 +648,7 @@ class Room:
             for k, empty in PER_AI_EMPTY.items():
                 self.meta.setdefault(k, {})
                 self.meta[k].setdefault(a, list() if isinstance(empty, list) else empty)
-            self.meta.setdefault("models", {}).setdefault(a, {"model": "", "effort": ""})
+            self.meta.setdefault("models", {}).setdefault(a, {"model": "", "effort": "", "reasoning": {}})
             self.meta.setdefault("tools", {}).setdefault(a, agents.default_tools(a))
             if a not in self.keys:
                 with keys_lock:

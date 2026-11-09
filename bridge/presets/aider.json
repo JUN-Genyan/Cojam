@@ -22,6 +22,18 @@
       "--message",
       "{prompt}",
       "--no-pretty"
+    ],
+    "model": [
+      "--model",
+      "{model}"
+    ],
+    "effort": [
+      "--reasoning-effort",
+      "{effort}"
+    ],
+    "thinking_budget": [
+      "--thinking-tokens",
+      "{thinking_budget}"
     ]
   },
   "prompt": "arg",
@@ -35,5 +47,10 @@
     "",
     ""
   ],
-  "caps": {}
+  "caps": {},
+  "adapter": "aider",
+  "discovery": {
+    "commands": [],
+    "packages": []
+  }
 }

@@ -7,7 +7,7 @@
     "gemini"
   ],
   "verified": false,
-  "note": "照 gemini-cli 的 headless 文档写的：-p 提问、--output-format json 回一个 {response, stats} 对象。文档里的 JSON 格式不带会话 id，所以这里当无会话用（每轮递整份会议记录）。没实测。",
+  "note": "模型与思考参数优先读取本机配置；未配置时使用官方候选。候选不代表账户授权，实际模型以执行端报告为准。",
   "args": {
     "base": [],
     "read": [],
@@ -20,6 +20,10 @@
       "{prompt}",
       "--output-format",
       "json"
+    ],
+    "model": [
+      "--model",
+      "{model}"
     ]
   },
   "prompt": "arg",
@@ -28,11 +32,52 @@
     "text": "response"
   },
   "context": "full",
-  "models": [],
+  "models": [
+    "auto",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-3-pro-preview",
+    "gemini-3-flash-preview"
+  ],
   "efforts": [],
   "default": [
     "",
     ""
   ],
-  "caps": {}
+  "caps": {},
+  "adapter": "gemini",
+  "discovery": {
+    "commands": [],
+    "packages": [
+      "@google/gemini-cli"
+    ]
+  },
+  "reasoning": {
+    "gemini-2.5-pro": {
+      "kind": "budget",
+      "min": 128,
+      "max": 32768
+    },
+    "gemini-2.5-flash": {
+      "kind": "budget",
+      "min": 0,
+      "max": 24576
+    },
+    "gemini-3-pro-preview": {
+      "kind": "effort",
+      "options": [
+        "low",
+        "high"
+      ]
+    },
+    "gemini-3-flash-preview": {
+      "kind": "effort",
+      "options": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ]
+    }
+  }
 }
