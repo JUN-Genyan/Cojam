@@ -338,7 +338,10 @@ class Members(unittest.TestCase):
         process=subprocess.Popen([sys.executable,'-m','bridge.member','--server',support.BASE,'--agent','fake','--workdir',str(wd),'--state-dir',str(state)],cwd=bundle,env=env,stdout=log,stderr=log)
         try:
             try:
-                wait_until(lambda:members.broker.status('member-a')['automatic'],timeout=12)
+                # macOS ARM hosted runners can need noticeably longer to
+                # create the isolated Python process on a cold filesystem.
+                # This remains a liveness test, not a 12-second benchmark.
+                wait_until(lambda:members.broker.status('member-a')['automatic'],timeout=30)
             except AssertionError as error:
                 log.flush()
                 raise AssertionError((root/'connector.log').read_text(encoding='utf-8',errors='replace')) from error
