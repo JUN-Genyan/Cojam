@@ -163,6 +163,14 @@ footer .row:focus-within{border-color:var(--btn);box-shadow:0 0 0 3px color-mix(
 .scan-connect p[role=alert]{margin:0;color:var(--danger);font-size:12px}
 .scan-connect .connection-identity{border-radius:9px;padding:11px 12px;display:grid;gap:2px;font-size:13px}
 .scan-connect .connection-identity small{font-size:10px;color:var(--mut)}
+/* 首次使用引导：首页大按钮直接开扫 */
+.workspace-empty .empty-acts{display:flex;gap:10px;justify-content:center;margin-top:8px;flex-wrap:wrap}
+.workspace-empty button{padding:10px 18px;border-radius:9px;font-size:13px}
+.workspace-empty button.pri{background:var(--btn);border-color:var(--btn);color:var(--btn-fg)}
+/* 接入第一屏：本机 AI 是主推入口 */
+.connection-choices-first .connection-choice.primary{border-color:var(--btn)!important;background:color-mix(in srgb,var(--btn) 5%,var(--bar))!important;grid-column:1/-1;min-height:0;padding:16px 20px!important}
+.connection-choices-first .connection-choice.primary b{font-size:15px}
+.connection-choices-first .connection-choice.primary small{color:var(--fg)}
 .connection-identity{background:var(--bar)}#connError{background:color-mix(in srgb,var(--danger) 6%,var(--bg));padding:10px 12px;border-radius:7px;font-size:12px;line-height:1.8}
 .contact-pick{font-size:13px}.perm-grid{font-size:11px;gap:12px}.member-row{padding:13px 0}.contact-manage small{font-size:11px}
 @media(min-width:850px){

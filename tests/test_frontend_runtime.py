@@ -664,6 +664,54 @@ class ScanOnboarding(unittest.TestCase):
         self.assertIn('!w.legacy', gate)
         self.assertIn('scanV2Enabled()', gate)
         self.assertIn('手动指定程序', scan)                                     # 失败出口：回到旧界面
+        # 入口扁平化：第一屏就有「本机 AI」，点了直接开扫描流程
+        self.assertIn('本机 AI（自动扫描）', js)
+        step1 = js[js.index('if (w.step === 1)'):js.index('function connectionNameFields')]
+        self.assertIn("typeof scanEnable === 'function') scanEnable()", step1)
+        self.assertIn('function scanEnable()', scan)
+        # 首次使用引导：空首页大按钮直接开扫；联系人就绪后重绘
+        self.assertIn('扫描这台电脑上的 AI', html)
+        self.assertIn('emptyScan', html)
+        self.assertIn('if(!RID&&document.getElementById(\'emptyScan\'))drawEmptyState()', html)
+        self.assertIn('全部接入', scan)
+        self.assertIn('function scanConnectAll(', scan)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute the scan page')
+    def test_first_run_hero_switches_with_contacts(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const html=fs.readFileSync('index.html','utf8');
+const fn=html.match(/function drawEmptyState\(\)\{[\s\S]*?\n\}/)[0];
+const feed={innerHTML:''};
+const nodes={};
+let opened=null,scanEnabled=false;
+const context=vm.createContext({feed,
+ CONTACTS:[],openNew:x=>{opened='new:'+x},
+ startConnectionWizard:(id,type)=>{opened='wizard:'+type},
+ scanEnable:()=>{scanEnabled=true},
+ document:{getElementById:id=>nodes[id]||(nodes[id]={id,onclick:null})}});
+vm.runInContext(fn,context);
+// 没有任何 AI 联系人 → 扫描引导
+context.drawEmptyState();
+assert.match(feed.innerHTML,/扫描这台电脑上的 AI/);assert.match(feed.innerHTML,/emptyScan/);
+nodes.emptyScan.onclick();
+assert.ok(scanEnabled);assert.equal(opened,'wizard:local');
+nodes.emptyOther.onclick();
+assert.equal(opened,'wizard:undefined');                       // 打开普通接入向导
+// 有 AI 联系人 → 原来的空状态
+context.CONTACTS=[{id:'me',kind:'user'},{id:'claude',kind:'agent'}];
+context.drawEmptyState();
+assert.match(feed.innerHTML,/开始一场新会话/);
+nodes.emptyNew.onclick();
+assert.equal(opened,'new:true');
+// 只剩用户自己（kind=user）也算没有 AI
+context.CONTACTS=[{id:'me',kind:'user'}];
+context.drawEmptyState();
+assert.match(feed.innerHTML,/扫描本机 AI/);
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute the scan page')
     def test_scan_page_groups_rows_and_connect_flow(self):
@@ -690,7 +738,7 @@ const context=vm.createContext({
  post:async(url,body)=>{posts.push([url,body]);if(url==='/api/agents/scan')return [true,scanData];return [true,{token:'tok-123'}]},
  connectionGet:async url=>[true,scanData],
  wizardFrame:(w,c)=>{node('scanBody').innerHTML='';w._frame=c;},
- wizardCurrent:()=>true,wizardError:()=>{},clearTimeout:()=>{},clearInterval:()=>{},clearInterval:()=>{},
+ wizardCurrent:()=>true,wizardError:m=>{context._err=m;},clearTimeout:()=>{},clearInterval:()=>{},clearInterval:()=>{},
  setInterval:()=>0,setTimeout:()=>0,
  startConnectionWizard:()=>{},openConnection:id=>{context._managed=id;},renderConnectionWizard:()=>{},
  connectionDefaultBase:()=> 'http://192.168.1.5:8766',connectionBaseWarning:()=>'',
@@ -739,6 +787,18 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
  node('scanRoom').value='';
  await context.submitScanConnect(w);
  assert.equal(JSON.stringify(posts.filter(p=>p[0]==='/api/agents/connect')[1]),JSON.stringify(['/api/agents/connect',{candidate:'cursor_desktop',installation:'',label:'Cursor Agent',room:''}]));
+ // 全部接入：所有 ready 行一次接上（默认名称、暂不入会话）
+ w.sub=null;w.connecting=null;
+ w.scan.candidates.push({id:'r2',label:'R Two',kind:'cli',status:'ready',installations:[],rooms:[]},
+                        {id:'r3',label:'R Three',kind:'cli',status:'ready',installations:[],rooms:[]});
+ w.scanDrawn='';context.drawScan(w);
+ assert.match(body(),/全部接入（2）/);
+ node('scanAll').onclick();
+ await sleep(20);
+ assert.equal(connects().length,4);
+ assert.equal(connects()[2][1].candidate,'r2');assert.equal(connects()[2][1].label,'R Two');assert.equal(connects()[2][1].room,'');
+ assert.equal(connects()[3][1].candidate,'r3');
+ assert.match(context._err,/已接入 2 个程序/);
  w.sub='help';w.help='devin';w.scanDrawn='';context.drawScan(w);
  assert.match(body(),/作为外部成员/);assert.match(body(),/devin_cli/);
  // 外部成员简化流程：生成配置并复用旧凭据展示

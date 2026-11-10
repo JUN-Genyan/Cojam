@@ -1387,7 +1387,19 @@ async function pickRoom(){
   const rooms=(j&&j.rooms)||[];
   const id=(j&&j.last&&rooms.some(m=>m.id===j.last)&&j.last)||((rooms.find(m=>!m.archived)||rooms[0]||{}).id);
   if(id)switchRoom(id,true);
-  else {drawState();feed.innerHTML='<div class="workspace-empty"><h2>开始一场新会话</h2><p>添加联系人，创建项目，再邀请成员一起协作。</p><button id="emptyNew">＋ 创建项目 / 会话</button></div>';document.getElementById('emptyNew').onclick=()=>openNew(true)}
+  else drawEmptyState();
+}
+function drawEmptyState(){
+  const hasAI=(typeof CONTACTS!=='undefined')&&CONTACTS.some(c=>c.kind!=='user');
+  feed.innerHTML=hasAI
+    ?'<div class="workspace-empty"><h2>开始一场新会话</h2><p>添加联系人，创建项目，再邀请成员一起协作。</p><button id="emptyNew">＋ 创建项目 / 会话</button></div>'
+    :'<div class="workspace-empty"><h2>扫描这台电脑上的 AI</h2><p>自动查找已安装的 Claude、Codex 等，找到就能一键接入会议室。</p><div class="empty-acts"><button id="emptyScan" class="pri">扫描本机 AI</button><button id="emptyOther">其他接入方式</button></div></div>';
+  const fresh=document.getElementById('emptyNew');
+  if(fresh)fresh.onclick=()=>openNew(true);
+  const scan=document.getElementById('emptyScan');
+  if(scan)scan.onclick=()=>{if(typeof scanEnable==='function')scanEnable();startConnectionWizard(null,'local')};
+  const other=document.getElementById('emptyOther');
+  if(other)other.onclick=()=>startConnectionWizard();
 }
 document.getElementById('rNew').onclick=()=>openNew(false);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&RID&&since)markSeen(RID,since)});
@@ -1450,7 +1462,7 @@ async function loadTools(a,x){
 
 setInterval(()=>{if(RID)poll()},1500);
 setInterval(pollRooms,3000);
-refreshContacts().catch(e=>console.error(e));
+refreshContacts().then(()=>{if(!RID&&document.getElementById('emptyScan'))drawEmptyState()}).catch(e=>console.error(e));
 setInterval(()=>refreshContacts(undefined,true).catch(()=>{}),10000);
 if(RID)switchRoom(RID,true);else pickRoom();
 </script>

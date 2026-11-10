@@ -11,6 +11,12 @@ function scanV2Enabled() {
   try { return sessionStorage.getItem('cojam_scan2') === '1'; } catch (e) { return false; }
 }
 
+function scanEnable() {
+  /* 入口扁平化和首次使用引导点进来时显式选择扫描流程：打开开关。 */
+  try { sessionStorage.setItem('cojam_scan2', '1'); } catch (e) {}
+  return true;
+}
+
 function scanCandidate(w, id) {
   return ((w.scan && w.scan.candidates) || []).find(c => c.id === id) || null;
 }
@@ -170,9 +176,14 @@ function drawScan(w) {
     html += '<div class="connection-evidence pending"><b>没有检测到可调用的程序</b><p>可以先手动指定一个程序，或装好之后点「重新扫描」。</p></div>';
   const log = (scan && scan.log) || [];
   html += '<div class="scan-log"><small>扫描日志</small><ul>' + log.map(l => '<li>' + esc((l.time || '').slice(11)) + ' ' + esc(l.text) + '</li>').join('') + '</ul></div>';
-  html += '<div class="btns scan-footer"><button id="scanManual">手动指定程序</button><button id="scanRescan"' + (state === 'scanning' ? ' disabled' : '') + '>' + (state === 'scanning' ? '扫描中…' : '重新扫描') + '</button></div>';
+  html += '<div class="btns scan-footer">';
+  if ((state === 'done' || state === 'partial') && groups.ready.length)
+    html += '<button id="scanAll" class="pri">全部接入（' + groups.ready.length + '）</button>';
+  html += '<button id="scanManual">手动指定程序</button><button id="scanRescan"' + (state === 'scanning' ? ' disabled' : '') + '>' + (state === 'scanning' ? '扫描中…' : '重新扫描') + '</button></div>';
   body.innerHTML = html;
   mbox.scrollTop = top;
+  const all = document.getElementById('scanAll');
+  if (all) all.onclick = () => scanConnectAll(w);
   document.getElementById('scanManual').onclick = () => scanLegacy(w);
   document.getElementById('scanRescan').onclick = () => { if ((w.scan || {}).state !== 'scanning') scanStart(w, true); };
   mbox.querySelectorAll('[data-scan-connect]').forEach(b => b.onclick = () => { w.connecting = b.dataset.scanConnect; w.scanDrawn = ''; drawScan(w); });
@@ -208,8 +219,28 @@ function drawScanConnect(w) {
   document.getElementById('scanConnectGo').onclick = () => submitScanConnect(w);
 }
 
-async function submitScanConnect(w) {
-  const row = scanCandidate(w, w.connecting);
+async function scanConnectAll(w) {
+  /* 首次使用引导的「全部接入」：把扫描到的可直接连接的程序全接上（默认名称、暂不入会话）。 */
+  const rows = scanRowGroups((w.scan && w.scan.candidates) || []).ready;
+  const all = document.getElementById('scanAll');
+  if (!rows.length || !all || all.disabled) return;
+  all.disabled = true; all.textContent = '接入中…';
+  let ok = 0;
+  const failed = [];
+  for (const row of rows) {
+    const [done, data] = await post('/api/agents/connect', {candidate: row.id, label: row.label, room: ''});
+    if (!wizardCurrent(w)) return;
+    if (done) { ok++; row.note = row.note || '已接入，可在会话里添加'; }
+    else failed.push(row.label + '：' + ((data || {}).error || '失败'));
+  }
+  w.scanDrawn = '';
+  drawScan(w);
+  refreshContacts();
+  if (typeof pollRooms === 'function') pollRooms();
+  wizardError(failed.length ? '已接入 ' + ok + ' 个；失败的没动：' + failed.join('；') : '已接入 ' + ok + ' 个程序。建会话时勾上它们就能开工。');
+}
+
+async function submitScanConnect(w) {  const row = scanCandidate(w, w.connecting);
   if (!row) { w.connecting = null; w.scanDrawn = ''; return drawScan(w); }
   const select = document.getElementById('scanInstall');
   const name = document.getElementById('scanName');

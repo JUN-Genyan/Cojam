@@ -232,13 +232,14 @@ function renderConnectionWizard() {
   clearTimeout(w.catalogTimer);
   if (w.step === 1) {
     const choices = w.chooseAI ? ['local','external','http'].map(id => [id, CONNECTION_TYPES[id]]) : [
+      ['local', ['本机 AI（自动扫描）', '扫描这台电脑，找到能直接协作的 Claude、Codex 等，一键接入。', uiIcon('terminal')]],
       ['user', ['邀请其他人', '生成邀请链接，让朋友加入指定会话。', uiIcon('user')]],
       ['ai', ['连接 AI', '连接本机程序、其他设备上的 Harness 或 HTTP 服务。', uiIcon('terminal')]],
       ['mydevice', CONNECTION_TYPES.mydevice]
     ];
-    wizardFrame(w, '<h3>' + (w.chooseAI ? '选择 AI 的连接方式' : '谁来一起合拍？') + '</h3><p class="hint">' + (w.chooseAI ? '选择 AI 所在的位置或服务类型。' : '选择要邀请的人、AI 或自己的设备。') + '</p><div class="connection-choices">' + choices.map(([id, t]) => '<button class="connection-choice" data-connection-type="' + id + '"><span class="connection-symbol">' + t[2] + '</span><span><b>' + t[0] + '</b><small>' + t[1] + '</small></span><span>›</span></button>').join('') + '</div>' + (w.chooseAI ? '<div class="btns"><button id="connChoiceBack">返回</button></div>' : ''));
+    wizardFrame(w, '<h3>' + (w.chooseAI ? '选择 AI 的连接方式' : '谁来一起合拍？') + '</h3><p class="hint">' + (w.chooseAI ? '选择 AI 所在的位置或服务类型。' : '选「本机 AI」自动扫描这台电脑；或者邀请人、接自己的设备。') + '</p><div class="connection-choices' + (w.chooseAI ? '' : ' connection-choices-first') + '">' + choices.map(([id, t]) => '<button class="connection-choice' + (id === 'local' && !w.chooseAI ? ' primary' : '') + '" data-connection-type="' + id + '"><span class="connection-symbol">' + t[2] + '</span><span><b>' + t[0] + '</b><small>' + t[1] + '</small></span><span>›</span></button>').join('') + '</div>' + (w.chooseAI ? '<div class="btns"><button id="connChoiceBack">返回</button></div>' : ''));
     if (w.chooseAI) document.getElementById('connChoiceBack').onclick = () => { w.chooseAI = false; renderConnectionWizard(); };
-    mbox.querySelectorAll('[data-connection-type]').forEach(b => b.onclick = () => { if (b.dataset.connectionType === 'ai') { w.chooseAI = true; renderConnectionWizard(); return; } w.type = b.dataset.connectionType; w.base = connectionDefaultBase(w.type, w.info, location.origin); w.step = 2; renderConnectionWizard(); });
+    mbox.querySelectorAll('[data-connection-type]').forEach(b => b.onclick = () => { if (b.dataset.connectionType === 'ai') { w.chooseAI = true; renderConnectionWizard(); return; } if (b.dataset.connectionType === 'local' && typeof scanEnable === 'function') scanEnable(); w.type = b.dataset.connectionType; w.base = connectionDefaultBase(w.type, w.info, location.origin); w.step = 2; renderConnectionWizard(); });
   } else if (w.step === 2) renderConnectionSetup(w);
   else if (w.step === 3) renderConnectionAssignment(w);
   else renderConnectionComplete(w);
