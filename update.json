@@ -1,8 +1,8 @@
 {
   "app": "Cojam",
-  "version": "2.6.11",
-  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.11.exe",
-  "sha256": "82b6bb81c50101e781ee98f85b60fffc30b6cba3d3066513b9df8fa7e07a953c",
-  "size": 27738233,
-  "notes": "优化 Agent 接入与模型设置：模型和思考强度联动、保存反馈、扫描保留选择，并修复 HTTP Harness 参数传递。"
+  "version": "2.6.12",
+  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.6.12.exe",
+  "sha256": "2ad055b0b7e9aff2fa44b1392bb4ad52eff2a6462b19248c3fbbed9dd09c2149",
+  "size": 31651767,
+  "notes": "全新扫描式接入：自动找到这台电脑上的 Claude、Codex 等，一键接入；修复关闭窗口后的残留后台进程；桌面窗口支持下载成员连接端与接入配置；修复 npm 新版 shim 导致 Codex 无法识别；聊天消息可选中、引用、复制；界面文件损坏时自动恢复。"
 }
