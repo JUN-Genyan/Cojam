@@ -173,11 +173,18 @@ def shim_target(path):
             text = handle.read(65536)
     except OSError:
         return False
-    match = re.search(r'(?:%dp0%[\\/]|\$basedir[\\/])([^"\r\n]+?\.(?:[cm]?js|exe))', text, re.I)
-    if not match:
+    hits = re.finditer(r'(?:%dp0%[\\/]|\$basedir[\\/])([^"\r\n]+?\.(?:[cm]?js|exe))', text, re.I)
+    targets = [os.path.join(os.path.dirname(path), m[1].replace('\\', os.sep).replace('/', os.sep)) for m in hits]
+    if not targets:
         return None
-    target = os.path.join(os.path.dirname(path), match[1].replace('\\', os.sep).replace('/', os.sep))
-    return os.path.realpath(target) if os.path.isfile(target) else False
+    # npm 9+ 的模板先写 IF EXIST "%dp0%\node.exe" 探测 node 在不在 shim 目录里，
+    # 真正的程序在最后一行（codex.CMD 实测）。逐个找，挑第一个真实存在的；
+    # 一处都不存在才是真坏掉的 shim。
+    for target in targets:
+        real = os.path.realpath(target)
+        if os.path.isfile(real):
+            return real
+    return False
 
 
 def installations(spec):
