@@ -638,5 +638,13 @@ vm.runInContext(js.match(/async function checkConnectionBackend\(signal\) \{[\s\
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+class MessageActions(unittest.TestCase):
+    def test_desktop_keeps_reply_and_copy_controls_visible(self):
+        html = (Path(__file__).resolve().parents[1] / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('class="cp"', html)
+        self.assertIn('.who .rp,.who .cp', html)
+        self.assertNotIn('@media(hover:hover) and (pointer:fine){.who .rp{display:none}}', html)
+
+
 if __name__ == '__main__':
     unittest.main()

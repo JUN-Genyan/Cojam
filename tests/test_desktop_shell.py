@@ -28,6 +28,7 @@ class State:
     rooms = []
     delay = 0
     rooms_error = False
+    assets = True
     calls = []
 
 
@@ -52,6 +53,10 @@ class FakeHandler(BaseHTTPRequestHandler):
         if self.path == "/":
             html = '<meta name="rt-token" content="%s">' % State.token
             return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+        if self.path.startswith("/static/"):
+            if State.assets:
+                return self._send(200, b"asset", "text/plain")
+            return self._send(404, b"not found", "text/plain")
         if self.path == "/api/rooms":
             if self.headers.get("X-RT-Token") != State.token:
                 return self._send(403, {"error": "forbidden"})
@@ -80,6 +85,7 @@ class ShellTest(unittest.TestCase):
         State.rooms = []
         State.delay = 0
         State.rooms_error = False
+        State.assets = True
         State.calls = []
         self.server = QuietServer(("127.0.0.1", 0), FakeHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -114,6 +120,11 @@ class ShellTest(unittest.TestCase):
         State.token = ""
         with self.assertRaises(RuntimeError):
             backend.fetch_token(self.base)
+
+    def test_ui_ready_checks_static_bundle(self):
+        self.assertTrue(backend.ui_ready(self.base))
+        State.assets = False
+        self.assertFalse(backend.ui_ready(self.base))
 
     def test_post_session_body_and_header(self):
         backend.post_session(self.base, "test-token", "a" * 32, "open", "a" * 32)
@@ -241,6 +252,11 @@ class FakeWebview:
 
 
 class WindowAndFlow(unittest.TestCase):
+    def setUp(self):
+        self.ui_ready = patch.object(shell_main.backend, "ui_ready", return_value=True)
+        self.ui_ready.start()
+        self.addCleanup(self.ui_ready.stop)
+
     def test_folder_picker_returns_selected_path_and_cancel(self):
         webview = Mock()
         webview.FileDialog.FOLDER = 20
@@ -264,6 +280,7 @@ class WindowAndFlow(unittest.TestCase):
         self.assertEqual(fake.created["url"], "http://127.0.0.1:8765/?owner_tab=" + "a" * 32)
         self.assertEqual((fake.created["width"], fake.created["height"]), (1280, 860))
         self.assertEqual(fake.created["min_size"], (960, 640))
+        self.assertTrue(fake.created["text_select"])
         self.assertEqual(fake.window.events.closing.items, [handler])
         self.assertEqual(fake.window.events.shown.items, [shell_main.tint_title_bar])
         self.assertTrue(fake.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"])
@@ -334,6 +351,37 @@ class WindowAndFlow(unittest.TestCase):
             self.assertEqual(shell_main.main(), 0)
         spawn.assert_not_called()
         error.assert_not_called()
+
+    def test_existing_backend_without_ui_assets_is_replaced(self):
+        proc = Mock()
+        with patch.object(shell_main.backend, "find_core", return_value=(["core.exe"], "C:/core")), \
+                patch.object(shell_main.backend, "probe", return_value=("cojam", {"app": "AI Bridge"})), \
+                patch.object(shell_main.backend, "ui_ready", side_effect=[False, True]), \
+                patch.object(shell_main.backend, "spawn_core", return_value=proc) as spawn, \
+                patch.object(shell_main.backend, "wait_ready", return_value={"app": "AI Bridge"}), \
+                patch.object(shell_main.backend, "fetch_token", return_value="token"), \
+                patch.object(shell_main.backend, "TabHeartbeat", return_value=Mock()), \
+                patch.object(shell_main, "open_window"), \
+                patch.object(shell_main, "show_error") as error:
+            self.assertEqual(shell_main.main(), 0)
+        spawn.assert_called_once_with(["core.exe"], "C:/core")
+        error.assert_not_called()
+
+    def test_backend_that_stays_without_ui_assets_fails_clearly(self):
+        proc = Mock()
+        with patch.object(shell_main.backend, "find_core", return_value=(["core.exe"], "C:/core")), \
+                patch.object(shell_main.backend, "probe", return_value=("cojam", {"app": "AI Bridge"})), \
+                patch.object(shell_main.backend, "ui_ready", return_value=False), \
+                patch.object(shell_main.backend, "spawn_core", return_value=proc), \
+                patch.object(shell_main.backend, "wait_ready", return_value={"app": "AI Bridge"}), \
+                patch.object(shell_main.backend, "stop_process") as stop, \
+                patch.object(shell_main.backend, "log_path", return_value="C:/core/data/cojam.log"), \
+                patch.object(shell_main, "open_window") as window, \
+                patch.object(shell_main, "show_error") as error:
+            self.assertEqual(shell_main.main(), 2)
+        stop.assert_called_once_with(proc)
+        window.assert_not_called()
+        self.assertIn("界面文件不完整", error.call_args.args[0])
 
     def test_backend_start_failure_stops_spawned_process(self):
         proc = Mock()

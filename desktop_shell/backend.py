@@ -107,6 +107,18 @@ def wait_ready(base, proc=None, timeout=30, interval=.2):
     return None
 
 
+def ui_ready(base, timeout=3):
+    """The backend can answer JSON but still be missing its CSS/JS bundle."""
+    for name in ("studio.css", "workspace.js"):
+        try:
+            with _opener().open(base.rstrip("/") + "/static/" + name, timeout=timeout) as response:
+                if response.status != 200:
+                    return False
+        except Exception:
+            return False
+    return True
+
+
 def fetch_token(base, timeout=3):
     with _opener().open(base.rstrip("/") + "/", timeout=timeout) as response:
         html = response.read().decode("utf-8")

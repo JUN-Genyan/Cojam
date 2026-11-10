@@ -22,6 +22,7 @@ class OldServer(BaseHTTPRequestHandler):
     busy = False
     old = False
     other = False
+    assets = True
     stops = 0
 
     def log_message(self, *args):
@@ -34,6 +35,12 @@ class OldServer(BaseHTTPRequestHandler):
             return
         if self.old:
             self.send_response(404); self.end_headers(); self.wfile.write(b'not found')
+            return
+        if self.path.startswith('/static/'):
+            if self.assets:
+                self.send_response(200); self.end_headers(); self.wfile.write(b'asset')
+            else:
+                self.send_response(404); self.end_headers(); self.wfile.write(b'not found')
             return
         if self.path == '/api/server/info':
             value = {'app':'AI Bridge', 'version':self.version, 'api_revision':API_REVISION}
@@ -58,6 +65,7 @@ class Runtime(unittest.TestCase):
     def setUp(self):
         OldServer.version = VERSION
         OldServer.busy = OldServer.old = OldServer.other = False
+        OldServer.assets = True
         OldServer.stops = 0
         self.server = ThreadingHTTPServer(('127.0.0.1',0), OldServer)
         self.thread = threading.Thread(target=self.serve, daemon=True)
@@ -101,6 +109,19 @@ class Runtime(unittest.TestCase):
         OldServer.version = 'old'
         self.assertEqual(server_runtime.reuse_or_stop(self.url)[0], 'stopped')
         self.assertEqual(OldServer.stops, 1)
+
+    def test_idle_backend_with_missing_ui_assets_restarts(self):
+        OldServer.assets = False
+        self.assertEqual(server_runtime.reuse_or_stop(self.url)[0], 'stopped')
+        self.assertEqual(OldServer.stops, 1)
+
+    def test_busy_backend_with_missing_ui_assets_is_not_stopped(self):
+        OldServer.assets = False
+        OldServer.busy = True
+        action, message = server_runtime.reuse_or_stop(self.url)
+        self.assertEqual(action, 'error')
+        self.assertIn('任务', message)
+        self.assertEqual(OldServer.stops, 0)
 
     def test_running_backend_keeps_matching_ui_assets(self):
         with tempfile.TemporaryDirectory() as temp:

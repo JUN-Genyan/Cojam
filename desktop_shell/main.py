@@ -136,7 +136,8 @@ def open_window(url, on_closing, module=None):
     if isinstance(settings, dict) and "OPEN_EXTERNAL_LINKS_IN_BROWSER" in settings:
         settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
     api = DesktopApi(webview)
-    window = webview.create_window(TITLE, url, width=1280, height=860, min_size=(960, 640), js_api=api)
+    window = webview.create_window(TITLE, url, width=1280, height=860, min_size=(960, 640),
+                                   text_select=True, js_api=api)
     api._window = window
     window.events.closing += on_closing
     window.events.shown += tint_title_bar
@@ -159,6 +160,10 @@ def main():
     if state in ("foreign", "timeout"):
         show_error("端口 %s 被其他程序占用，合拍无法启动。" % os.environ.get("ROUNDTABLE_PORT", "8765"))
         return 2
+    if state == "cojam" and not backend.ui_ready(base):
+        # A half-extracted backend answers /api/* but serves no CSS/JS. Ask the
+        # core to replace it instead of opening an unstyled, scriptless page.
+        state = "free"
     proc = None
     if state != "cojam":
         command, cwd = core
@@ -168,9 +173,10 @@ def main():
             show_error("合拍后台没有启动成功。\n%s" % error)
             return 2
         info = backend.wait_ready(base, proc)
-        if info is None:
+        if info is None or not backend.ui_ready(base):
             backend.stop_process(proc)
-            show_error("合拍后台没有启动成功。日志：%s" % backend.log_path(cwd))
+            show_error("合拍后台的界面文件不完整，无法打开。请完全退出合拍 Cojam 后重新打开；"
+                       "如果仍然失败，请重新安装应用。日志：%s" % backend.log_path(cwd))
             return 2
     try:
         token = backend.fetch_token(base)

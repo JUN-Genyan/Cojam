@@ -280,9 +280,11 @@ body.work header{box-shadow:inset 0 -2px 0 var(--work)}
 .atts a.file{font-size:13px;padding:6px 10px;border:1px solid var(--line);background:var(--bar);border-radius:9px;color:inherit;text-decoration:none;word-break:break-all}
 .atts a.file:hover{background:var(--soft)}
 
-/* 引用 */
-.who .rp{border:0;background:transparent;color:var(--faint);font-size:12px;padding:0 4px;margin-left:auto;cursor:pointer}
-.who .rp:hover{color:var(--btn)}
+/* 引用 / 复制：桌面端不依赖右键菜单，按钮始终可见 */
+.who .acts{margin-left:auto;display:flex;align-items:baseline;gap:2px;opacity:.72}
+.msg:hover .who .acts,.msg:focus-within .who .acts{opacity:1}
+.who .rp,.who .cp{border:0;background:transparent;color:var(--faint);font-size:12px;padding:0 4px;cursor:pointer;white-space:nowrap}
+.who .rp:hover,.who .cp:hover{color:var(--btn)}
 .qt{border-left:2px solid var(--faint);padding:0 10px;margin:4px 0 6px;font-size:12.5px;color:var(--mut);cursor:pointer;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}
 .qt:hover{color:var(--fg)}
 #quote{display:none;align-items:flex-start;gap:6px;border-left:2px solid var(--btn);background:var(--soft);border-radius:8px;padding:6px 6px 6px 10px;margin-bottom:8px;font-size:13px;color:var(--mut)}
@@ -293,7 +295,6 @@ body.work header{box-shadow:inset 0 -2px 0 var(--work)}
 #cmenu.on{display:block;animation:pop .12s ease-out}
 #cmenu button{display:block;width:100%;text-align:left;border:0;background:transparent;color:inherit;padding:7px 12px;border-radius:7px;font-size:14px}
 #cmenu button:hover{background:var(--soft)}
-@media(hover:hover) and (pointer:fine){.who .rp{display:none}}
 
 /* 跳到我的发言：聊天区右下角两个圆按钮 */
 #jump{position:fixed;z-index:15;display:none;flex-direction:column;gap:6px}
@@ -406,7 +407,7 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
   #clip,#send{height:40px}
   .undo{padding:6px 12px}
   #stops button{padding:6px 12px;font-size:13.5px}
-  .who .rp{font-size:13px;padding:2px 6px}
+  .who .rp,.who .cp{font-size:13px;padding:2px 6px}
   #jump button{width:32px;height:32px;opacity:.85}
   #jump button.dim{opacity:.35}
 }
@@ -667,7 +668,7 @@ function add(m){
   d.className='msg '+cls+(m.to_user?' touser':'')+(m.step!=null?' step':'');
   if(cls==='ai'){d.style.setProperty('--c',agentColor(m.speaker));d.dataset.l=agentLetter(m.speaker)}
   const tag=m.to_user?'<span class="tag">→ 用户</span>':'';
-  const who=cls==='sys'?'':'<div class="who"><span class="nm">'+esc((agentMeta(m.speaker)||{}).label||m.speaker)+'</span><span class="tm">'+esc(m.time)+'</span>'+tag+'<button type="button" class="rp" title="引用回复">↩ 引用</button></div>';
+  const who=cls==='sys'?'':'<div class="who"><span class="nm">'+esc((agentMeta(m.speaker)||{}).label||m.speaker)+'</span><span class="tm">'+esc(m.time)+'</span>'+tag+'<span class="acts"><button type="button" class="rp" title="引用回复">↩ 引用</button><button type="button" class="cp" title="复制这条消息">复制</button></span></div>';
   const q=m.reply_to?'<div class="qt" data-to="'+m.reply_to.id+'">'+esc(m.reply_to.speaker)+'：'+(m.reply_to.part?'“'+esc(m.reply_to.text)+'”':esc(m.reply_to.text))+'</div>':'';
   d.dataset.id=m.id;msgById[m.id]=m;
   const md=cls==='ai';
@@ -675,6 +676,7 @@ function add(m){
   feed.appendChild(d);
   const ub=d.querySelector('.undo');if(ub)ub.onclick=()=>undoStep(m.step);
   const rb=d.querySelector('.rp');if(rb)rb.onclick=()=>{const sel=lastSel&&lastSel.id===m.id&&Date.now()-lastSel.t<15000?lastSel.text:'';setQuote(m,sel)};
+  const cb=d.querySelector('.cp');if(cb)cb.onclick=async()=>{const text=(m.text||'').trim();if(!text){cb.textContent='无文字';}else{await copyText(text);cb.textContent='已复制';}setTimeout(()=>{cb.textContent='复制'},1200)};
   const qb=d.querySelector('.qt');if(qb)qb.onclick=()=>{const o=feed.querySelector('.msg[data-id="'+qb.dataset.to+'"]');if(o){o.scrollIntoView({block:'center',behavior:'smooth'});o.classList.add('flash');setTimeout(()=>o.classList.remove('flash'),1200)}};
 }
 // 状态行：谁在想、想了多久，下面是它这一轮最近说的一句中途的话（不进会议记录，点一下展开）

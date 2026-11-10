@@ -36,7 +36,17 @@ def reuse_or_stop(url):
         same_path = lambda a, b: os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
         if not same_path(runtime.get("install", ""), installation()) or not same_path(runtime.get("data", ""), LOG_DIR):
             return "error", "端口上已有另一份合拍 Cojam。请先退出原来的程序，再打开这一份，以免混用会话数据。"
-        if info.get("version") == VERSION and info.get("api_revision") == API_REVISION:
+        # A half-extracted PyInstaller bundle can answer / and the JSON APIs while
+        # every /static/* request is a 404. Reusing it leaves the user staring at an
+        # unstyled, scriptless page. Treat missing UI assets as an unhealthy backend.
+        assets_ready = True
+        for asset in ("studio.css", "workspace.js"):
+            try:
+                request("/static/" + asset)
+            except Exception:
+                assets_ready = False
+                break
+        if assets_ready and info.get("version") == VERSION and info.get("api_revision") == API_REVISION:
             return "reuse", ""
         request("/api/server/stop", token, {})
         for _ in range(30):
