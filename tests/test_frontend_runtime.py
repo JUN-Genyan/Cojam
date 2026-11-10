@@ -646,5 +646,156 @@ class MessageActions(unittest.TestCase):
         self.assertNotIn('@media(hover:hover) and (pointer:fine){.who .rp{display:none}}', html)
 
 
+class ScanOnboarding(unittest.TestCase):
+    """扫描式接入（?scan=2）：静态接线 + 在 Node 里跑一遍分组、连接确认和失败重试。"""
+
+    def test_scan_module_is_wired_and_keeps_legacy_fallback(self):
+        root = Path(__file__).resolve().parents[1]
+        html = (root / 'index.html').read_text(encoding='utf-8')
+        js = (root / 'static' / 'connections.js').read_text(encoding='utf-8')
+        scan = (root / 'static' / 'scan.js').read_text(encoding='utf-8')
+        self.assertLess(html.index('connections.js'), html.index('scan.js'))   # scan.js 在旧模块之后加载
+        self.assertIn('/api/agents/scan', scan)
+        self.assertIn('/api/agents/connect', scan)
+        self.assertIn("sessionStorage.setItem('cojam_scan2'", scan)            # 开关粘住，刷新不丢
+        # 只有「新连接」走扫描页；管理已有联系人（saved）仍用旧界面
+        gate = js[js.index('function renderConnectionSetup'):js.index("let content = '<h3>'")]
+        self.assertIn('!w.saved', gate)
+        self.assertIn('!w.legacy', gate)
+        self.assertIn('scanV2Enabled()', gate)
+        self.assertIn('手动指定程序', scan)                                     # 失败出口：回到旧界面
+
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute the scan page')
+    def test_scan_page_groups_rows_and_connect_flow(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const elements={};
+function node(id){return elements[id]||(elements[id]={id,value:'',innerHTML:'',textContent:'',disabled:false,
+  onclick:null,hidden:false,dataset:{},classList:{toggle(){}},oninput:null,onchange:null});}
+const posts=[];
+let scanData={state:'done',progress:1,counts:{ready:1,attention:1,desktop:2,connected:1,missing:1},errors:[],log:[{time:'2026-11-10T10:00:00',text:'扫描完成'}],
+ candidates:[
+  {id:'opencode',label:'OpenCode',kind:'cli',status:'ready',version:'2.2.5',installations:[{id:'a1',path:'C:\\o\\opencode.cmd',selected:true},{id:'a2',path:'C:\\t\\opencode.exe'}],rooms:[],actions:['connect'],note:'',preset:false},
+  {id:'qodercli',label:'Qoder CLI',kind:'cli',status:'attention',version:null,installations:[{id:'b1',path:'C:\\q\\qodercli.exe',selected:true}],rooms:[],actions:['connect','diagnose'],note:'版本读取失败：超时',preset:false},
+  {id:'claude',label:'Claude',kind:'cli',status:'connected',version:'2.1.4',installations:[{id:'c1',path:'C:\\c\\claude.cmd',selected:true}],rooms:[{id:'r1',title:'登录页改版'}],actions:['open'],note:'',preset:false},
+  {id:'cursor_desktop',label:'Cursor 桌面版',kind:'desktop',status:'desktop_cli',installations:[{id:'d1',path:'C:\\Cursor.exe'}],linked_cli:'cursor',cli:{id:'cursor',label:'Cursor Agent',kind:'cli',status:'ready',version:'1.0',installations:[{id:'e1',path:'C:\\cursor-agent.cmd',selected:true}],rooms:[]},rooms:[],actions:['connect_cli'],note:'',preset:false},
+  {id:'devin',label:'Devin',kind:'desktop',status:'desktop_only',installations:[{id:'f1',path:'C:\\Devin.exe'}],linked_cli:'devin_cli',cli:null,rooms:[],actions:['how'],note:'',preset:false},
+  {id:'gonecli',label:'Gone',kind:'cli',status:'missing',installations:[],rooms:[],actions:['rescan','specify'],note:'程序没找到',preset:false}]};
+const context=vm.createContext({
+ location:{search:'',origin:'http://127.0.0.1:8765'},
+ sessionStorage:{store:{},getItem(k){return this.store[k]||null},setItem(k,v){this.store[k]=v}},
+ URL,URLSearchParams,
+ esc:s=>String(s),
+ post:async(url,body)=>{posts.push([url,body]);if(url==='/api/agents/scan')return [true,scanData];return [true,{token:'tok-123'}]},
+ connectionGet:async url=>[true,scanData],
+ wizardFrame:(w,c)=>{node('scanBody').innerHTML='';w._frame=c;},
+ wizardCurrent:()=>true,wizardError:()=>{},clearTimeout:()=>{},clearInterval:()=>{},clearInterval:()=>{},
+ setInterval:()=>0,setTimeout:()=>0,
+ startConnectionWizard:()=>{},openConnection:id=>{context._managed=id;},renderConnectionWizard:()=>{},
+ connectionDefaultBase:()=> 'http://192.168.1.5:8766',connectionBaseWarning:()=>'',
+ renderConnectionCredentials:w=>{node('connCredentials').innerHTML='creds:'+w.token;},
+ refreshContacts:async()=>{context._refreshed=(context._refreshed||0)+1;},pollRooms:async()=>{},
+ ROOMS:[{id:'r1',title:'登录页改版',archived:false}],CONTACTS:[{id:'opencode',label:'我的 OpenCode'}],
+ agCat:{hosts:[],members:{},connections:{}},
+ mbox:{scrollTop:0,querySelectorAll:()=>[]},
+ document:{getElementById:node}});
+vm.runInContext(fs.readFileSync('static/scan.js','utf8'),context);
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+(async()=>{
+ // 默认关闭；?scan=2 打开并粘住
+ assert.equal(context.scanV2Enabled(),false);
+ context.location.search='?scan=2';
+ assert.equal(context.scanV2Enabled(),true);
+ context.location.search='';
+ assert.equal(context.scanV2Enabled(),true);            // 刷新后仍生效
+ // 渲染扫描页：POST 开始扫描，画分组
+ const w={seq:1,step:2,type:'local',saved:false,scan:null};
+ context.w=w;
+ await context.renderScanSetup(w); await sleep(20);
+ const body=()=>node('scanBody').innerHTML;
+ assert.match(body(),/可以直接连接/);assert.match(body(),/需要确认/);
+ assert.match(body(),/已加入会话/);assert.match(body(),/桌面应用（不能直接接收任务）/);
+ assert.match(body(),/之前接入过/);
+ assert.match(body(),/仍然连接/);assert.match(body(),/连接 CLI/);assert.match(body(),/查看接入方式/);
+ assert.match(body(),/已加入：登录页改版/);assert.match(body(),/2 个安装/);
+ assert.match(body(),/扫描日志/);assert.match(body(),/手动指定程序/);
+ // 确认层：默认「暂不加入」，安装可选
+ w.connecting='opencode';w.scanDrawn='';context.drawScan(w);
+ assert.match(body(),/连接 OpenCode/);assert.match(body(),/暂不加入，稍后从会话里添加/);
+ assert.match(body(),/我的 OpenCode/);                                   // 名称预填已有联系人
+ node('scanName').value='我的 OpenCode';
+ node('scanRoom').value='r1';
+ await context.submitScanConnect(w);
+ const connects=()=>posts.filter(p=>p[0]==='/api/agents/connect');
+ assert.equal(JSON.stringify(connects()[0]),JSON.stringify(['/api/agents/connect',{candidate:'opencode',installation:'',label:'我的 OpenCode',room:'r1'}]));
+ assert.equal(w.connecting,null);
+ assert.match(body(),/已加入会话/);
+ assert.equal(context._refreshed,1);
+ // 桌面应用行连的是自带 CLI；帮助面板给出两条出路
+ w.connecting='cursor_desktop';w.scanDrawn='';context.drawScan(w);
+ assert.match(body(),/自带/);
+ node('scanName').value='Cursor Agent';
+ node('scanRoom').value='';
+ await context.submitScanConnect(w);
+ assert.equal(JSON.stringify(posts.filter(p=>p[0]==='/api/agents/connect')[1]),JSON.stringify(['/api/agents/connect',{candidate:'cursor_desktop',installation:'',label:'Cursor Agent',room:''}]));
+ w.sub='help';w.help='devin';w.scanDrawn='';context.drawScan(w);
+ assert.match(body(),/作为外部成员/);assert.match(body(),/devin_cli/);
+ // 外部成员简化流程：生成配置并复用旧凭据展示
+ w.ext=scanData.candidates[4];w.sub='external';w.scanDrawn='';context.drawScan(w);
+ assert.match(body(),/接成外部成员/);
+ await context.submitScanExternal(w);
+ assert.match(node('connCredentials').innerHTML,/creds:tok-123/);
+})().catch(e=>{console.error(e);process.exitCode=1});
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute the scan page')
+    def test_scan_connect_failure_keeps_inputs_and_reports(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const elements={};
+function node(id){return elements[id]||(elements[id]={id,value:'',innerHTML:'',textContent:'',disabled:false,
+  onclick:null,hidden:false,dataset:{},classList:{toggle(){}},oninput:null,onchange:null});}
+const posts=[];
+let calls=0;
+const scanData={state:'done',progress:1,counts:{ready:1},errors:[],log:[],candidates:[{id:'a1',label:'A',kind:'cli',status:'ready',installations:[],rooms:[]}]};
+const context=vm.createContext({
+ location:{search:'',origin:'http://127.0.0.1:8765'},
+ sessionStorage:{store:{},getItem(k){return this.store[k]||null},setItem(k,v){this.store[k]=v}},
+ URL,URLSearchParams,esc:s=>String(s),
+ post:async(url,body)=>{posts.push([url,body]);if(url==='/api/agents/scan')return [true,scanData];calls++;return calls===1?[false,{error:'AI 还在回复，等它们说完再改'}]:[true,{}];},
+ connectionGet:async()=>[true,scanData],
+ wizardFrame:()=>{},wizardCurrent:()=>true,wizardError:()=>{},clearTimeout:()=>{},clearInterval:()=>{},setInterval:()=>0,setTimeout:()=>0,
+ startConnectionWizard:()=>{},openConnection:()=>{},renderConnectionWizard:()=>{},
+ connectionDefaultBase:()=>'',connectionBaseWarning:()=>'',renderConnectionCredentials:()=>{},
+ refreshContacts:async()=>{},pollRooms:async()=>{},ROOMS:[],CONTACTS:[],agCat:{},
+ mbox:{scrollTop:0,querySelectorAll:()=>[]},document:{getElementById:node}});
+vm.runInContext(fs.readFileSync('static/scan.js','utf8'),context);
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+(async()=>{
+ const w={seq:1,step:2,type:'local',saved:false,scan:{state:'done',progress:1,counts:{ready:1},errors:[],log:[],candidates:[{id:'a1',label:'A',kind:'cli',status:'ready',installations:[],rooms:[]}]}};
+ context.w=w;
+ await context.renderScanSetup(w); await sleep(20);
+ w.connecting='a1';w.scanDrawn='';context.drawScan(w);
+ node('scanName').value='我的 A';
+ await context.submitScanConnect(w);
+ const connects=()=>posts.filter(p=>p[0]==='/api/agents/connect');
+ const err=node('scanConnectError');
+ assert.match(err.textContent,/还在回复/);
+ assert.equal(node('scanConnectGo').disabled,false);       // 按钮恢复，可重试
+ assert.equal(node('scanName').value,'我的 A');            // 名称还在
+ assert.equal(w.connecting,'a1');                          // 没有被重绘冲掉
+ await context.submitScanConnect(w);
+ assert.equal(connects()[1][1].label,'我的 A');            // 重试带上同样的输入
+ assert.equal(w.connecting,null);
+})().catch(e=>{console.error(e);process.exitCode=1});
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 if __name__ == '__main__':
     unittest.main()

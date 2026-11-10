@@ -532,6 +532,7 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
 <script src="/static/workspace.js"></script>
 <script src="/static/qrcode.min.js"></script>
 <script src="/static/connections.js"></script>
+<script src="/static/scan.js"></script>
 <script src="/static/model-settings.js"></script>
 <script>
 (function(){const m=document.querySelector('meta[name=rt-token]'),t=m?m.content:'';if(!t)return;if(t.startsWith('dev_')){try{localStorage.setItem('cojam_owner_device_token',t)}catch(e){}}const f=window.fetch;window.fetch=function(u,o){o=o||{};const h=new Headers(o.headers||{});h.set('X-RT-Token',t);o.headers=h;return f.call(this,u,o)}})();

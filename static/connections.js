@@ -44,7 +44,7 @@ const CONNECTION_TYPES = {
   user: ['其他用户', '生成邀请票；对方打开链接领取身份，只进指定会话。同一设备之后仍是同一个人。', uiIcon('user')]
 };
 function stopConnectionWizard() {
-  if (connectionWizard) { clearInterval(connectionWizard.timer); clearTimeout(connectionWizard.catalogTimer); if (connectionWizard.controller) connectionWizard.controller.abort(); connectionWizard.token = ''; }
+  if (connectionWizard) { clearInterval(connectionWizard.timer); clearTimeout(connectionWizard.catalogTimer); clearInterval(connectionWizard.extTimer); if (connectionWizard.controller) connectionWizard.controller.abort(); connectionWizard.token = ''; }
   connectionWizard = null;
 }
 function connectionModalChanged() {
@@ -248,6 +248,8 @@ function connectionNameFields(w) {
   return '<label>联系人名称<input id="connName" maxlength="40" placeholder="例如：我的 Harness" value="' + esc(w.form.label || '') + '"></label><details class="connection-advanced"><summary>高级：自定义联系人 ID</summary><input id="connId" maxlength="24" placeholder="留空自动生成，小写英文和数字" value="' + esc(w.form.id || '') + '"></details>';
 }
 function renderConnectionSetup(w) {
+  // 扫描式接入（?scan=2 灰度）：新的本机连接先走自动扫描；管理已有联系人或 scan=1 时用旧界面。
+  if (w.type === 'local' && !w.legacy && !w.saved && typeof renderScanSetup === 'function' && scanV2Enabled()) return renderScanSetup(w);
   let content = '<h3>' + CONNECTION_TYPES[w.type][0] + '</h3>';
   if (w.type === 'mydevice') {
     content += '<p class="hint">生成可重复使用的个人设备链接，保存后可在不同浏览器打开。该链接拥有你的完整权限，请妥善保管。</p>'
