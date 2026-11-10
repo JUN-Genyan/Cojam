@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>合拍 Cojam · 本机 AI 扫描原型</title>
+<style>
+  :root{
+    --bg:#ffffff;--side:#f7f7f8;--bar:#ffffff;--fg:#18181b;--mut:#71717a;--faint:#a1a1aa;
+    --line:#e7e7ea;--soft:#f3f3f5;--hover:rgba(24,24,27,.05);--btn:#2563eb;--btn-fg:#fff;
+    --ok:#15803d;--ok-bg:#ecfdf3;--warn:#b45309;--warn-bg:#fffbeb;--danger:#dc2626;
+    --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 16px rgba(0,0,0,.06);
+    --shadow-lg:0 12px 40px rgba(0,0,0,.18);
+  }
+  @media(prefers-color-scheme:dark){
+    :root{--bg:#151517;--side:#1b1b1e;--bar:#1b1b1e;--fg:#ececf1;--mut:#a1a1aa;--faint:#6b6b74;
+      --line:#2c2c31;--soft:#232328;--hover:rgba(255,255,255,.05);--btn:#3b82f6;
+      --ok:#4ade80;--ok-bg:#12301f;--warn:#fbbf24;--warn-bg:#33270d;--danger:#f87171;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.3);--shadow-lg:0 12px 40px rgba(0,0,0,.5)}
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%;background:var(--bg);color:var(--fg);
+    font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  button{font:inherit;color:inherit;cursor:pointer}
+  .page{max-width:860px;margin:0 auto;padding:28px 20px 72px}
+  .top{display:flex;align-items:flex-start;gap:12px;margin-bottom:22px}
+  .back{width:34px;height:34px;border:1px solid var(--line);background:var(--bar);border-radius:10px;
+    display:flex;align-items:center;justify-content:center;font-size:18px;flex:none}
+  .back:hover{background:var(--soft)}
+  h1{font-size:20px;line-height:1.3;margin:1px 0 3px;letter-spacing:-.01em}
+  .sub{color:var(--mut);font-size:13px}
+  .scanbar{border:1px solid var(--line);background:var(--bar);border-radius:14px;padding:14px 16px;
+    box-shadow:var(--shadow);margin-bottom:18px}
+  .scanline{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .pulse{width:9px;height:9px;border-radius:50%;background:var(--btn);flex:none;
+    box-shadow:0 0 0 0 color-mix(in srgb,var(--btn) 40%,transparent);animation:pulse 1.6s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--btn) 45%,transparent)}
+    70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
+  .scanline b{font-size:13.5px;font-weight:600}
+  .scanline .count{color:var(--mut);font-size:13px}
+  .scanline .spacer{flex:1}
+  .linkbtn{border:0;background:transparent;color:var(--btn);padding:3px 4px;font-size:13px;border-radius:6px}
+  .linkbtn:hover{background:var(--soft)}
+  .progress{height:6px;background:var(--soft);border-radius:999px;overflow:hidden;margin-top:12px}
+  .progress i{display:block;height:100%;width:0;background:var(--btn);border-radius:999px;transition:width .35s ease}
+  .phase{color:var(--faint);font-size:12px;margin-top:7px;min-height:18px}
+  .group{margin:22px 0 8px;display:flex;align-items:baseline;gap:8px}
+  .group h2{font-size:13px;letter-spacing:.02em;margin:0;font-weight:650}
+  .group .n{font-size:12px;color:var(--faint);background:var(--soft);border-radius:999px;padding:0 7px}
+  .group p{margin:0;color:var(--faint);font-size:12px}
+  .list{display:flex;flex-direction:column;gap:8px}
+  .row{border:1px solid var(--line);background:var(--bar);border-radius:13px;padding:13px 14px;
+    display:flex;align-items:center;gap:12px;box-shadow:var(--shadow);transition:border-color .15s}
+  .row:hover{border-color:color-mix(in srgb,var(--fg) 16%,var(--line))}
+  .row.connected{background:color-mix(in srgb,var(--ok-bg) 55%,var(--bar))}
+  .avatar{width:38px;height:38px;border-radius:11px;background:var(--soft);display:flex;align-items:center;
+    justify-content:center;font-weight:750;font-size:15px;flex:none;color:var(--fg)}
+  .avatar.claude{background:#f7e8e2;color:#b4532f}.avatar.codex{background:#e2f6f0;color:#0f7c61}
+  .avatar.opencode{background:#fff0e2;color:#b45309}.avatar.qoder{background:#eee8ff;color:#6d4bd1}
+  .avatar.cursor{background:#ece9ff;color:#5b4bc4}.avatar.devin{background:#e8edff;color:#4055b3}
+  .avatar.windsurf{background:#e2f7f3;color:#0f766e}
+  @media(prefers-color-scheme:dark){
+    .avatar.claude{background:#3b241d;color:#f0a184}.avatar.codex{background:#12332b;color:#5ee0bd}
+    .avatar.opencode{background:#3a2a13;color:#f6c177}.avatar.qoder{background:#2b2447;color:#b7a4ff}
+    .avatar.cursor{background:#292447;color:#b7a4ff}.avatar.devin{background:#1e2745;color:#9fb0ff}
+    .avatar.windsurf{background:#12332f;color:#6ee7d8}
+  }
+  .main{flex:1;min-width:0}
+  .name{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .name b{font-size:14px;font-weight:650}
+  .ver{font-size:12px;color:var(--mut)}
+  .tag{font-size:11px;line-height:18px;padding:0 7px;border-radius:999px;font-weight:600;white-space:nowrap}
+  .tag.ok{color:var(--ok);background:var(--ok-bg)}
+  .tag.warn{color:var(--warn);background:var(--warn-bg)}
+  .tag.plain{color:var(--mut);background:var(--soft)}
+  .meta{color:var(--faint);font-size:12px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .actions{display:flex;align-items:center;gap:6px;flex:none}
+  .btn{border:1px solid var(--line);background:var(--bar);border-radius:9px;padding:6px 12px;font-size:13px;
+    font-weight:550;white-space:nowrap}
+  .btn:hover{background:var(--soft)}
+  .btn.pri{background:var(--btn);border-color:var(--btn);color:var(--btn-fg)}
+  .btn.pri:hover{filter:brightness(1.07)}
+  .btn.ghost{border-color:transparent;background:transparent;color:var(--mut)}
+  .btn.ghost:hover{background:var(--soft);color:var(--fg)}
+  .btn:disabled{opacity:.55;cursor:default}
+  .installs{display:none;margin:10px 0 0 50px;padding:8px 0 0;border-top:1px dashed var(--line)}
+  .installs.on{display:block}
+  .inst{display:flex;align-items:center;gap:8px;padding:5px 2px;font-size:12.5px;color:var(--mut)}
+  .inst input{accent-color:var(--btn)}
+  .inst code{font:12px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--fg);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .empty{border:1px dashed var(--line);border-radius:14px;padding:34px 20px;text-align:center;color:var(--mut)}
+  .empty b{display:block;color:var(--fg);font-size:15px;margin-bottom:5px}
+  .empty .actions{justify-content:center;margin-top:14px}
+  .foot{margin-top:24px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+    border-top:1px solid var(--line);padding-top:16px}
+  .foot .spacer{flex:1}
+  .dev{margin-top:34px;border:1px dashed var(--line);border-radius:12px;padding:10px 12px;
+    color:var(--faint);font-size:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .dev b{color:var(--mut);font-weight:600}
+  .dev button{border:1px solid var(--line);background:var(--bar);border-radius:7px;padding:3px 8px;font-size:12px}
+  .dev button.on{border-color:var(--btn);color:var(--btn)}
+  .modal{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
+    background:rgba(10,10,12,.45);backdrop-filter:blur(3px);padding:20px}
+  .modal.on{display:flex}
+  .sheet{width:min(440px,100%);background:var(--bar);border:1px solid var(--line);border-radius:16px;
+    box-shadow:var(--shadow-lg);padding:20px}
+  .sheet h3{margin:0 0 4px;font-size:17px}
+  .sheet .sub{margin-bottom:16px}
+  .field{margin:12px 0}
+  .field label{display:block;font-size:12.5px;color:var(--mut);margin-bottom:5px}
+  .field input,.field select{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--fg);
+    border-radius:9px;padding:8px 10px;font:inherit;font-size:13.5px}
+  .path{font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--mut);word-break:break-all;
+    background:var(--soft);border-radius:8px;padding:8px 10px}
+  .sheet .actions{justify-content:flex-end;margin-top:18px}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,16px);z-index:30;opacity:0;
+    pointer-events:none;background:var(--fg);color:var(--bg);border-radius:999px;padding:9px 16px;
+    font-size:13px;box-shadow:var(--shadow-lg);transition:opacity .2s,transform .2s;max-width:90vw}
+  .toast.on{opacity:1;transform:translate(-50%,0)}
+  .toast.warn{background:var(--warn);color:#fff}
+  @media(max-width:640px){
+    .page{padding:18px 14px 60px}
+    .row{align-items:flex-start;flex-wrap:wrap}
+    .actions{width:100%;justify-content:flex-end;margin-top:2px}
+    .installs{margin-left:0}
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <button class="back" aria-label="返回">‹</button>
+    <div>
+      <h1>连接本机 AI</h1>
+      <div class="sub">在这台电脑上查找可以协作的程序。扫描不会安装或登录任何软件。</div>
+    </div>
+  </header>
+
+  <section class="scanbar" aria-live="polite">
+    <div class="scanline">
+      <span class="pulse" id="pulse"></span>
+      <b id="scanTitle">正在扫描这台电脑…</b>
+      <span class="count" id="scanCount"></span>
+      <span class="spacer"></span>
+      <button class="linkbtn" id="scanToggle">停止扫描</button>
+    </div>
+    <div class="progress"><i id="bar"></i></div>
+    <div class="phase" id="phase">正在读取 PATH 和系统命令目录</div>
+  </section>
+
+  <div id="groups"></div>
+
+  <div class="foot">
+    <button class="btn" id="manual">手动选择程序</button>
+    <button class="btn" id="rescan">重新扫描</button>
+    <button class="btn ghost" id="diagnose">复制诊断信息</button>
+    <span class="spacer"></span>
+    <span class="sub" id="lastScan">上次扫描：刚刚</span>
+  </div>
+
+  <div class="dev">
+    <b>原型状态</b>
+    <button data-demo="scan" class="on">扫描中</button>
+    <button data-demo="done">有结果</button>
+    <button data-demo="empty">没找到</button>
+    <button data-demo="error">扫描失败</button>
+  </div>
+</div>
+
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="sheet">
+    <h3 id="modalTitle">连接</h3>
+    <div class="sub" id="modalSub"></div>
+    <div class="field"><label>联系人名称</label><input id="connName" maxlength="40"></div>
+    <div class="field"><label>加入会话</label>
+      <select id="connRoom">
+        <option value="current">当前会话：登录页改版</option>
+        <option value="">暂不加入，只保留联系人</option>
+      </select>
+    </div>
+    <div class="path" id="connPath"></div>
+    <div class="actions">
+      <button class="btn" id="modalCancel">取消</button>
+      <button class="btn pri" id="modalConnect">连接</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const groups = $('groups');
+  let state = 'scanning', timer = null, progress = 0, modalCandidate = null;
+  let connected = new Set();
+
+  const candidates = [
+    {id:'claude', group:'ready', name:'Claude Code', letter:'C', tone:'claude', version:'2.1.4',
+     path:'C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd', source:'PATH', status:'可以使用',
+     installs:[{id:'claude-npm',path:'C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd',version:'2.1.4'},
+               {id:'claude-local',path:'C:\\Tools\\claude\\claude.exe',version:'2.1.4'}]},
+    {id:'codex', group:'ready', name:'Codex', letter:'X', tone:'codex', version:'0.52.0',
+     path:'C:\\Users\\me\\AppData\\Local\\Programs\\codex\\codex.exe', source:'App Paths',
+     status:'可以使用', installs:[]},
+    {id:'opencode', group:'ready', name:'OpenCode', letter:'O', tone:'opencode', version:'2.2.5',
+     path:'C:\\Users\\me\\AppData\\Roaming\\npm\\opencode.cmd', source:'npm 包入口',
+     status:'可以使用', installs:[
+       {id:'oc-npm',path:'C:\\Users\\me\\AppData\\Roaming\\npm\\opencode.cmd',version:'2.2.5'},
+       {id:'oc-tools',path:'D:\\Tools\\opencode\\opencode.exe',version:'2.1.8'}]},
+    {id:'qodercli', group:'attention', name:'Qoder CLI', letter:'Q', tone:'qoder', version:'',
+     path:'C:\\Users\\me\\AppData\\Local\\Qoder\\bin\\qodercli.exe', source:'安装目录',
+     status:'版本读取超时', note:'程序存在，但 --version 在 8 秒内没有返回。仍然可以尝试连接。', installs:[]},
+    {id:'cursor_desktop', group:'desktop', name:'Cursor', letter:'C', tone:'cursor', version:'',
+     path:'C:\\Users\\me\\AppData\\Local\\Programs\\cursor\\Cursor.exe', source:'开始菜单快捷方式',
+     status:'已安装 · 自带 Agent CLI 已找到', note:'桌面窗口本身不能接收任务；连接它的 CLI 后可以自动执行。',
+     linked:'cursor_agent', installs:[]},
+    {id:'devin', group:'desktop', name:'Devin', letter:'D', tone:'devin', version:'',
+     path:'C:\\Users\\me\\AppData\\Local\\Programs\\Devin\\Devin.exe', source:'开始菜单快捷方式',
+     status:'已安装 · 可通过外部成员接入', note:'需要 Devin 自己通过 MCP 或 HTTP 连接会议室。', installs:[]},
+    {id:'windsurf', group:'desktop', name:'Windsurf', letter:'W', tone:'windsurf', version:'',
+     path:'C:\\Users\\me\\AppData\\Local\\Programs\\Windsurf\\Windsurf.exe', source:'开始菜单快捷方式',
+     status:'已安装 · 会议室不能直接调用', note:'目前没有检测到可用的 CLI 或接口。', installs:[]}
+  ];
+
+  const groupMeta = {
+    ready:['可以直接连接',''],
+    attention:['需要确认','找到程序，但还没能确认它能正常启动'],
+    desktop:['桌面应用','应用本身不能直接接收任务，请选择它提供的接入方式']
+  };
+
+  function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+  function statusTag(c){
+    if(connected.has(c.id)) return '<span class="tag ok">已连接</span>';
+    if(c.group==='attention') return '<span class="tag warn">需要确认</span>';
+    if(c.group==='desktop') return '<span class="tag plain">桌面应用</span>';
+    return '<span class="tag ok">可以使用</span>';
+  }
+
+  function row(c){
+    const isDesktop = c.group==='desktop';
+    let actions = '';
+    if(connected.has(c.id)){
+      actions = '<button class="btn" data-open="'+c.id+'">打开</button>';
+    } else if(c.id==='cursor_desktop'){
+      actions = '<button class="btn pri" data-connect="cursor_agent">连接 CLI</button>'+
+                '<button class="btn" data-external="cursor_desktop">外部接入</button>';
+    } else if(isDesktop){
+      actions = c.id==='devin'
+        ? '<button class="btn pri" data-external="'+c.id+'">作为外部成员接入</button>'
+        : '<button class="btn" data-explain="'+c.id+'">查看接入方式</button>';
+    } else if(c.group==='attention'){
+      actions = '<button class="btn" data-explain="'+c.id+'">诊断</button>'+
+                '<button class="btn pri" data-connect="'+c.id+'">仍然连接</button>';
+    } else {
+      actions = '<button class="btn pri" data-connect="'+c.id+'">连接</button>';
+    }
+    if(c.installs && c.installs.length>1 && !isDesktop){
+      actions = '<button class="btn ghost" data-installs="'+c.id+'">2 个安装</button>' + actions;
+    }
+    const installs = c.installs && c.installs.length>1 ? '<div class="installs" id="inst-'+c.id+'">'+
+      c.installs.map((x,i)=>'<label class="inst"><input type="radio" name="inst-'+c.id+'" '+(i===0?'checked':'')+
+        ' value="'+esc(x.id)+'"><code>'+esc(x.path)+'</code><span>'+esc(x.version||'')+'</span></label>').join('')+'</div>' : '';
+    return '<div class="row'+(connected.has(c.id)?' connected':'')+'" data-row="'+c.id+'">'+
+      '<div class="avatar '+c.tone+'">'+esc(c.letter)+'</div>'+
+      '<div class="main"><div class="name"><b>'+esc(c.name)+'</b>'+
+        (c.version?'<span class="ver">'+esc(c.version)+'</span>':'')+statusTag(c)+'</div>'+
+        '<div class="meta">'+esc(c.path)+' · '+esc(c.source)+'</div>'+
+        (c.note?'<div class="meta">'+esc(c.note)+'</div>':'')+
+        installs+
+      '</div><div class="actions">'+actions+'</div></div>';
+  }
+
+  function render(){
+    if(state==='scanning'){
+      const visible = candidates.filter(c=>c.group==='ready'||c.group==='attention');
+      groups.innerHTML = visible.length ? section('ready', visible.filter(c=>c.group==='ready')) +
+        section('attention', visible.filter(c=>c.group==='attention')) : '';
+      return;
+    }
+    if(state==='empty'){
+      groups.innerHTML = '<div class="empty"><b>没有检测到可调用的程序</b>'+
+        '可以手动选择程序，或先安装一个支持命令行的 AI。'+
+        '<div class="actions"><button class="btn pri" data-manual="1">手动选择程序</button>'+
+        '<button class="btn" data-explain="install">安装说明</button></div></div>';
+      return;
+    }
+    if(state==='error'){
+      groups.innerHTML = '<div class="empty"><b>扫描没有完成</b>'+
+        '读取开始菜单快捷方式时失败：权限不足。已找到的程序仍然可以使用。'+
+        '<div class="actions"><button class="btn pri" data-rescan="1">重试扫描</button>'+
+        '<button class="btn" data-explain="error">复制诊断信息</button></div></div>'+
+        section('ready', candidates.filter(c=>c.group==='ready'))+
+        section('desktop', candidates.filter(c=>c.group==='desktop'));
+      return;
+    }
+    groups.innerHTML = ['ready','attention','desktop'].map(g=>section(g, candidates.filter(c=>c.group===g))).join('');
+  }
+
+  function section(key, rows){
+    if(!rows.length) return '';
+    return '<div class="group"><h2>'+groupMeta[key][0]+'</h2><span class="n">'+rows.length+'</span>'+
+      (groupMeta[key][1]?'<p>'+groupMeta[key][1]+'</p>':'')+'</div>'+
+      '<div class="list">'+rows.map(row).join('')+'</div>';
+  }
+
+  function setProgress(p, title, phase){
+    progress = p;
+    $('bar').style.width = Math.round(p*100)+'%';
+    if(title) $('scanTitle').textContent = title;
+    if(phase) $('phase').textContent = phase;
+    const ready = candidates.filter(c=>c.group==='ready').length;
+    const desktop = candidates.filter(c=>c.group==='desktop').length;
+    $('scanCount').textContent = p>=1 ? '扫描完成' : '已找到 '+(p>.35?ready:Math.max(1,ready-2))+' 个程序、'+(p>.7?desktop:0)+' 个桌面应用';
+  }
+
+  function startScan(){
+    clearInterval(timer); connected = new Set(); state='scanning'; progress=0;
+    $('pulse').style.display=''; $('scanToggle').textContent='停止扫描';
+    setProgress(.08,'正在扫描这台电脑…','正在读取 PATH 和系统命令目录');
+    render();
+    const steps = [
+      [.3,'正在扫描这台电脑…','正在检查 App Paths 和用户命令目录'],
+      [.55,'正在扫描这台电脑…','正在读取 npm / pnpm / Bun 包入口'],
+      [.78,'正在扫描这台电脑…','正在解析开始菜单快捷方式'],
+      [1,'扫描完成','共检查 4 个阶段，没有发现需要处理的问题']
+    ];
+    let i=0;
+    timer = setInterval(()=>{
+      if(i>=steps.length){clearInterval(timer); return}
+      const s=steps[i++]; setProgress(s[0],s[1],s[2]); render();
+      if(s[0]===1){clearInterval(timer); state='done'; $('pulse').style.display='none';
+        $('scanToggle').textContent='重新扫描'; render()}
+    }, 850);
+  }
+
+  function showModal(c){
+    modalCandidate = c;
+    $('modalTitle').textContent = '连接 ' + c.name;
+    $('modalSub').textContent = c.group==='desktop' ? '将连接它自带的 CLI，而不是桌面窗口。' : '确认后会把联系人加入所选会话。';
+    $('connName').value = '我的 ' + c.name.replace(/ CLI$/,'');
+    $('connPath').textContent = c.path;
+    $('modal').classList.add('on');
+    setTimeout(()=>$('connName').focus(),30);
+  }
+
+  function hideModal(){ $('modal').classList.remove('on'); modalCandidate=null }
+
+  function connect(id){
+    const c = candidates.find(x=>x.id===id) || {
+      id:'cursor_agent', name:'Cursor Agent CLI',
+      path:'C:\\Users\\me\\AppData\\Local\\Programs\\cursor\\resources\\app\\bin\\cursor-agent.exe'
+    };
+    showModal(c);
+  }
+
+  function toast(text, warn){
+    const t=$('toast'); t.textContent=text; t.className='toast on'+(warn?' warn':'');
+    clearTimeout(toast.timer); toast.timer=setTimeout(()=>t.className='toast',2600);
+  }
+
+  $('modalCancel').onclick = hideModal;
+  $('modal').onclick = e => { if(e.target===$('modal')) hideModal() };
+  $('modalConnect').onclick = () => {
+    if(!modalCandidate) return;
+    const name=$('connName').value.trim() || modalCandidate.name;
+    const room=$('connRoom').value;
+    const btn=$('modalConnect'); btn.disabled=true; btn.textContent='连接中…';
+    setTimeout(()=>{
+      btn.disabled=false; btn.textContent='连接';
+      const id=modalCandidate.id==='cursor_agent'?'cursor_desktop':modalCandidate.id;
+      connected.add(id); hideModal(); state='done'; render();
+      toast('已连接 '+name+(room?'，并加入「登录页改版」':'，已保留在联系人里'));
+    },650);
+  };
+
+  document.addEventListener('click', e=>{
+    const t=e.target.closest('button'); if(!t) return;
+    if(t.dataset.connect) return connect(t.dataset.connect);
+    if(t.dataset.installs){ const box=$('inst-'+t.dataset.installs); box.classList.toggle('on'); return }
+    if(t.dataset.external){ toast('将打开外部成员接入：'+t.dataset.external, false); return }
+    if(t.dataset.explain){ toast(t.dataset.explain==='install'?'将打开安装说明':'诊断信息已展开（原型）'); return }
+    if(t.dataset.open){ toast('将打开已连接的联系人'); return }
+    if(t.dataset.manual){ toast('将打开文件选择器'); return }
+    if(t.dataset.rescan) return startScan();
+  });
+
+  $('rescan').onclick = startScan;
+  $('manual').onclick = ()=>toast('将打开文件选择器，选择后可探测版本');
+  $('diagnose').onclick = ()=>{
+    const text = 'Cojam harness scan\nstate='+state+'\nplatform=win32\ncandidates='+candidates.length;
+    if(navigator.clipboard && window.isSecureContext){ navigator.clipboard.writeText(text).catch(()=>{}); }
+    else { const x=document.createElement('textarea'); x.value=text; document.body.appendChild(x); x.select();
+      try{document.execCommand('copy')}catch(e){} x.remove(); }
+    toast('诊断信息已复制（不含密钥）');
+  };
+  $('scanToggle').onclick = ()=>{
+    if(state==='scanning'){ clearInterval(timer); state='done'; $('pulse').style.display='none';
+      $('scanToggle').textContent='重新扫描'; $('scanTitle').textContent='扫描已停止'; render(); }
+    else startScan();
+  };
+
+  document.querySelectorAll('[data-demo]').forEach(b=>b.onclick=()=>{
+    document.querySelectorAll('[data-demo]').forEach(x=>x.classList.toggle('on',x===b));
+    clearInterval(timer);
+    state=b.dataset.demo;
+    $('pulse').style.display = state==='scanning'?'':'none';
+    $('scanToggle').textContent = state==='scanning'?'停止扫描':'重新扫描';
+    if(state==='scanning'){ startScan(); return }
+    if(state==='done'){ setProgress(1,'扫描完成','共检查 4 个阶段，没有发现需要处理的问题'); }
+    if(state==='empty'){ setProgress(1,'扫描完成','没有检测到可调用的程序'); }
+    if(state==='error'){ setProgress(1,'扫描未完成','读取开始菜单快捷方式时失败：权限不足'); }
+    render();
+  });
+
+  startScan();
+})();
+</script>
+</body>
+</html>

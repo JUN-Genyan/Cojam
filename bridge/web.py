@@ -8,7 +8,7 @@ import hmac, json, mimetypes, os, re, secrets, socket, sys, threading, webbrowse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import access, agents, common, connections, devices, install, invites, mcp, members, projects, registry, model_catalog, room as R
+from . import access, agents, common, connections, devices, install, invites, mcp, members, projects, registry, scan, model_catalog, room as R
 from .common import (AIS, EXTERNAL_SPEAKERS, HERE, HOST, MAX_ANN, MAX_BODY, MAX_UPLOAD, MEET_DIR, PORT, PROJECT,
                      in_dir, kind_of)
 from .guard import USER, guard
@@ -276,6 +276,8 @@ class Handler(BaseHTTPRequestHandler):
                                         owner_devices=devices.listing(getattr(self, "_device_id", "")),
                                         connections=connections.catalog(), members={s["id"]: members.broker.status(s["id"]) for s in registry.all_specs() if s["driver"] == "external" and s.get("kind") != "user"},
                                         mcp_url="http://127.0.0.1:%d/mcp" % PORT))
+        if path == "/api/agents/scan":
+            return self._json(200, scan.snapshot())
         if path == '/api/agents/models':
             ai = (q.get('ai') or [''])[0]
             if not registry.get(ai):
@@ -450,6 +452,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "请先生成此联系人的接入密钥"})
             ok, msg = install.host_install(str(data.get("host") or ""), token)
             return self._json(200 if ok else 409, {"ok": ok, "msg": msg, "hosts": install.hosts_status()})
+        if path == "/api/agents/scan":        # 开始一次本机扫描；重复调用回同一份快照，不并行
+            data = self._read_json()
+            if data is None:
+                return
+            if not self._from_browser():
+                return self._json(403, {"error": USER_ONLY_MSG})
+            return self._json(200, scan.start(force=bool(data.get("force"))))
+        if path == "/api/agents/connect":     # 扫描页的「连接」：选安装、接入、加入会话一次完成
+            data = self._read_json()
+            if data is None:
+                return
+            if not self._from_browser():
+                return self._json(403, {"error": USER_ONLY_MSG})
+            try:
+                result = scan.connect(str(data.get("candidate") or ""),
+                                      installation=str(data.get("installation") or "") or None,
+                                      label=str(data.get("label") or ""),
+                                      room=str(data.get("room") or ""), rooms=R.rooms)
+            except scan.ScanError as error:
+                return self._json(error.code, {"error": str(error)})
+            return self._json(200, result)
         if not self._from_browser():
             return self._json(403, {"error": USER_ONLY_MSG})
         m = ROOM_PATH.match(path)

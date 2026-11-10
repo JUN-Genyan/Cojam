@@ -6,6 +6,7 @@
   "driver": "external",
   "detect": ["%LOCALAPPDATA%\\Qoder\\Qoder Launcher\\Qoder Launcher.exe", "%LOCALAPPDATA%\\Qoder CN\\Qoder CN Launcher\\Qoder CN Launcher.exe", "/Applications/Qoder.app/Contents/MacOS/Qoder", "~/Applications/Qoder.app/Contents/MacOS/Qoder"],
   "shortcuts": ["Qoder", "Qoder CN"],
+  "linked_cli": "qodercli",
   "note": "检测到 Qoder 桌面应用；自动执行需要另行安装和配置可用的命令行程序。",
   "context": "full"
 }

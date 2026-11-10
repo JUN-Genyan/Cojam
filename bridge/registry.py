@@ -188,6 +188,7 @@ def _norm(raw, idx=0, scan=True):
     discovery = {key:_as_list(discovery.get(key)) for key in ('commands','packages','app_names','bundled_commands','version_command','help_command')} | {
         'paths':{str(platform):_as_list(paths) for platform, paths in (discovery.get('paths') or {}).items()}
         if isinstance(discovery.get('paths'), dict) else {}}
+    linked = _as_list(raw.get("linked_cli"))[:1]   # 桌面应用自带的 CLI；扫描时合并成一行
     arg = {}
     for k in ("base", "read", "work", "new", "resume", "model", "effort", "thinking_budget", "thinking"):
         arg[k] = _as_list(args.get(k))
@@ -210,6 +211,7 @@ def _norm(raw, idx=0, scan=True):
         "bin": _as_list(raw.get("bin")),
         "detect": _as_list(raw.get("detect")),
         "shortcuts": _as_list(raw.get("shortcuts")),
+        "linked_cli": linked[0] if linked else "",
         "discovery": discovery,
         "adapter": str(raw.get("adapter") or ""),
         "catalog_command": _as_list(raw.get("catalog_command")),
