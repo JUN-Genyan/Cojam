@@ -207,6 +207,41 @@ class ShellTest(unittest.TestCase):
         backend.stop_process(proc)
         self.assertIsNotNone(proc.poll())
 
+    def test_stop_process_kills_the_whole_tree_on_windows(self):
+        proc = Mock()
+        proc.pid = 4321
+        proc.poll.return_value = None
+        with patch.object(backend.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            backend.stop_process(proc)
+        if os.name == "nt":
+            args, _ = run.call_args
+            self.assertEqual(args[0], ["taskkill", "/PID", "4321", "/T", "/F"])
+            proc.terminate.assert_not_called()      # 树杀成功就不走单进程 fallback
+        else:
+            proc.terminate.assert_called_once()
+        proc.wait.assert_called_once()
+
+    def test_stop_process_kills_descendants_too(self):
+        if os.name != "nt":
+            self.skipTest("PyInstaller 式进程树只在 Windows 上有")
+        parent = subprocess.Popen(
+            [sys.executable, "-c",
+             "import subprocess,sys,time;"
+             "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)']);"
+             "print(p.pid, flush=True); time.sleep(30)"],
+            stdout=subprocess.PIPE, text=True)
+        try:
+            child_pid = int(parent.stdout.readline())
+            backend.stop_process(parent)
+            self.assertIsNotNone(parent.poll())
+            time.sleep(0.5)
+            listing = subprocess.run(["tasklist", "/FI", "PID eq %d" % child_pid],
+                                     capture_output=True, text=True).stdout
+            self.assertNotIn(str(child_pid), listing)   # 真身子进程没被留在后台
+        finally:
+            backend.stop_process(parent)
+
     def test_log_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"ROUNDTABLE_LOG_DIR": tmp}):
@@ -238,7 +273,7 @@ class FakeWindow:
 
 class FakeWebview:
     def __init__(self):
-        self.settings = {"OPEN_EXTERNAL_LINKS_IN_BROWSER": False}
+        self.settings = {"OPEN_EXTERNAL_LINKS_IN_BROWSER": False, "ALLOW_DOWNLOADS": False}
         self.created = None
         self.started = False
 
@@ -284,6 +319,7 @@ class WindowAndFlow(unittest.TestCase):
         self.assertEqual(fake.window.events.closing.items, [handler])
         self.assertEqual(fake.window.events.shown.items, [shell_main.tint_title_bar])
         self.assertTrue(fake.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"])
+        self.assertTrue(fake.settings["ALLOW_DOWNLOADS"])
         self.assertEqual(fake.started, {})
 
     def test_confirm_close_skips_when_idle(self):
@@ -323,13 +359,15 @@ class WindowAndFlow(unittest.TestCase):
     def test_free_port_starts_core_and_opens_window(self):
         base = shell_main.base_url()
         heartbeat = Mock()
+        proc = Mock()
         with patch.object(shell_main.backend, "find_core", return_value=(["core.exe"], "C:/core")), \
                 patch.object(shell_main.backend, "probe", return_value=("free", None)), \
-                patch.object(shell_main.backend, "spawn_core", return_value=Mock()) as spawn, \
+                patch.object(shell_main.backend, "spawn_core", return_value=proc) as spawn, \
                 patch.object(shell_main.backend, "wait_ready", return_value={"app": "AI Bridge"}), \
                 patch.object(shell_main.backend, "fetch_token", return_value="token"), \
                 patch.object(shell_main.backend, "new_tab_id", return_value="T" * 32), \
                 patch.object(shell_main.backend, "TabHeartbeat", return_value=heartbeat) as beat_class, \
+                patch.object(shell_main.backend, "stop_process") as stop, \
                 patch.object(shell_main, "open_window") as window, \
                 patch.object(shell_main, "show_error") as error:
             self.assertEqual(shell_main.main(), 0)
@@ -338,18 +376,21 @@ class WindowAndFlow(unittest.TestCase):
         heartbeat.start.assert_called_once()
         self.assertEqual(window.call_args.args[0], base + "/?owner_tab=" + "T" * 32)
         self.assertEqual(heartbeat.stop.call_count, 1)
+        stop.assert_called_once_with(proc)          # 窗口关闭：本壳启动的后台跟着停
         error.assert_not_called()
 
-    def test_existing_backend_is_reused(self):
+    def test_reused_backend_is_left_to_owner_lifecycle(self):
         with patch.object(shell_main.backend, "find_core", return_value=(["core.exe"], "C:/core")), \
                 patch.object(shell_main.backend, "probe", return_value=("cojam", {"app": "AI Bridge"})), \
                 patch.object(shell_main.backend, "spawn_core") as spawn, \
                 patch.object(shell_main.backend, "fetch_token", return_value="token"), \
                 patch.object(shell_main.backend, "TabHeartbeat", return_value=Mock()), \
+                patch.object(shell_main.backend, "stop_process") as stop, \
                 patch.object(shell_main, "open_window"), \
                 patch.object(shell_main, "show_error") as error:
             self.assertEqual(shell_main.main(), 0)
         spawn.assert_not_called()
+        stop.assert_called_once_with(None)          # 不是本壳启动的：杀 None 是空操作，交给 OwnerLifecycle
         error.assert_not_called()
 
     def test_existing_backend_without_ui_assets_is_replaced(self):

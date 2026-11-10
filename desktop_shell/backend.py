@@ -155,8 +155,24 @@ def new_tab_id():
 
 
 def stop_process(proc):
+    """停掉整个进程树。
+
+    PyInstaller onefile 的 CojamCore.exe 是引导器 + 真身两层：只 terminate 引导器
+    会把真身留在后台继续占端口（任务管理器里的「残留进程」就是这么来的）。
+    Windows 上用 taskkill /T 连子进程一起杀；其他平台退回 terminate/kill。
+    """
     if proc is None or proc.poll() is not None:
         return
+    if os.name == "nt":
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        killed = subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                                capture_output=True, creationflags=flags)
+        if killed.returncode == 0:
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            return
     proc.terminate()
     try:
         proc.wait(timeout=5)

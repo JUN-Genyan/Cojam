@@ -133,8 +133,12 @@ class DesktopApi:
 def open_window(url, on_closing, module=None):
     webview = module or __import__("webview")
     settings = getattr(webview, "settings", None)
-    if isinstance(settings, dict) and "OPEN_EXTERNAL_LINKS_IN_BROWSER" in settings:
-        settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+    if isinstance(settings, dict):
+        if "OPEN_EXTERNAL_LINKS_IN_BROWSER" in settings:
+            settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+        if "ALLOW_DOWNLOADS" in settings:
+            # 成员连接端、接入配置这些下载在桌面窗口里也要能用；pywebview 默认一律取消下载。
+            settings["ALLOW_DOWNLOADS"] = True
     api = DesktopApi(webview)
     window = webview.create_window(TITLE, url, width=1280, height=860, min_size=(960, 640),
                                    text_select=True, js_api=api)
@@ -209,4 +213,7 @@ def main():
         show_error("没能打开桌面窗口。已改用浏览器打开合拍。")
         return 0
     heartbeat.stop()
+    # 窗口关了就把本壳启动的后台连进程树一起停掉，不留 CojamCore 残留；
+    # 复用的后台（proc 是 None）不动它，由 OwnerLifecycle 按最后一个页面兜底。
+    backend.stop_process(proc)
     return 0
