@@ -11,10 +11,18 @@ import secrets
 import threading
 import time
 
-from . import access, registry
+from . import access, conn_settings, registry
 from .common import LOG_DIR, read_json, write_json, timeout_for
 
-WORKER_TTL = 60
+WORKER_TTL = 60   # 仅作默认值；实际按 conn_settings 的 offline_after（可按联系人设置）
+STANDBY_STOP_COOLDOWN = 600   # 点了「停止待命」后，这段时间内再调用也不会自动复活
+
+
+def ttl(pid):
+    try:
+        return conn_settings.get("offline_after", pid)
+    except Exception:
+        return WORKER_TTL
 ID = re.compile(r"^[a-zA-Z0-9_-]{1,80}$")
 
 
@@ -38,6 +46,7 @@ class Broker:
         self.condition = threading.Condition(threading.RLock())
         self.workers = {}
         self.tasks = {}
+        self.standby_stopped = {}   # pid -> 点「停止待命」的时间；冷却期内不自动复活
 
     def _journal(self):
         os.makedirs(LOG_DIR, exist_ok=True)
@@ -58,34 +67,47 @@ class Broker:
 
     def register(self, pid, key, data):
         spec = registry.get(pid)
-        if not spec or spec["driver"] != "external" or spec.get("kind") == "user":
-            raise MemberError("只有 Harness 成员可以领取自动响应任务", 403)
+        if not spec or spec.get("kind") == "user":
+            raise MemberError("只有成员可以领取自动响应任务", 403)
         worker = str(data.get("worker") or "")
         if not ID.fullmatch(worker):
             raise MemberError("worker 必须是 1–80 位字母数字、横线或下划线", 400)
         with self.condition:
             old = self.workers.get(pid)
-            if old and old["digest"] == fingerprint(key) and old["id"] != worker and time.time() - old["seen"] < WORKER_TTL:
+            transport = str(data.get("transport") or (old.get("transport") if old and old["id"] == worker else "") or "connector")
+            # 待命通道任何驱动都能用（Claude/Codex 桌面端、ACP、external）；
+            # 普通「自动响应端」仍然只给 Harness 成员，避免把本机 CLI 误当成远程执行端。
+            if spec["driver"] != "external" and transport != "standby":
+                raise MemberError("只有 Harness 成员可以领取自动响应任务", 403)
+            if old and old["digest"] == fingerprint(key) and old["id"] != worker and time.time() - old["seen"] < ttl(pid):
                 raise MemberError("此联系人已有自动响应端；不同 Harness 请分别添加为成员")
             if old and (old["id"] != worker or old["digest"] != fingerprint(key)):
                 for task in self.tasks.values():
                     if task["member"] == pid and task["state"] in ("queued", "claimed"):
                         self._state(task, "cancelled", "执行端已更换，旧任务不会重复执行")
-            self.workers[pid] = {"id": worker, "digest": fingerprint(key), "seen": time.time(),
-                                 "device": str(data.get("device") or "未命名设备")[:80],
+            now = time.time()
+            started = old.get("started", now) if (old and old["id"] == worker and old["digest"] == fingerprint(key)) else now
+            self.workers[pid] = {"id": worker, "digest": fingerprint(key), "seen": now, "started": started,
+                                 "transport": transport,
+                                 "device": str(data.get("device") or ("本机 MCP 待命" if transport == "standby" else "未命名设备"))[:80],
                                  "workdir": str(data.get("workdir") or "成员自己的工作文件夹")[:500],
                                  "allow_work": data.get("allow_work") is True}
             self.condition.notify_all()
-        return {"ok": True, "member": pid, "protocol": 1, "heartbeat_interval": 10}
+        cfg = conn_settings.member_config(pid)
+        return {"ok": True, "member": pid, "protocol": 1, "heartbeat_interval": cfg["heartbeat_interval"],
+                "settings": cfg, "settings_rev": cfg["rev"]}
 
     def status(self, pid):
         digest = current_digest(pid)
         with self.condition:
             w = self.workers.get(pid)
-            live = bool(w and digest == w["digest"] and time.time() - w["seen"] < WORKER_TTL)
-            return {"automatic": live, "device": w["device"] if live else "", "workdir": w["workdir"] if live else "",
+            live = bool(w and digest == w["digest"] and time.time() - w["seen"] < ttl(pid))
+            transport = w.get("transport", "connector") if live else ""
+            standby = bool(live and transport == "standby")
+            return {"automatic": live, "standby": standby, "transport": transport,
+                    "device": w["device"] if live else "", "workdir": w["workdir"] if live else "",
                     "allow_work": bool(live and w["allow_work"]),
-                    "label": "自动响应已连接" if live else "等待成员开启自动响应"}
+                    "label": "MCP 待命中" if standby else ("自动响应已连接" if live else "等待成员开启自动响应")}
 
     def _valid(self, task):
         # Do not acquire a room lock while holding the broker lock.
@@ -97,10 +119,13 @@ class Broker:
     def call(self, pid, prompt, session, mode, room):
         if not access.allowed(room, pid, "read") or not access.allowed(room, pid, "post"):
             return False, "此成员未加入会话或没有读取、发言权限", session, []
-        mode = room.member_mode(pid, mode)
         status = self.status(pid)
         if not status["automatic"]:
-            return False, "%s 尚未开启自动响应；请在它所在设备运行成员连接端，或通过 MCP 领取任务。" % pid, session, []
+            return False, "%s 尚未开启自动响应；请在该软件里输入 /cojam_standby（或调用 ai-bridge 的 cojam_standby 工具）开启待命，或运行成员连接端。" % pid, session, []
+        mode = room.member_mode(pid, mode)
+        # 待命端默认只读：会话是干活模式，也要这个联系人自己允许改文件才真的进 work。
+        if mode == "work" and not status.get("allow_work"):
+            mode = "discuss"
         digest = current_digest(pid)
         now = time.time()
         with self.condition:
@@ -120,10 +145,11 @@ class Broker:
                                 "goal": room.goal(), "prompt": prompt, "session": session or "", "mode": mode,
                                 "board": [dict(b) for b in room.meta.get("board", [])],
                                 "permissions": access.permissions(room, pid), "model": room.own_models(pid)[0],
-                                "effort": room.own_models(pid)[1], "execution": {"location": "member", "workdir": status["workdir"]}}}
+                                "effort": room.own_models(pid)[1], "allow_work": bool(status.get("allow_work")),
+                                "execution": {"location": "member", "workdir": status["workdir"]}}}
             self.tasks[tid] = task
             self._state(task, "queued")
-        end = now + timeout_for(mode)[1]
+        end = now + timeout_for(mode, pid)[1]
         while True:
             valid = self._valid(task)
             online = self.status(pid)["automatic"]
@@ -159,7 +185,7 @@ class Broker:
 
     def receive(self, pid, key, data):
         try:
-            wait = max(0, min(20, int(data.get("timeout", 20))))
+            wait = max(0, min(55, int(data.get("timeout", conn_settings.get("long_poll", pid)))))
         except (TypeError, ValueError):
             raise MemberError("timeout 必须是整数", 400)
         end = time.time() + wait
@@ -167,6 +193,8 @@ class Broker:
             if access.identify(key) != pid:
                 raise MemberError("接入密钥已失效", 401)
             with self.condition:
+                if pid in self.standby_stopped:
+                    return {"task": None, "stopped": True, "settings_rev": conn_settings.rev()}
                 w = self._registered(pid, data.get("worker"), key)
                 w["seen"] = time.time()
                 candidates = [t for t in self.tasks.values() if t["member"] == pid and t["state"] in ("queued", "claimed")]
@@ -183,11 +211,11 @@ class Broker:
                     if task["state"] == "queued":
                         task.update(worker=w["id"], lease=secrets.token_urlsafe(24))
                         self._state(task, "claimed")
-                    return {"task": dict(task["payload"], lease=task["lease"])}
+                    return {"task": dict(task["payload"], lease=task["lease"]), "settings_rev": conn_settings.rev()}
             with self.condition:
                 remaining = end - time.time()
                 if remaining <= 0:
-                    return {"task": None}
+                    return {"task": None, "settings_rev": conn_settings.rev()}
                 self.condition.wait(min(.5, remaining))
 
     def heartbeat(self, pid, key, data):
@@ -196,8 +224,8 @@ class Broker:
             w["seen"] = time.time()
         if data.get("task"):
             task = self._task(pid, key, data)
-            return {"ok": True, "state": task["state"]}
-        return {"ok": True}
+            return {"ok": True, "state": task["state"], "settings_rev": conn_settings.rev()}
+        return {"ok": True, "settings_rev": conn_settings.rev()}
 
     def complete(self, pid, key, data):
         task = self._task(pid, key, data)
@@ -254,6 +282,75 @@ class Broker:
                     self._state(task, "cancelled", "成员已断开连接")
         return {"ok": True}
 
+    def stop_standby(self, pid):
+        now = time.time()
+        with self.condition:
+            self.standby_stopped[pid] = now
+            # 顺手清掉已经过期的标记，避免这个集合无限长
+            for old, at in list(self.standby_stopped.items()):
+                if now - at >= STANDBY_STOP_COOLDOWN:
+                    self.standby_stopped.pop(old, None)
+            self.workers.pop(pid, None)
+            for task in self.tasks.values():
+                if task["member"] == pid and task["state"] in ("queued", "claimed"):
+                    self._state(task, "cancelled", "Cojam 端已停止此成员的待命状态")
+            self.condition.notify_all()
+        return {"ok": True, "member": pid, "stopped": True, "resume_after": STANDBY_STOP_COOLDOWN}
+
+    def standby(self, pid, key, data):
+        worker = str(data.get("worker") or ("standby-" + fingerprint(key)[:16]))
+        with self.condition:
+            stopped_at = self.standby_stopped.get(pid)
+            if stopped_at is not None:
+                left = int(STANDBY_STOP_COOLDOWN - (time.time() - stopped_at))
+                if left > 0:
+                    self.workers.pop(pid, None)
+                    return {"status": "stopped", "member": pid, "worker": worker, "resume_after": left,
+                            "next_step": "Cojam 端已停止待命（%d 分钟内不会恢复）。请停止循环调用 cojam_standby 并告知用户待命已结束。" % max(1, left // 60)}
+                self.standby_stopped.pop(pid, None)
+        reg_data = {
+            "worker": worker,
+            "transport": "standby",
+            "device": str(data.get("device") or "本机 MCP 待命"),
+            "workdir": str(data.get("workdir") or os.getcwd()),
+            "allow_work": data.get("allow_work") is True,
+        }
+        self.register(pid, key, reg_data)
+        with self.condition:
+            w = self.workers.get(pid)
+            max_sec = conn_settings.get("standby_max", pid) * 60
+            if w and time.time() - w.get("started", time.time()) > max_sec:
+                self.workers.pop(pid, None)
+                return {"status": "expired", "member": pid, "worker": worker,
+                        "next_step": "已达到 Cojam 设定的最长待命时长（%d 分钟），请结束待命并告知用户。" % conn_settings.get("standby_max", pid)}
+        poll = data.get("timeout", conn_settings.get("standby_poll", pid))
+        res = self.receive(pid, key, {"worker": worker, "timeout": poll})
+        if res.get("stopped"):
+            with self.condition:
+                self.workers.pop(pid, None)
+            left = int(STANDBY_STOP_COOLDOWN - (time.time() - self.standby_stopped.get(pid, 0)))
+            return {"status": "stopped", "member": pid, "worker": worker, "resume_after": max(0, left),
+                    "next_step": "Cojam 端已停止待命，请停止循环调用 cojam_standby 并告知用户待命已结束。"}
+        task = res.get("task")
+        if task:
+            return {
+                "status": "task",
+                "member": pid,
+                "worker": worker,
+                "task": task,
+                "settings_rev": res.get("settings_rev"),
+                "next_step": ("收到 Cojam 会话「%s」的任务！请按 prompt 要求处理，完成后调用 "
+                              "reply_task(worker=%r, task=%r, lease=%r, ok=true, text='你的回复')，"
+                              "提交后再调用 cojam_standby 继续待命。") % (task.get("title") or task.get("room"), worker, task["id"], task["lease"]),
+            }
+        return {
+            "status": "idle",
+            "member": pid,
+            "worker": worker,
+            "settings_rev": res.get("settings_rev"),
+            "next_step": "暂无数新任务；请不要输出多余文字，立即再次调用 cojam_standby 继续待命。",
+        }
+
     def board(self, pid, key, data):
         task = self._task(pid, key, data)
         from .room import rooms
@@ -295,4 +392,9 @@ def handle(pid, key, action, data):
         return broker.board(pid, key, data)
     if action == "disconnect":
         return broker.disconnect(pid, key, data)
+    if action == "standby":
+        return broker.standby(pid, key, data)
+    if action == "settings":
+        cfg = conn_settings.member_config(pid)
+        return {"ok": True, "settings": cfg, "settings_rev": cfg["rev"]}
     raise MemberError("没有此成员操作", 404)

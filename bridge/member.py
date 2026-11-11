@@ -57,6 +57,21 @@ class Client:
         self.workdir, self.allow_work, self.emit = workdir, allow_work, emit
         self.stop_event = threading.Event()
         self.active = None
+        self.settings = {"rev": 0, "heartbeat_interval": 10, "offline_after": 60, "long_poll": 20,
+                         "reconnect": True, "reconnect_max": 60}
+
+    def _sync_settings(self, result):
+        if not isinstance(result, dict):
+            return
+        if isinstance(result.get("settings"), dict):
+            self.settings.update(result["settings"])
+        elif isinstance(result.get("settings_rev"), int) and result["settings_rev"] != self.settings.get("rev"):
+            try:
+                info = self.request("settings", timeout=5)
+                if isinstance(info.get("settings"), dict):
+                    self.settings.update(info["settings"])
+            except Exception:
+                pass
 
     def request(self, action, body=None, timeout=30):
         body = dict(body or {}, worker=self.worker)
@@ -92,24 +107,30 @@ class Client:
 
     def run(self, executor):
         connected = False
+        backoff = 2
         try:
             while not self.stop_event.is_set():
                 try:
                     if not connected:
                         info = self.request("connect", {"device":self.device, "workdir":self.workdir, "allow_work":self.allow_work})
                         self.member = info["member"]
+                        self._sync_settings(info)
                         connected = True
+                        backoff = 2
                         self.emit("已加入会议室服务，等待分配给 %s 的任务。" % self.member)
-                    result = self.request("receive", {"timeout":5}, timeout=10)
+                    poll = max(1, min(55, int(self.settings.get("long_poll", 5))))
+                    result = self.request("receive", {"timeout": min(poll, 5)}, timeout=max(10, min(poll, 5) + 5))
+                    self._sync_settings(result)
                     task = result.get("task")
                     if task:
                         self._execute(task, executor)
                 except ConnectionError as e:
                     self.emit(str(e))
-                    if e.code in (401, 409) or (e.code == 403 and not connected):
+                    if e.code in (401, 409) or (e.code == 403 and not connected) or not self.settings.get("reconnect", True):
                         break
                     connected = False
-                    self.stop_event.wait(3)
+                    self.stop_event.wait(min(backoff, int(self.settings.get("reconnect_max", 60))))
+                    backoff = min(backoff * 2, int(self.settings.get("reconnect_max", 60)))
         finally:
             self.active = None
             if connected:
@@ -141,18 +162,19 @@ class Client:
         thread.start()
         last_ok = time.monotonic()
         cancelled = False
-        while not done.wait(2):
+        while not done.wait(max(1, min(10, int(self.settings.get("heartbeat_interval", 10)) // 2 or 2))):
             if self.stop_event.is_set():
                 cancelled = True
                 break
             try:
                 status = self.task_request("heartbeat", task)
+                self._sync_settings(status)
                 if status.get("state") not in ("claimed",):
                     cancelled = True
                     break
                 last_ok = time.monotonic()
             except ConnectionError as e:
-                if e.code in (401, 403, 410) or time.monotonic() - last_ok > 40:
+                if e.code in (401, 403, 410) or time.monotonic() - last_ok > max(20, int(self.settings.get("offline_after", 60))):
                     cancelled = True
                     break
         if cancelled or self.stop_event.is_set():

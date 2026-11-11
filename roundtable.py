@@ -58,6 +58,9 @@ def main():
     if cmd == "hook-codex":
         from bridge.hook_codex import main as hook
         return hook()
+    if cmd == "mcp-stdio":
+        from bridge.mcp_stdio import main as mcp_stdio_main
+        raise SystemExit(mcp_stdio_main(args[1:]))
     if cmd in ("install", "join", "doctor", "agents"):
         from bridge import install, doctor, registry
         if cmd == "install":

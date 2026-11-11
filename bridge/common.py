@@ -150,10 +150,16 @@ def preamble(mode, wd, ais=None):
     return head + "\n" + mode_text(mode)
 
 
-def timeout_for(mode):
-    """返回 (多久没动静就停, 一轮总上限)，单位秒。"""
+def timeout_for(mode, pid=None):
+    """返回 (多久没动静就停, 一轮总上限)，单位秒。总上限可在 Cojam 的「连接与心跳」里按联系人设置。"""
     m = mode if mode in IDLE_LIMIT else "discuss"
-    return IDLE_LIMIT[m], TOTAL_LIMIT[m]
+    total = TOTAL_LIMIT[m]
+    try:
+        from . import conn_settings
+        total = conn_settings.get("task_timeout_" + m, pid)
+    except Exception:
+        pass
+    return min(IDLE_LIMIT[m], total), total
 
 
 def timeout_text(ai, why, mode):
@@ -349,9 +355,14 @@ def tailscale_ipv4():
     return _tailscale_ip((result.stdout or "").split())
 
 
-def find_executable(name):
-    """Find a command using current paths, including newly installed Windows CLIs."""
+def find_executable(name, extra_paths=()):
+    """Find a command using current paths, including newly installed Windows CLIs or explicit paths."""
     import shutil
+    if not name:
+        return None
+    expanded = os.path.expandvars(os.path.expanduser(str(name)))
+    if (os.sep in expanded or (os.altsep and os.altsep in expanded)) and os.path.isfile(expanded):
+        return expanded
     paths = [os.environ.get("PATH", "")]
     if os.name == "nt":
         # A running GUI application does not receive PATH changes made later.
@@ -367,10 +378,70 @@ def find_executable(name):
         except ImportError:
             pass
         home = os.path.expanduser("~")
+        local_app = os.environ.get("LOCALAPPDATA", "")
         paths.extend([os.path.join(home, ".local", "bin"),
+                      os.path.join(home, ".bun", "bin"),
+                      os.path.join(home, ".cargo", "bin"),
+                      os.path.join(home, "scoop", "shims"),
                       os.path.join(os.environ.get("APPDATA", ""), "npm"),
-                      os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Links")])
-    return shutil.which(name, path=os.pathsep.join(p for p in paths if p))
+                      os.path.join(local_app, "Microsoft", "WinGet", "Links"),
+                      os.path.join(local_app, "cursor-agent")])
+    for p in extra_paths or ():
+        exp = os.path.expandvars(os.path.expanduser(str(p)))
+        if os.path.isfile(exp):
+            return exp
+        if os.path.isdir(exp):
+            paths.append(exp)
+    return shutil.which(expanded, path=os.pathsep.join(p for p in paths if p))
+
+
+_APP_NAMES = {"at": 0.0, "names": frozenset()}
+
+
+def installed_app_names(ttl=30.0):
+    """Windows 卸载注册表里的软件名（小写）。
+
+    安装路径五花八门时（比如 Cursor 装在 D:\\cursor），只按固定路径猜会漏；
+    用系统应用列表兜底，扫描和「一键接插件」才不会一个说装了、一个说没装。
+    """
+    if os.name != "nt":
+        return frozenset()
+    now = time.time()
+    if _APP_NAMES["names"] and now - _APP_NAMES["at"] < ttl:
+        return _APP_NAMES["names"]
+    names = set()
+    try:
+        import winreg
+        roots = (
+            (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+        )
+        for root, sub in roots:
+            try:
+                with winreg.OpenKey(root, sub) as key:
+                    for idx in range(winreg.QueryInfoKey(key)[0]):
+                        try:
+                            with winreg.OpenKey(key, winreg.EnumKey(key, idx)) as child:
+                                val, _ = winreg.QueryValueEx(child, "DisplayName")
+                                if isinstance(val, str) and val.strip():
+                                    names.add(val.strip().lower())
+                        except OSError:
+                            continue
+            except OSError:
+                continue
+    except ImportError:
+        pass
+    _APP_NAMES.update(at=now, names=frozenset(names))
+    return _APP_NAMES["names"]
+
+
+def app_installed(tokens):
+    """软件名里出现任意一个 token 就算装了（大小写不敏感）。"""
+    toks = [str(t).strip().lower() for t in (tokens or ()) if str(t).strip()]
+    if not toks:
+        return False
+    return any(tok in name for name in installed_app_names() for tok in toks)
 
 
 def resolve_cmd(name):

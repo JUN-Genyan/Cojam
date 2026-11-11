@@ -1,0 +1,481 @@
+{
+  "agents": [
+    {
+      "id": "claude",
+      "label": "Claude Code / Desktop",
+      "color": "#d97757",
+      "cli": {
+        "driver": "claude",
+        "bin": ["claude"],
+        "paths": [
+          "%APPDATA%\\npm\\claude.cmd",
+          "%USERPROFILE%\\.local\\bin\\claude.exe",
+          "%LOCALAPPDATA%\\AnthropicClaude\\claude.exe"
+        ],
+        "verified": true
+      },
+      "desktop": {
+        "detect": [
+          "%LOCALAPPDATA%\\AnthropicClaude\\Claude.exe",
+          "%LOCALAPPDATA%\\Programs\\Claude\\Claude.exe"
+        ],
+        "uninstall": ["Claude"]
+      },
+      "mcp": {
+        "id": "claude",
+        "label": "Claude Code",
+        "kind": "claude",
+        "bin": ["claude"],
+        "restart": "重开 claude（/mcp 里能看到 ai-bridge）"
+      },
+      "mcp_desktop": {
+        "id": "claude-desktop",
+        "label": "Claude Desktop",
+        "kind": "json-stdio",
+        "path": "%APPDATA%\\Claude\\claude_desktop_config.json",
+        "detect": [
+          "%LOCALAPPDATA%\\AnthropicClaude\\Claude.exe",
+          "%LOCALAPPDATA%\\Programs\\Claude\\Claude.exe"
+        ],
+        "restart": "完全退出并重开 Claude Desktop"
+      },
+      "install_hint": "https://docs.claude.com/en/docs/claude-code"
+    },
+    {
+      "id": "codex",
+      "label": "OpenAI Codex",
+      "color": "#10a37f",
+      "cli": {
+        "driver": "codex",
+        "bin": ["codex"],
+        "paths": [
+          "%APPDATA%\\npm\\codex.cmd",
+          "%LOCALAPPDATA%\\Programs\\Codex\\resources\\bin\\codex.exe",
+          "%LOCALAPPDATA%\\Programs\\codex\\resources\\bin\\codex.exe"
+        ],
+        "verified": true
+      },
+      "desktop": {
+        "detect": [
+          "%LOCALAPPDATA%\\Programs\\Codex\\Codex.exe",
+          "%LOCALAPPDATA%\\Programs\\codex\\Codex.exe"
+        ],
+        "uninstall": ["Codex"]
+      },
+      "mcp": {
+        "id": "codex",
+        "label": "Codex",
+        "kind": "toml",
+        "bin": ["codex"],
+        "path": "~/.codex/config.toml",
+        "restart": "重开 codex"
+      },
+      "install_hint": "https://github.com/openai/codex"
+    },
+    {
+      "id": "antigravity",
+      "label": "Google Antigravity",
+      "color": "#34a853",
+      "cli": {
+        "driver": "cli",
+        "bin": ["agy"],
+        "paths": [
+          "%LOCALAPPDATA%\\Programs\\antigravity\\bin\\agy.cmd",
+          "%LOCALAPPDATA%\\Programs\\Antigravity\\bin\\agy.cmd",
+          "%USERPROFILE%\\.local\\bin\\agy.exe"
+        ],
+        "args": {
+          "new": ["-p", "{prompt}"]
+        },
+        "parse": {"type": "text"},
+        "context": "full",
+        "verified": false
+      },
+      "desktop": {
+        "detect": [
+          "%LOCALAPPDATA%\\Programs\\antigravity\\resources\\bin\\language_server.exe",
+          "%LOCALAPPDATA%\\Programs\\Antigravity\\resources\\bin\\language_server.exe",
+          "%LOCALAPPDATA%\\Programs\\Antigravity\\Antigravity.exe"
+        ],
+        "uninstall": ["Antigravity"]
+      },
+      "mcp": {
+        "id": "antigravity",
+        "label": "Google Antigravity",
+        "kind": "json",
+        "path": "~/.gemini/config/mcp_config.json",
+        "detect": [
+          "%LOCALAPPDATA%\\Programs\\antigravity\\resources\\bin\\language_server.exe",
+          "%LOCALAPPDATA%\\Programs\\Antigravity\\resources\\bin\\language_server.exe"
+        ],
+        "restart": "重启 Antigravity（完全退出再开）"
+      },
+      "install_hint": "https://antigravity.google/docs/cli/reference"
+    },
+    {
+      "id": "cursor",
+      "label": "Cursor",
+      "color": "#7c3aed",
+      "cli": {
+        "driver": "cli",
+        "bin": ["cursor-agent"],
+        "paths": [
+          "%LOCALAPPDATA%\\cursor-agent\\cursor-agent.cmd",
+          "%LOCALAPPDATA%\\cursor-agent\\cursor-agent.exe",
+          "%USERPROFILE%\\.local\\bin\\cursor-agent.cmd"
+        ],
+        "preset": "cursor",
+        "verified": false
+      },
+      "desktop": {
+        "detect": [
+          "%LOCALAPPDATA%\\Programs\\cursor\\Cursor.exe",
+          "%LOCALAPPDATA%\\Programs\\Cursor\\Cursor.exe"
+        ],
+        "uninstall": ["Cursor"]
+      },
+      "mcp": {
+        "id": "cursor",
+        "label": "Cursor",
+        "kind": "json",
+        "path": "~/.cursor/mcp.json",
+        "detect": [
+          "%LOCALAPPDATA%\\Programs\\cursor\\Cursor.exe",
+          "%LOCALAPPDATA%\\Programs\\Cursor\\Cursor.exe"
+        ],
+        "restart": "重启 Cursor"
+      },
+      "install_hint": "https://cursor.com/cli"
+    },
+    {
+      "id": "gemini",
+      "label": "Gemini CLI",
+      "color": "#4285f4",
+      "acp": {
+        "bin": ["gemini"],
+        "args": ["--experimental-acp"],
+        "verified": false
+      },
+      "cli": {
+        "driver": "cli",
+        "bin": ["gemini"],
+        "paths": ["%APPDATA%\\npm\\gemini.cmd"],
+        "preset": "gemini",
+        "verified": false
+      },
+      "mcp": {
+        "id": "gemini",
+        "label": "Gemini CLI",
+        "kind": "json",
+        "path": "~/.gemini/settings.json",
+        "bin": ["gemini"],
+        "restart": "重开 gemini"
+      },
+      "install_hint": "https://github.com/google-gemini/gemini-cli"
+    },
+    {
+      "id": "opencode",
+      "label": "OpenCode",
+      "color": "#f97316",
+      "acp": {
+        "bin": ["opencode"],
+        "args": ["acp"],
+        "verified": false
+      },
+      "cli": {
+        "driver": "cli",
+        "bin": ["opencode"],
+        "paths": [
+          "%APPDATA%\\npm\\opencode.cmd",
+          "%USERPROFILE%\\.opencode\\bin\\opencode.exe"
+        ],
+        "preset": "opencode",
+        "verified": false
+      },
+      "desktop": {
+        "detect": [
+          "%LOCALAPPDATA%\\Programs\\OpenCode\\OpenCode.exe"
+        ],
+        "uninstall": ["OpenCode"]
+      },
+      "install_hint": "https://opencode.ai"
+    },
+    {
+      "id": "qwen",
+      "label": "Qwen Code",
+      "color": "#615ced",
+      "acp": {
+        "bin": ["qwen"],
+        "args": ["--experimental-acp"],
+        "verified": false
+      },
+      "cli": {
+        "driver": "cli",
+        "bin": ["qwen"],
+        "paths": ["%APPDATA%\\npm\\qwen.cmd"],
+        "preset": "qwen",
+        "verified": false
+      },
+      "install_hint": "https://github.com/QwenLM/qwen-code"
+    },
+    {
+      "id": "copilot",
+      "label": "GitHub Copilot / VS Code",
+      "color": "#24292f",
+      "cli": {
+        "driver": "cli",
+        "bin": ["copilot"],
+        "paths": ["%APPDATA%\\npm\\copilot.cmd"],
+        "args": {
+          "work": ["--allow-all-tools"],
+          "new": ["-p", "{prompt}"]
+        },
+        "parse": {"type": "text"},
+        "context": "full",
+        "verified": false
+      },
+      "desktop": {
+        "detect": [
+          "%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe",
+          "%ProgramFiles%\\Microsoft VS Code\\Code.exe"
+        ],
+        "uninstall": ["Microsoft Visual Studio Code"]
+      },
+      "mcp": {
+        "id": "vscode",
+        "label": "VS Code (GitHub Copilot)",
+        "kind": "json-servers",
+        "path": "%APPDATA%\\Code\\User\\mcp.json",
+        "detect": [
+          "%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe",
+          "%ProgramFiles%\\Microsoft VS Code\\Code.exe"
+        ],
+        "restart": "在 VS Code 中重新加载窗口或重启"
+      },
+      "install_hint": "https://docs.github.com/en/copilot"
+    },
+    {
+      "id": "windsurf",
+      "label": "Windsurf",
+      "color": "#06b6d4",
+      "desktop": {
+        "detect": [
+          "%LOCALAPPDATA%\\Programs\\Windsurf\\Windsurf.exe",
+          "%LOCALAPPDATA%\\Programs\\windsurf\\Windsurf.exe"
+        ],
+        "uninstall": ["Windsurf"]
+      },
+      "mcp": {
+        "id": "windsurf",
+        "label": "Windsurf",
+        "kind": "json-serverurl",
+        "path": "~/.codeium/windsurf/mcp_config.json",
+        "detect": [
+          "%LOCALAPPDATA%\\Programs\\Windsurf\\Windsurf.exe",
+          "%LOCALAPPDATA%\\Programs\\windsurf\\Windsurf.exe"
+        ],
+        "restart": "重启 Windsurf"
+      },
+      "install_hint": "https://windsurf.com"
+    },
+    {
+      "id": "trae",
+      "label": "Trae",
+      "color": "#ef4444",
+      "desktop": {
+        "detect": [
+          "%LOCALAPPDATA%\\Programs\\Trae\\Trae.exe",
+          "%LOCALAPPDATA%\\Programs\\Trae CN\\Trae CN.exe"
+        ],
+        "uninstall": ["Trae"]
+      },
+      "mcp": {
+        "id": "trae",
+        "label": "Trae",
+        "kind": "json",
+        "path": "~/.trae/mcp.json",
+        "detect": [
+          "%LOCALAPPDATA%\\Programs\\Trae\\Trae.exe",
+          "%LOCALAPPDATA%\\Programs\\Trae CN\\Trae CN.exe"
+        ],
+        "restart": "重启 Trae"
+      },
+      "install_hint": "https://www.trae.ai"
+    },
+    {
+      "id": "kiro",
+      "label": "Kiro",
+      "color": "#8b5cf6",
+      "cli": {
+        "driver": "cli",
+        "bin": ["kiro-cli"],
+        "args": {
+          "work": ["--trust-all-tools"],
+          "new": ["chat", "--no-interactive", "{prompt}"]
+        },
+        "parse": {"type": "text"},
+        "context": "full",
+        "verified": false
+      },
+      "desktop": {
+        "detect": [
+          "%LOCALAPPDATA%\\Programs\\Kiro\\Kiro.exe",
+          "%LOCALAPPDATA%\\Programs\\kiro\\Kiro.exe"
+        ],
+        "uninstall": ["Kiro"]
+      },
+      "mcp": {
+        "id": "kiro",
+        "label": "Kiro",
+        "kind": "json",
+        "path": "~/.kiro/settings/mcp.json",
+        "detect": [
+          "%LOCALAPPDATA%\\Programs\\Kiro\\Kiro.exe",
+          "%LOCALAPPDATA%\\Programs\\kiro\\Kiro.exe"
+        ],
+        "restart": "重启 Kiro"
+      },
+      "install_hint": "https://kiro.dev"
+    },
+    {
+      "id": "goose",
+      "label": "Goose",
+      "color": "#f59e0b",
+      "acp": {
+        "bin": ["goose"],
+        "args": ["acp"],
+        "verified": false
+      },
+      "cli": {
+        "driver": "cli",
+        "bin": ["goose"],
+        "args": {
+          "new": ["run", "-t", "{prompt}"]
+        },
+        "parse": {"type": "text"},
+        "context": "full",
+        "verified": false
+      },
+      "desktop": {
+        "detect": [
+          "%LOCALAPPDATA%\\Programs\\Goose\\Goose.exe"
+        ],
+        "uninstall": ["Goose"]
+      },
+      "install_hint": "https://block.github.io/goose"
+    },
+    {
+      "id": "kimi",
+      "label": "Kimi CLI",
+      "color": "#0ea5e9",
+      "acp": {
+        "bin": ["kimi"],
+        "args": ["acp"],
+        "verified": false
+      },
+      "cli": {
+        "driver": "cli",
+        "bin": ["kimi"],
+        "args": {
+          "work": ["--yolo"],
+          "new": ["-p", "{prompt}"]
+        },
+        "parse": {"type": "text"},
+        "context": "full",
+        "verified": false
+      },
+      "install_hint": "https://github.com/MoonshotAI/kimi-cli"
+    },
+    {
+      "id": "crush",
+      "label": "Crush",
+      "color": "#ec4899",
+      "cli": {
+        "driver": "cli",
+        "bin": ["crush"],
+        "preset": "crush",
+        "verified": false
+      },
+      "install_hint": "https://github.com/charmbracelet/crush"
+    },
+    {
+      "id": "aider",
+      "label": "Aider",
+      "color": "#22c55e",
+      "cli": {
+        "driver": "cli",
+        "bin": ["aider"],
+        "preset": "aider",
+        "verified": false
+      },
+      "install_hint": "https://aider.chat"
+    },
+    {
+      "id": "qoder",
+      "label": "Qoder CLI",
+      "color": "#14b8a6",
+      "cli": {
+        "driver": "cli",
+        "bin": ["qodercli"],
+        "args": {"new": ["-p", "{prompt}"]},
+        "parse": {"type": "text"},
+        "context": "full",
+        "verified": false
+      },
+      "install_hint": "https://qoder.com"
+    },
+    {
+      "id": "codebuddy",
+      "label": "CodeBuddy CLI",
+      "color": "#3b82f6",
+      "cli": {
+        "driver": "cli",
+        "bin": ["codebuddy"],
+        "args": {"new": ["-p", "{prompt}"]},
+        "parse": {"type": "text"},
+        "context": "full",
+        "verified": false
+      },
+      "install_hint": "https://copilot.tencent.com"
+    },
+    {
+      "id": "iflow",
+      "label": "iFlow CLI",
+      "color": "#6366f1",
+      "cli": {
+        "driver": "cli",
+        "bin": ["iflow"],
+        "args": {"new": ["-p", "{prompt}"]},
+        "parse": {"type": "text"},
+        "context": "full",
+        "verified": false
+      }
+    },
+    {
+      "id": "amp",
+      "label": "Amp CLI",
+      "color": "#e11d48",
+      "cli": {
+        "driver": "cli",
+        "bin": ["amp"],
+        "args": {"new": ["-x", "{prompt}"]},
+        "parse": {"type": "text"},
+        "context": "full",
+        "verified": false
+      }
+    },
+    {
+      "id": "droid",
+      "label": "Factory Droid",
+      "color": "#84cc16",
+      "cli": {
+        "driver": "cli",
+        "bin": ["droid"],
+        "args": {"new": ["exec", "{prompt}"]},
+        "parse": {"type": "text"},
+        "context": "full",
+        "verified": false
+      }
+    }
+  ]
+}

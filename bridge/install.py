@@ -16,7 +16,7 @@ r"""把会议室接进别人家的工具里（一键，不用改它们的代码�
 """
 import json, os, re, shutil, subprocess, sys, time
 
-from .common import PORT
+from .common import PORT, app_installed
 
 URL = "http://127.0.0.1:%d/mcp" % PORT
 SERVER_NAME = "ai-bridge"
@@ -48,12 +48,15 @@ HOSTS = [
      "path": os.path.join(HOME, ".gemini", "config", "mcp_config.json"),
      "detect": [os.path.join(HOME, "AppData", "Local", "Programs", "antigravity", "resources", "bin", "language_server.exe"),
                 os.path.join(HOME, "AppData", "Local", "Programs", "Antigravity", "resources", "bin", "language_server.exe")],
+     "uninstall": ["antigravity"],
      "restart": "重启 Antigravity（完全退出再开）"},
     {"id": "cursor", "label": "Cursor", "kind": "json",
      "path": os.path.join(HOME, ".cursor", "mcp.json"),
      # 只认真正的 Cursor 程序文件；~/.cursor 目录不算（cursor-agent CLI 也会创建它）
      "detect": [os.path.join(HOME, "AppData", "Local", "Programs", "cursor", "Cursor.exe"),
                 os.path.join(HOME, "AppData", "Local", "Programs", "Cursor", "Cursor.exe")],
+     # 装在别处的 Cursor（比如 D:\cursor）只能靠系统应用列表认出来
+     "uninstall": ["cursor"],
      "restart": "重启 Cursor"},
     {"id": "gemini", "label": "Gemini CLI", "kind": "json",
      "path": os.path.join(HOME, ".gemini", "settings.json"),
@@ -65,6 +68,42 @@ HOSTS = [
      "path": os.path.join(HOME, ".codex", "config.toml"),
      "restart": "重开 codex"},
 ]
+
+
+def _load_catalog_hosts():
+    cat_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "catalog")
+    if not os.path.isdir(cat_dir):
+        return
+    known = {h["id"] for h in HOSTS}
+    for name in sorted(os.listdir(cat_dir)):
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(cat_dir, name), encoding="utf-8") as f:
+                raw = json.load(f)
+        except Exception:
+            continue
+        items = raw.get("agents") if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
+        for entry in items or []:
+            for key in ("mcp", "mcp_desktop"):
+                m = entry.get(key) if isinstance(entry, dict) else None
+                if not isinstance(m, dict) or not m.get("id") or m["id"] in known:
+                    continue
+                known.add(m["id"])
+                desktop = entry.get("desktop") if isinstance(entry.get("desktop"), dict) else {}
+                HOSTS.append({
+                    "id": m["id"],
+                    "label": m.get("label") or entry.get("label") or m["id"],
+                    "kind": m.get("kind") or "json",
+                    "path": os.path.expandvars(os.path.expanduser(m["path"])) if m.get("path") else "",
+                    "bin": list(m.get("bin") or []),
+                    "detect": [os.path.expandvars(os.path.expanduser(p)) for p in (m.get("detect") or [])],
+                    "uninstall": list(m.get("uninstall") or desktop.get("uninstall") or []),
+                    "restart": m.get("restart") or ("重启 " + (m.get("label") or m["id"])),
+                })
+
+
+_load_catalog_hosts()
 
 
 def _backup(path):
@@ -166,11 +205,75 @@ def install_toml(host):
     return True, "写好了：%s%s" % (path, ("（备份在 %s）" % os.path.basename(bak)) if bak else "")
 
 
+def _stdio_command():
+    if FROZEN:
+        return sys.executable, ["mcp-stdio"]
+    return sys.executable, ["-m", "bridge.mcp_stdio"]
+
+
+def _install_json_variant(host, root_key="mcpServers", entry_builder=None):
+    path = host["path"]
+    parent = os.path.dirname(path)
+    os.makedirs(parent, exist_ok=True)
+    try:
+        data = _read_json(path)
+    except Exception as e:
+        return False, "%s 现在不是合法 JSON（%s），不敢动它。手动加吧：\n%s" % (path, e, _sample())
+    if not isinstance(data, dict):
+        return False, "%s 顶层不是对象，不敢动它。手动加吧：\n%s" % (path, _sample())
+    servers = data.get(root_key)
+    if not isinstance(servers, dict):
+        servers = {}
+    bak = _backup(path)
+    token = host.get("token") or os.environ.get("AI_BRIDGE_TOKEN")
+    servers[SERVER_NAME] = entry_builder(token)
+    data[root_key] = servers
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    return True, "写好了：%s%s" % (path, ("（原文件备份在 %s）" % os.path.basename(bak)) if bak else "")
+
+
+def install_json_servers(host):
+    def build(token):
+        item = {"type": "http", "url": URL}
+        if token:
+            item["headers"] = {"Authorization": "Bearer " + token}
+        return item
+    return _install_json_variant(host, "servers", build)
+
+
+def install_json_serverurl(host):
+    def build(token):
+        item = {"serverUrl": URL}
+        if token:
+            item["headers"] = {"Authorization": "Bearer " + token}
+        return item
+    return _install_json_variant(host, "mcpServers", build)
+
+
+def install_json_stdio(host):
+    def build(token):
+        cmd, args = _stdio_command()
+        env = {"AI_BRIDGE_URL": URL}
+        if token:
+            env["AI_BRIDGE_TOKEN"] = token
+        return {"command": cmd, "args": args, "env": env}
+    return _install_json_variant(host, "mcpServers", build)
+
+
 def _sample():
     return json.dumps({"mcpServers": {SERVER_NAME: {"url": URL}}}, ensure_ascii=False, indent=2)
 
 
-INSTALLERS = {"json": install_json, "claude": install_claude, "toml": install_toml}
+INSTALLERS = {
+    "json": install_json,
+    "json-servers": install_json_servers,
+    "json-serverurl": install_json_serverurl,
+    "json-stdio": install_json_stdio,
+    "claude": install_claude,
+    "toml": install_toml,
+}
 
 
 def _claude_has_it():
@@ -208,6 +311,9 @@ def present(host):
     for p in host.get("detect") or []:
         if os.path.exists(os.path.expandvars(os.path.expanduser(p))):
             return True
+    # 装在非默认目录的软件，只能靠系统应用列表认；扫描用同一份数据，避免两边结论相反
+    if app_installed(host.get("uninstall")):
+        return True
     return False
 
 

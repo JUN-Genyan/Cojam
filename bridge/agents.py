@@ -549,7 +549,7 @@ def call_ai(ai, prompt, session_id=None, images=(), mode=None, room=None):
                 if room is not None:
                     room.push_live(ai, res)
 
-            rc, so, se, to = run_stream(cmd, prompt, on_line, timeout_for(mode), cwd=wd, env=env, reg=reg)
+            rc, so, se, to = run_stream(cmd, prompt, on_line, timeout_for(mode, ai), cwd=wd, env=env, reg=reg)
             r = res.get("result") or {}
             out = (r.get("result") or "").strip() if isinstance(r.get("result"), str) else ""
             bad = bool(r.get("is_error"))
@@ -565,7 +565,7 @@ def call_ai(ai, prompt, session_id=None, images=(), mode=None, room=None):
             os.close(fd)
             try:
                 cmd = build_cmd(ai, mode, sid, exe, images, outf, mo_m, mo_e)
-                rc, so, se, to = run_stream(cmd, prompt, lambda l: parse_codex_line(l, edits, res), timeout_for(mode), cwd=wd,
+                rc, so, se, to = run_stream(cmd, prompt, lambda l: parse_codex_line(l, edits, res), timeout_for(mode, ai), cwd=wd,
                                             reg=(lambda p: room.procs.__setitem__(ai, p)) if room is not None else None)
                 sid = res.get("sid") or sid
                 try:
@@ -1017,7 +1017,7 @@ class CodexServer:
             try:
                 r = self.request("turn/start", tp, timeout=120, on_note=on_note)
                 state["turn"] = (r.get("turn") or {}).get("id")
-                idle, total = timeout_for(mode)
+                idle, total = timeout_for(mode, "codex")
                 t0 = last = time.time()
                 while state["done"] is None:
                     try:

@@ -10,6 +10,8 @@
 
 统一成员：本机和其他设备上的 Harness 都能接收任务、回复、互相 @。另一台 Windows / Mac 可运行轻量成员连接端，选择自己的 Harness 与工作文件夹后加入同一会话。见 [统一成员与跨设备协作](docs/MEMBERS.md)。
 
+启动时会扫描这台机器上已装的 Agent，一键接入；桌面软件可写入 MCP 配置后用 `/cojam_standby` 待命接单。扫描只保留一套实现：见 [本机 Agent 发现](docs/DISCOVERY.md)。
+
 接新的 AI 只用写配置，不改代码：见 [docs/PROVIDERS.md](docs/PROVIDERS.md)。
 
 ![icon](roundtable_preview.png)
@@ -62,6 +64,11 @@
 | `bridge\registry.py` | 参与者注册表：读 `presets\` 和 `data\agents.d\`，决定会议室里有哪些 AI、每个怎么叫 |
 | `bridge\install.py` | 一条命令把会议室接进别的工具（写它们的 MCP 配置，改之前备份） |
 | `bridge\drivers.py` | 通用驱动：`cli`（起命令行程序）、`http`（POST 给你自己的服务）；按注册表里的配置拼命令、解析输出 |
+| `bridge\discovery.py` | 启动与手动扫描本机 CLI / ACP / 桌面 Agent，支持一键直连与一键写入 MCP 插件 |
+| `bridge\catalog\*.json` | 本机 Agent 发现目录表（CLI 路径、ACP 参数、桌面检测路径与 MCP 宿主格式） |
+| `bridge\acp.py` | ACP（Agent Client Protocol）常驻驱动：流式输出、权限控制与文件护栏 |
+| `bridge\mcp_stdio.py` | stdio ↔ HTTP MCP 转发桥（供 Claude Desktop 等仅支持 stdio 的宿主接入） |
+| `bridge\conn_settings.py` | Cojam 端统一连接与心跳设置（心跳间隔、掉线判定、超时、待命上限，实时下发连接端） |
 | `bridge\doctor.py` | `python -m bridge.doctor`：验一个 agent 接没接上（不用开会） |
 | `bridge\presets\*.json` | 内置预置：gemini、opencode、crush、aider、qwen、cursor |
 | `bridge\guard.py` | 文件护栏：谁占着哪个文件，跨会议 |

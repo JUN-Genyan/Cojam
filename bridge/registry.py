@@ -34,6 +34,7 @@ COLORS = ["#d97757", "#10a37f", "#4285f4", "#a855f7", "#f59e0b", "#06b6d4", "#ec
 DRIVER_CAPS = {
     "claude": {"images": True, "native_compact": True, "handoff": True, "tools": True, "edits": True},
     "codex": {"images": True, "native_compact": True, "handoff": True, "tools": True, "edits": True},
+    "acp": {"images": True, "native_compact": False, "handoff": False, "tools": False, "edits": True},
     "cli": {"images": False, "native_compact": False, "handoff": False, "tools": False, "edits": False},
     "http": {"images": False, "native_compact": False, "handoff": False, "tools": False, "edits": False},
     # 会外参与者：会议室不叫它，它自己经 /api/post 或 MCP 进来发言（IDE 里的 agent 都是这种）
@@ -93,7 +94,7 @@ def _norm(raw, idx=0):
         raise ValueError("id %r 是会议室自己用的名字" % pid)
     driver = str(raw.get("driver") or "cli").strip().lower()
     if driver not in DRIVER_CAPS:
-        raise ValueError("driver 只能是 claude / codex / cli / http / external，给的是 %r" % driver)
+        raise ValueError("driver 只能是 claude / codex / acp / cli / http / external，给的是 %r" % driver)
     if raw.get("kind") == "user" and driver != "external":
         raise ValueError("用户联系人应使用 external 接入方式")
 
@@ -109,7 +110,7 @@ def _norm(raw, idx=0):
 
     args = raw.get("args") if isinstance(raw.get("args"), dict) else {}
     arg = {}
-    for k in ("base", "read", "work", "new", "resume"):
+    for k in ("base", "read", "work", "new", "resume", "acp"):
         arg[k] = _as_list(args.get(k))
 
     parse = raw.get("parse") if isinstance(raw.get("parse"), dict) else {}
@@ -163,15 +164,15 @@ def _norm(raw, idx=0):
         spec["context"] = "delta"
     if driver == "http" and not spec["endpoint"]:
         raise ValueError("driver=http 得写 endpoint")
-    if driver == "cli" and not spec["bin"]:
-        raise ValueError("driver=cli 得写 bin")
+    if driver in ("cli", "acp") and not spec["bin"]:
+        raise ValueError("driver=%s 得写 bin" % driver)
     for k in ("id", "label"):
         if spec[k].lower() in ("用户", "user", "系统", "system"):
             raise ValueError("%s 不能叫 %r" % (k, spec[k]))
 
     # 有没有装：配置里写死了 enabled 就听配置的，没写就看命令在不在 PATH 里
     ra = raw.get("enabled")
-    if driver in ("cli", "claude", "codex"):
+    if driver in ("cli", "acp", "claude", "codex"):
         # A saved contact or pairing is not evidence that its executable is
         # still installed. Keep its configuration, but recheck availability.
         spec["enabled"] = ra is not False and any(find_executable(b) for b in spec["bin"])
@@ -334,7 +335,7 @@ def discover_hidden_presets():
             try:
                 for raw in _read_file(path):
                     spec = _norm(raw)
-                    if spec["id"] in hidden and spec["id"] not in SPECS and spec["enabled"] and spec["driver"] in ("cli", "claude", "codex"):
+                    if spec["id"] in hidden and spec["id"] not in SPECS and spec["enabled"] and spec["driver"] in ("cli", "acp", "claude", "codex"):
                         found.append(public(spec))
             except (OSError, ValueError, TypeError):
                 continue

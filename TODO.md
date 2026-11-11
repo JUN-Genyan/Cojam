@@ -28,7 +28,7 @@
 
 框架和内置预置都做完了，下面是还没验到的：
 
-- [ ] **预置实测**：gemini / qwen / crush / aider / cursor 的预置是照文档写的，没真跑过。验完把那份 json 里的 `verified` 改成 true（界面和 doctor 会跟着变）。
+- [ ] **预置与目录表实测**：gemini / qwen / crush / aider / cursor / copilot / kiro / goose / kimi / qoder / codebuddy / iflow / amp / droid 的 CLI 或 ACP 预置是照公开文档写的，本机目前仅实测了 claude / codex / opencode 及 Antigravity MCP 配置。装上对应工具后用 `python -m bridge.doctor <id>` 跑一次，验完把 `verified` 改成 true。
 - [ ] **opencode 的文本事件**：会话 id 已经验到了（`--format json` 每行都有 `sessionID`），但回复文本的 `part.text` 没跑通（免费额度用完）。`python -m bridge.doctor opencode` 跑一次，按实际输出调 `parse.text`。
 - [ ] **http 驱动只在测试里验过**：拿本地假服务验了请求 / 回复格式，还没接过真的 harness。
 - [ ] **三个以上 AI 的会议没在真会议上跑过**：界面上 3 个胶囊的冒烟截图正常，实际让 3-4 个一起回话、一起改文件的场面还没试。

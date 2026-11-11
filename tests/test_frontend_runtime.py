@@ -555,5 +555,61 @@ vm.runInContext(js.match(/async function checkConnectionBackend\(signal\) \{[\s\
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+class DiscoveryAndHeartbeatModals(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
+    def test_discovery_and_heartbeat_settings_render_and_submit(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
+const js = fs.readFileSync('static/connections.js', 'utf8');
+let modalHtml = '', posted = [];
+const elements = {};
+function node(id) {
+  return elements[id] ||= {id, value: '', disabled: false, onclick: null, classList: {contains: () => false, remove() {}}};
+}
+const mbox = {
+  querySelectorAll: sel => {
+    if (sel === '[data-hb-field]') return [{dataset: {hbField: 'heartbeat_interval'}, value: '7'}];
+    return [];
+  },
+  querySelector: () => null,
+};
+const context = vm.createContext({
+  URL, uiIcon: () => '', esc: s => String(s ?? ''), mbox,
+  agCat: {members: {antigravity: {standby: true}}},
+  document: {getElementById: node, body: {classList: {remove() {}}}},
+  showModal: html => { modalHtml = html; },
+  hideModal: () => {},
+  refreshContacts: async () => {},
+  fetch: async url => {
+    if (url === '/api/settings/connection') {
+      return {ok: true, json: async () => ({
+        global: {heartbeat_interval: 10},
+        contacts: {},
+        fields: {heartbeat_interval: {label: '心跳间隔（秒）', min: 3, max: 120, default: 10}},
+      })};
+    }
+    return {ok: true, json: async () => ({pending_count: 1, detected: [{id: 'antigravity', label: 'Antigravity', level: 'mcp', via: 'mcp', options: ['mcp'], present: true, mcp_installed: true}]})};
+  },
+  post: async (url, body) => { posted.push([url, body]); return [true, {}]; },
+});
+vm.runInContext(js, context);
+(async () => {
+  await context.checkStartupDiscovery();
+  assert.match(modalHtml, /发现 1 个 Agent/);
+  assert.match(modalHtml, /MCP 待命中/);
+  assert.match(modalHtml, /\/cojam_standby/);
+  await context.openConnectionSettingsModal('antigravity');
+  assert.match(modalHtml, /联系人心跳与超时设置（@antigravity）/);
+  await node('hbSave').onclick({currentTarget: node('hbSave')});
+  assert.equal(posted[0][0], '/api/settings/connection');
+  assert.equal(posted[0][1].id, 'antigravity');
+  assert.equal(posted[0][1].contact.heartbeat_interval, 7);
+})().catch(e => { console.error(e); process.exitCode = 1; });
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 if __name__ == '__main__':
     unittest.main()

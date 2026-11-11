@@ -3,9 +3,12 @@
 会议室里的人（参与者）现在不止 claude 和 codex。装好的 CLI 会被自动发现；没预置的厂商，写一段 JSON 就能接。
 自己的 harness 甚至不用改会议室代码：让它监听一个 HTTP 端口，会议室每轮把话 POST 过去。
 
+- 接支持 ACP（Agent Client Protocol）的程序 → `driver = acp`（常驻 stdio JSON-RPC 会话、流式输出、按讨论/干活模式控制权限并接入文件护栏）
 - 接命令行程序 → [driver = cli](#driver--cli命令行程序)
 - 接自己的服务 → [driver = http](#driver--http驱动自己的-harness)
+- 纯桌面软件兜底 → 一键写入 MCP 插件（支持 Streamable HTTP 与 `mcp-stdio` 桥接），在软件内运行 `/cojam_standby` 进入待命模式
 - 自带两套的专门驱动：`claude`、`codex`（claude 每轮起一个 `claude -p`、codex 每场会议一个 app-server），它们不用配置
+- 本机自动发现目录表：`bridge/catalog/agents.json`，定义各 Agent 的 CLI / ACP / 桌面检测路径与 MCP 配置格式，新增 Agent 只需加一条 JSON。
 
 ---
 

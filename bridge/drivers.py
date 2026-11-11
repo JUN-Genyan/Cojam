@@ -155,7 +155,7 @@ def call_cli(pid, spec, prompt, session_id, images, mode, room):
         if room is not None:
             room.push_live(pid, {"live": line})   # 中途说的话给页面状态行看
 
-    rc, so, se, to = run_stream(cmd, stdin_text, on_line, timeout_for(mode), cwd=ctx["cwd"], env=env,
+    rc, so, se, to = run_stream(cmd, stdin_text, on_line, timeout_for(mode, pid), cwd=ctx["cwd"], env=env,
                                 reg=(lambda p: room.procs.__setitem__(pid, p)) if room is not None else None)
     stdout = "\n".join(buf) if buf else (so or "")
     if to:
@@ -177,7 +177,7 @@ def call_http(pid, spec, prompt, session_id, images, mode, room):
     请求：{"room","room_title","speaker","mode","prompt","session","workdir","goal","images","bridge_url","bridge_key"}
     回复：{"text": "...", "session": "可选的新会话 id"}
     """
-    idle, total = timeout_for(mode)
+    idle, total = timeout_for(mode, pid)
     body = {"room": room.id if room is not None else "", "room_title": room.title() if room is not None else "",
             "speaker": pid, "mode": mode, "prompt": prompt, "session": session_id or "",
             "workdir": room.workdir() if room is not None else os.getcwd(),
@@ -216,17 +216,37 @@ def call_http(pid, spec, prompt, session_id, images, mode, room):
 
 
 # ===================== 分派 =====================
+def standby_worker(pid):
+    """这个联系人现在是不是有桌面端在 MCP 待命。
+
+    有的话优先派给它：桌面软件里的 agent 自己会执行并回复，比再起一个 CLI 更贴近用户看到的东西。
+    待命端掉线就自然回落到本地 CLI，不需要用户改配置。
+    """
+    try:
+        from .members import broker
+        st = broker.status(pid)
+    except Exception:
+        return None
+    return st if (st.get("automatic") and st.get("transport") == "standby") else None
+
+
 def call(pid, prompt, session_id=None, images=(), mode=None, room=None):
     """叫一个 AI。跟 agents.call_ai 同签名，room.ai_caller 指的就是这里。"""
     spec = registry.get(pid)
     if not spec:                       # 没在注册表里（理论上不会）：退回内置处理
         return agents.call_ai(pid, prompt, session_id, images, mode, room)
     driver = spec["driver"]
-    if driver in ("claude", "codex"):
-        return agents.call_ai(pid, prompt, session_id, images, mode, room)
     if mode is None:
         mode = room.mode() if room is not None else "discuss"
+    if room is not None and standby_worker(pid):
+        from .members import broker
+        return broker.call(pid, prompt, session_id, mode, room)
+    if driver in ("claude", "codex"):
+        return agents.call_ai(pid, prompt, session_id, images, mode, room)
     try:
+        if driver == "acp":
+            from . import acp
+            return acp.call(pid, spec, prompt, session_id, images, mode, room)
         if driver == "external":
             from .members import broker
             if room is None:

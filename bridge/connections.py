@@ -13,7 +13,15 @@ from . import access, registry
 from .common import LOG_DIR, NO_WINDOW, read_json, write_json
 
 LOCK = threading.RLock()
-FRESH_SECONDS = 90
+FRESH_SECONDS = 90   # 默认值；实际 = 1.5 × Cojam「连接与心跳」里的掉线时间
+
+
+def fresh_seconds(pid=None):
+    try:
+        from . import conn_settings
+        return int(conn_settings.get("offline_after", pid) * 1.5)
+    except Exception:
+        return FRESH_SECONDS
 
 
 def _path():
@@ -65,7 +73,7 @@ def status(pid):
     if spec["driver"] == "external":
         valid = bool(digest and evidence.get("digest") == digest)
         age = max(0, time.time() - evidence.get("last_seen", 0)) if valid else None
-        connected = age is not None and age <= FRESH_SECONDS
+        connected = age is not None and age <= fresh_seconds(pid)
         state = "connected" if connected else "offline" if valid else "waiting" if digest else "unconfigured"
         return {"state": state, "label": {"connected": "已连接", "offline": "暂未收到新连接", "waiting": "等待对方连接", "unconfigured": "尚未配置连接"}[state],
                 "has_key": bool(digest), "last_seen": evidence.get("last_seen") if valid else None,
@@ -144,7 +152,14 @@ def check(pid):
         return status(pid)  # cannot fabricate a remote connection from an owner request
     ok = False
     try:
-        detail = _http_check(spec) if spec["driver"] == "http" else _local_check(spec)
+        if spec["driver"] == "http":
+            detail = _http_check(spec)
+        elif spec["driver"] == "acp":
+            # ACP 不能只看 --version：要真握手 + 开一个会话，才算「能连」
+            from . import acp
+            detail = acp.probe(spec)
+        else:
+            detail = _local_check(spec)
         ok = True
     except ValueError as e:
         detail = str(e)

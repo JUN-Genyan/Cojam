@@ -1202,12 +1202,14 @@ class Room:
                 self.state["force_work"].discard(a)
         from .members import broker
         broker.cancel(self.id, targets)
+        from . import acp
         for a in running:
             p = self.procs.get(a)
             if p is not None and p.poll() is None:
                 kill_tree(p)
             if a == "codex":
                 agents.stop_codex(self)   # 杀掉这场会议的 app-server 进程树；下一轮自动重起，会话从记录里接上
+            acp.stop(self, a)
         who = "、".join(targets)
         if running:
             msg = "你强行打断了：%s。%s排着的也清掉了。" % ("、".join(running), who)

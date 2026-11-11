@@ -12,6 +12,7 @@ def build(root=None):
     with LOCK:
         sources = [(p, 'bridge/' + p.relative_to(root/'bridge').as_posix()) for p in (root/'bridge').glob('*.py')]
         sources += [(p, 'bridge/presets/' + p.name) for p in (root/'bridge'/'presets').glob('*.json')]
+        sources += [(p, 'bridge/catalog/' + p.name) for p in (root/'bridge'/'catalog').glob('*.json')]
         sources += [(root/'LICENSE','LICENSE'), (root/'packaging'/'member-readme.md','README.md'),
                     (root/'packaging'/'start-member.command','start-member.command'),
                     (root/'packaging'/'start-member.bat','start-member.bat')]

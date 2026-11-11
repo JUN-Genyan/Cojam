@@ -8,7 +8,7 @@ import hmac, json, mimetypes, os, re, secrets, socket, sys, threading, webbrowse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import access, agents, common, connections, devices, install, invites, mcp, members, projects, registry, room as R
+from . import access, agents, common, conn_settings, connections, devices, discovery, install, invites, mcp, members, projects, registry, room as R
 from .common import (AIS, EXTERNAL_SPEAKERS, HERE, HOST, MAX_ANN, MAX_BODY, MAX_UPLOAD, MEET_DIR, PORT, PROJECT,
                      in_dir, kind_of)
 from .guard import USER, guard
@@ -268,13 +268,29 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"invites": invites.listing(), "guests": invites.guest_listing()})
         if path == "/api/claims":
             return self._json(200, {"claims": guard.listing()})
+        if path == "/api/discovery":
+            if (q.get("scan") or [""])[0] in ("1", "true", "yes"):
+                return self._json(200, discovery.scan())
+            discovery.ensure_scanned(async_scan=False)
+            return self._json(200, discovery.status())
+        if path == "/api/settings/connection":
+            return self._json(200, conn_settings.snapshot())
         if path == "/api/agents":
             if (q.get("reload") or [""])[0] in ("1", "true", "yes"):
                 registry.load()      # 用户刚改了 data/agents.d：重读一遍，不用重启服务器
+            # 待命通道不属于某一种 driver：Claude/Codex 的桌面端也能待命，界面要能看到
+            member_rows = {}
+            for s in registry.all_specs():
+                if s.get("kind") == "user":
+                    continue
+                st = members.broker.status(s["id"])
+                if st["automatic"] or s["driver"] == "external":
+                    member_rows[s["id"]] = st
             return self._json(200, dict(registry.catalog(), discovered_presets=registry.discover_hidden_presets(), default_dir=PROJECT, hosts=install.hosts_status(),
                                         local_workspace=self._is_local_owner() and not bool(getattr(self, "_device_id", "")),
                                         owner_devices=devices.listing(getattr(self, "_device_id", "")),
-                                        connections=connections.catalog(), members={s["id"]: members.broker.status(s["id"]) for s in registry.all_specs() if s["driver"] == "external" and s.get("kind") != "user"},
+                                        connections=connections.catalog(), members=member_rows,
+                                        discovery=discovery.status(), connection_settings=conn_settings.snapshot(),
                                         mcp_url="http://127.0.0.1:%d/mcp" % PORT))
         if path in ("/api/state", "/api/messages"):   # 老页面（服务器换了新版、页面还没刷新）：按最近打开的那场回
             rid = R.last_room()
@@ -514,6 +530,26 @@ class Handler(BaseHTTPRequestHandler):
             except devices.DeviceError as error:
                 return self._json(error.code, {"error": str(error)})
             return self._json(200, {"ok": True})
+        if path == "/api/discovery/scan":
+            return self._json(200, discovery.scan())
+        if path == "/api/discovery/connect":
+            ok, res = discovery.connect(str(data.get("id") or ""), data.get("via"))
+            return self._json(200 if ok else 409, res)
+        if path == "/api/discovery/dismiss":
+            return self._json(200, discovery.dismiss(str(data.get("id") or "all")))
+        if path == "/api/settings/connection":
+            snap = conn_settings.save(
+                global_values=data.get("global") if isinstance(data.get("global"), dict) else None,
+                pid=str(data.get("id") or "") or None,
+                contact_values=data.get("contact") if isinstance(data.get("contact"), dict) else None,
+                clear_contact=bool(data.get("clear_contact")),
+            )
+            return self._json(200, {"ok": True, "settings": snap})
+        if path == "/api/members/standby/stop":
+            pid = str(data.get("id") or "")
+            if not pid:
+                return self._json(400, {"error": "缺少成员 id"})
+            return self._json(200, members.broker.stop_standby(pid))
         if path == "/api/contacts/key":
             try:
                 token = access.credential(str(data.get("id") or ""), data.get("revoke") is True)
@@ -903,6 +939,7 @@ def main():
             if extra is not None:
                 extra.owner_lifecycle = srv.owner_lifecycle
     agents.start_reaper()
+    discovery.ensure_scanned(async_scan=True)
     print("会议室已启动：" + url)
     if lan_url:
         print("同一局域网（同一个 WiFi）可扫码或打开：" + lan_url)
