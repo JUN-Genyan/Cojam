@@ -1,0 +1,11 @@
+{
+  "id": "cursor_desktop",
+  "label": "Cursor 桌面版",
+  "letter": "C",
+  "color": "#7c3aed",
+  "driver": "external",
+  "detect": ["%LOCALAPPDATA%\\Programs\\cursor\\Cursor.exe", "%ProgramFiles%\\Cursor\\Cursor.exe", "/Applications/Cursor.app/Contents/MacOS/Cursor", "~/Applications/Cursor.app/Contents/MacOS/Cursor"],
+  "shortcuts": ["Cursor"],
+  "note": "检测到 Cursor 桌面应用；如需直接自动运行，需另外检测到受支持的 Cursor Agent CLI。",
+  "context": "full"
+}

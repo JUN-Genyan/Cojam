@@ -358,12 +358,19 @@ def tailscale_ipv4():
 def find_executable(name, extra_paths=()):
     """Find a command using current paths, including newly installed Windows CLIs or explicit paths."""
     import shutil
+    name = os.path.expandvars(os.path.expanduser(str(name or "").strip()))
     if not name:
         return None
-    expanded = os.path.expandvars(os.path.expanduser(str(name)))
-    if (os.sep in expanded or (os.altsep and os.altsep in expanded)) and os.path.isfile(expanded):
-        return expanded
-    paths = [os.environ.get("PATH", "")]
+    if os.path.dirname(name) and os.path.isfile(name):   # 配置里写的是绝对路径
+        return name
+    home = os.path.expanduser("~")
+    paths = [os.environ.get("PATH", ""),
+             os.path.join(home, ".gemini", "bin"),
+             os.path.join(home, ".local", "bin"),
+             os.path.join(home, ".cargo", "bin"),
+             os.path.join(home, ".bun", "bin"),
+             os.path.join(home, ".opencode", "bin"),
+             os.path.join(home, ".cursor", "bin")]
     if os.name == "nt":
         # A running GUI application does not receive PATH changes made later.
         try:
@@ -377,13 +384,11 @@ def find_executable(name, extra_paths=()):
                     pass
         except ImportError:
             pass
-        home = os.path.expanduser("~")
         local_app = os.environ.get("LOCALAPPDATA", "")
-        paths.extend([os.path.join(home, ".local", "bin"),
-                      os.path.join(home, ".bun", "bin"),
-                      os.path.join(home, ".cargo", "bin"),
-                      os.path.join(home, "scoop", "shims"),
+        paths.extend([os.path.join(home, "scoop", "shims"),
+                      os.path.join(home, ".qoder", "bin", "qodercli"),
                       os.path.join(os.environ.get("APPDATA", ""), "npm"),
+                      os.path.join(local_app, "pnpm"),
                       os.path.join(local_app, "Microsoft", "WinGet", "Links"),
                       os.path.join(local_app, "cursor-agent")])
     for p in extra_paths or ():
@@ -392,7 +397,7 @@ def find_executable(name, extra_paths=()):
             return exp
         if os.path.isdir(exp):
             paths.append(exp)
-    return shutil.which(expanded, path=os.pathsep.join(p for p in paths if p))
+    return shutil.which(name, path=os.pathsep.join(p for p in paths if p))
 
 
 _APP_NAMES = {"at": 0.0, "names": frozenset()}

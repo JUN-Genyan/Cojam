@@ -11,15 +11,22 @@ async function checkConnectionBackend(signal) {
     throw Error('界面与后台版本不一致。请重新打开最新的合拍 Cojam，再刷新此页面。');
   return info;
 }
+function hostFromUrl(value) {
+  try { return new URL(value).hostname.replace(/^\[|\]$/g, '').toLowerCase(); } catch (e) { return ''; }
+}
+function isLoopbackHost(host) {
+  return ['127.0.0.1', 'localhost', '::1'].includes(host);
+}
 function connectionDefaultBase(type, info, origin) {
   if (!['user', 'external', 'mydevice'].includes(type)) return origin;
-  try {
-    const host = new URL(origin).hostname.replace(/^\[|\]$/g, '').toLowerCase();
-    // When already using a remote address, it is the only address known to
-    // work from this device; replacing it with the server's LAN breaks tunnels.
-    if (!['127.0.0.1', 'localhost', '::1'].includes(host)) return origin;
-  } catch (e) { return origin; }
-  if (type === 'mydevice') return (info && info.tailscale_url) || (info && info.lan_url) || origin;
+  const host = hostFromUrl(origin);
+  if (!host) return origin;
+  // When already using a remote address, it is the only address known to
+  // work from this device; replacing it with the server's LAN breaks tunnels.
+  if (!isLoopbackHost(host)) return origin;
+  // 在本机打开页面时给别的设备生成地址：同一个 WiFi 最常用，默认局域网。
+  // 没有局域网地址（或对方在外部网络）才用 Tailscale。
+  if (type === 'mydevice') return (info && info.lan_url) || (info && info.tailscale_url) || origin;
   return (info && info.lan_url) || origin;
 }
 function connectionBaseWarning(base) {
@@ -55,18 +62,23 @@ async function renderDeviceSetup(w) {
   const custom = document.getElementById('connDeviceCustomBase');
   const hint = document.getElementById('connDeviceBaseHint');
   const options = [];
-  if (w.info && w.info.tailscale_url) options.push([w.info.tailscale_url, 'Tailscale（完整界面）']);
-  if (w.info && w.info.lan_url) options.push([w.info.lan_url, '局域网']);
-  options.push([location.origin, '当前地址']);
+  if (w.info && w.info.lan_url) options.push([w.info.lan_url, '局域网（同一个 WiFi）']);
+  if (w.info && w.info.tailscale_url) options.push([w.info.tailscale_url, 'Tailscale（对方也登录同一 Tailscale）']);
+  options.push([location.origin, '当前地址（仅这台电脑）']);
   select.innerHTML = options.map(([value, label]) => '<option value="' + esc(value) + '">' + esc(label) + '</option>').join('')
     + '<option value="__custom__">自定义 HTTPS 地址</option>';
   const known = options.some(([value]) => value === w.base);
   select.value = known ? w.base : '__custom__';
   custom.value = known ? '' : w.base;
   custom.hidden = known;
+  // 页面开在本机回环地址时，8765 只有这台电脑能打开；设备链接换成
+  // 局域网（8766）或 Tailscale（8767）是正常的，不说清楚会以为出了错。
+  const localOpen = isLoopbackHost(hostFromUrl(location.origin));
   const showHint = () => {
     const issue = connectionBaseWarning(w.base);
-    hint.textContent = issue || '用要接入的设备扫描二维码或打开链接。只发给可信设备。';
+    hint.textContent = issue || (localOpen
+      ? '本机界面用的 ' + new URL(location.origin).host + ' 只有这台电脑能打开；手机 / 其他设备请选局域网地址（同一个 WiFi），人在外面时选 Tailscale。'
+      : '用要接入的设备扫描二维码或打开链接。只发给可信设备。');
     hint.classList.toggle('warn', !!issue);
   };
   select.onchange = () => {
@@ -123,22 +135,26 @@ async function generateDeviceCode(w) {
   } catch (e) { wizardError('请填写完整的服务根地址，例如 https://example.ts.net'); return; }
   setConnectionBusy(w, true);
   try {
-    const [ok, data] = await post('/api/devices/code', {
+    const [ok, data] = await post('/api/devices/link', {
       label: connectionDeviceName(w.form.deviceName), base: w.base
     });
     if (!ok) throw Error(data.error || '生成失败');
     const issue = connectionBaseWarning(w.base);
     const box = document.getElementById('connDeviceResult');
-    box.innerHTML = '<div class="connection-evidence success"><b>✓ 接入码已生成</b>'
-      + '<p>10 分钟内有效，只能使用一次。用要接入的设备扫描二维码或打开链接。</p></div>'
+    box.innerHTML = '<div class="connection-evidence success"><b>✓ 个人设备链接已生成</b>'
+      + '<p id="connDeviceLinkStatus">此链接可重复使用，直到你撤销设备。请复制并保存，只发给你信任的设备；持有链接的人可使用你的身份。</p></div>'
+      + (isLoopbackHost(hostFromUrl(location.origin))
+        ? '<p class="hint">链接里的地址和你在本机用的 ' + esc(new URL(location.origin).host) + ' 不同是正常的：本机入口只给这台电脑用，其他设备走局域网或 Tailscale 入口。</p>'
+        : '')
       + (issue ? '<p class="hint connection-base-warning">' + esc(issue) + ' 先换一个设备能打开的地址。</p>'
                : '<div id="connQr" class="connection-qr" aria-label="设备接入二维码"></div>')
       + '<input id="connDeviceUrl" readonly aria-label="设备接入链接"><button id="connDeviceCopy">复制接入链接</button>';
     document.getElementById('connDeviceUrl').value = data.url || '';
+    w.deviceCopied = false;
     document.getElementById('connDeviceCopy').onclick = async event => {
-      await copyText(data.url || ''); event.target.textContent = '已复制';
+      await copyText(data.url || ''); w.deviceCopied = true; event.target.textContent = '已复制';
     };
-    if (!issue) renderConnectionQrUrl('connQr', data.url || connectionDeviceUrl(w.base, data.code));
+    if (!issue) renderConnectionQrUrl('connQr', data.url || '');
     clearInterval(w.timer);
     w.timer = setInterval(() => pollDeviceEnrollment(w, data.id), 2000);
   } catch (error) {
@@ -152,11 +168,17 @@ async function pollDeviceEnrollment(w, id) {
   if (w.devicePolling) return;
   w.devicePolling = true;
   try {
-    const [ok, status] = await connectionGet('/api/devices/code/status?id=' + encodeURIComponent(id));
-    if (ok && status.used && wizardCurrent(w)) {
-      clearInterval(w.timer);
-      try { await refreshContacts(); } finally { if (wizardCurrent(w)) hideModal(); }
-    } else if (ok && status.expired) clearInterval(w.timer);
+    const [ok, status] = await connectionGet('/api/devices');
+    const device = ok && (status.devices || []).find(item => item.id === id);
+    if (device && device.last_seen && wizardCurrent(w)) {
+      if (w.deviceCopied) {
+        clearInterval(w.timer);
+        try { await refreshContacts(); } finally { if (wizardCurrent(w)) hideModal(); }
+      } else {
+        const message = document.getElementById('connDeviceLinkStatus');
+        if (message) message.textContent = '设备已接入。请复制并保存这个链接，以后可以在其他浏览器重复打开；关闭后不会再次显示。';
+      }
+    }
   } catch (e) { /* Retry while the code remains valid. */ }
   finally { w.devicePolling = false; }
 }
@@ -227,11 +249,11 @@ function connectionNameFields(w) {
 function renderConnectionSetup(w) {
   let content = '<h3>' + CONNECTION_TYPES[w.type][0] + '</h3>';
   if (w.type === 'mydevice') {
-    content += '<p class="hint">接入码 10 分钟内有效，只能使用一次。设备拿到长期凭证后，重启应用也不用重新接入。</p>'
+    content += '<p class="hint">生成可重复使用的个人设备链接，保存后可在不同浏览器打开。该链接拥有你的完整权限，请妥善保管。</p>'
       + '<label>设备名称<input id="connDeviceName" maxlength="40" placeholder="例如：我的 iPhone" value="' + esc(w.form.deviceName || '') + '"></label>'
       + '<label>接入地址<select id="connDeviceBase"></select></label><input id="connDeviceCustomBase" type="url" placeholder="https://example.ts.net" aria-label="自定义接入地址" hidden>'
       + '<p class="hint" id="connDeviceBaseHint"></p>'
-      + '<button id="connDeviceCreate" class="pri">生成设备接入码</button>'
+      + '<button id="connDeviceCreate" class="pri">生成个人设备链接</button>'
       + '<div id="connDeviceResult"></div>'
       + '<h4>已接入的设备</h4><div id="connDeviceList">正在读取…</div>';
   } else if (w.type === 'user') {
@@ -245,10 +267,14 @@ function renderConnectionSetup(w) {
       + '<button id="connGuestGenerate" class="pri">生成邀请</button><div id="connGuestResult"></div>'
       + '<h4>邀请与游客</h4><div id="connInviteList">正在读取…</div>';
   } else if (w.type === 'local') {
-    const local = [...CONTACTS, ...((agCat && agCat.discovered_presets) || [])].filter(a => ['cli', 'acp', 'claude', 'codex'].includes(a.driver) && a.enabled);
+    const local = localAgentChoices();
+    const outside = [...CONTACTS, ...((agCat && agCat.discovered_presets) || [])].filter(a => a.driver === 'external' && a.kind !== 'user' && a.enabled);
     w.localChoice = w.localChoice || (local.find(a => a.enabled) || {}).id || '__custom__';
-    if (w.localChoice !== '__custom__' && !local.some(a => a.id === w.localChoice)) w.localChoice = (local[0] || {}).id || '__custom__';
-    content += '<p class="hint">自动检测运行合拍的设备上的程序；安装或卸载后可重新检索，也可打开「本机 Agent 扫描」一键连接。</p><label>选择程序<select id="connLocal">' + local.map(a => '<option value="' + esc(a.id) + '"' + (w.localChoice === a.id ? ' selected' : '') + '>' + esc(a.label) + ' · 已检测到</option>').join('') + '<option value="__custom__"' + (w.localChoice === '__custom__' ? ' selected' : '') + '>自定义 CLI / ACP 程序…</option></select></label><div class="btns" style="justify-content:flex-start;margin:6px 0"><button id="connRescan" type="button">重新检索已安装程序</button><button id="connOpenScan" type="button">打开本机 Agent 全盘扫描</button></div><div id="connCustom"' + (w.localChoice === '__custom__' ? '' : ' hidden') + '>' + connectionNameFields(w.localChoice === '__custom__' ? w : {...w, saved: false}) + '<label>协议类型<select id="connLocalDriver"><option value="cli"' + (w.form.localDriver !== 'acp' ? ' selected' : '') + '>无头命令行 (CLI)</option><option value="acp"' + (w.form.localDriver === 'acp' ? ' selected' : '') + '>ACP 协议 (Agent Client Protocol)</option></select></label><label>命令或可执行文件路径<input id="connCommand" placeholder="my-agent 或完整程序路径" value="' + esc(w.form.command || '') + '"></label><label>调用参数（JSON 数组）<textarea id="connArgs">' + esc(w.form.args || (w.form.localDriver === 'acp' ? '["acp"]' : '["-p", "{prompt}"]')) + '</textarea></label></div><button id="connCheck" class="pri">检测并验证程序</button><p class="hint">仅运行 --version，不调用模型；登录和额度在首次回复时确认。</p>';
+    if (w.localChoice !== '__custom__' && !local.some(a => a.id === w.localChoice)) {
+      w.localChoice = (local[0] || {}).id || '__custom__';
+      w.id = ''; w.saved = false; w.status = null;
+    }
+    content += '<p class="hint">自动检测运行合拍的设备上的程序；安装或卸载后可重新检索，也可打开「本机 Agent 扫描」一键连接。</p><label>选择程序<select id="connLocal">' + local.map(a => '<option value="' + esc(a.id) + '"' + (w.localChoice === a.id ? ' selected' : '') + '>' + esc(a.label) + ' · 已检测到</option>').join('') + '<option value="__custom__"' + (w.localChoice === '__custom__' ? ' selected' : '') + '>自定义 CLI / ACP 程序…</option></select></label><div class="btns" style="justify-content:flex-start;margin:6px 0"><button id="connRescan" type="button">重新检索已安装程序</button><button id="connOpenScan" type="button">打开本机 Agent 全盘扫描</button></div>' + (outside.length ? '<p class="hint">已检测到桌面应用。选择配置接入；桌面应用本身不能由会议室直接调用。</p>' + outside.map(a => '<button type="button" data-external-agent="' + esc(a.id) + '">配置 ' + esc(a.label) + '</button>').join('') : '') + '<div id="connCustom"' + (w.localChoice === '__custom__' ? '' : ' hidden') + '>' + connectionNameFields(w.localChoice === '__custom__' ? w : {...w, saved: false}) + '<label>协议类型<select id="connLocalDriver"><option value="cli"' + (w.form.localDriver !== 'acp' ? ' selected' : '') + '>无头命令行 (CLI)</option><option value="acp"' + (w.form.localDriver === 'acp' ? ' selected' : '') + '>ACP 协议 (Agent Client Protocol)</option></select></label><label>命令或可执行文件路径<input id="connCommand" placeholder="my-agent 或完整程序路径" value="' + esc(w.form.command || '') + '"></label><label>调用参数（JSON 数组）<textarea id="connArgs">' + esc(w.form.args || (w.form.localDriver === 'acp' ? '["acp"]' : '["-p", "{prompt}"]')) + '</textarea></label></div><button id="connCheck" class="pri">检测并验证程序</button><p class="hint">仅运行 --version，不调用模型；登录和额度在首次回复时确认。</p>';
   } else {
     content += connectionNameFields(w);
     if (w.type === 'http') {
@@ -275,17 +301,37 @@ function renderConnectionSetup(w) {
   }
   if (w.type === 'local') {
     if (document.getElementById('connOpenScan')) document.getElementById('connOpenScan').onclick = () => openDiscoveryModal(true);
+    document.querySelectorAll('[data-external-agent]').forEach(button => { button.onclick = async () => {
+      const id = button.dataset.externalAgent;
+      if ((agCat.discovered_presets || []).some(a => a.id === id)) {
+        const [ok, result] = await post('/api/agents/restore', {id});
+        if (!ok) { wizardError(result.error || '恢复联系人失败'); return; }
+      }
+      startConnectionWizard(id);
+    }; });
     document.getElementById('connRescan').onclick = async () => {
       if (w.busy) return;
       setConnectionBusy(w, true);
-      try { await refreshContacts(w.controller.signal, true); if (wizardCurrent(w)) { w.id=''; w.saved=false; w.localChoice=''; w.status=null; renderConnectionWizard(); } }
+      captureConnectionForm(w);
+      const button = document.getElementById('connRescan');
+      button.textContent = '正在检索…';
+      try {
+        await refreshContacts(w.controller.signal, true);
+        if (wizardCurrent(w)) {
+          w.status = (agCat.connections || {})[w.id] || null;
+          renderConnectionWizard();
+          wizardError('');
+          const help = document.getElementById('connProgramHelp');
+          if (help) help.textContent = '检索完成。列表已更新，可选择程序继续接入。';
+        }
+      }
       catch (e) { if (wizardCurrent(w)) wizardError('检索失败，请检查后台后重试。'); }
       finally { if (wizardCurrent(w)) setConnectionBusy(w, false); }
     };
-    const selected = connectionContact(w) || CONTACTS.find(a => a.id === w.localChoice);
+    const selected = [...CONTACTS, ...(agCat.discovered_presets || [])].find(a => a.id === w.localChoice);
     const help = document.createElement('p');
     help.id = 'connProgramHelp'; help.className = 'hint';
-    help.textContent = selected && !selected.enabled ? '尚未找到 ' + selected.label + '。如果已安装，请重启应用以更新 PATH，或选择“自定义 CLI 程序”填写完整路径。也可先选择标有“已检测到”的程序。' : '';
+    help.textContent = !localAgentChoices().length ? '没有检测到可调用的 CLI。安装后点“重新检索”，或填写完整程序路径。' : selected ? '已检测到 ' + selected.label + '。检查程序启动后，即可选择加入的会话。' : '';
     document.getElementById('connLocal').parentElement.after(help);
     document.getElementById('connLocal').onchange = async e => {
       if (w.busy) return;
@@ -326,6 +372,10 @@ function renderConnectionSetup(w) {
   if (w.token) renderConnectionCredentials(w);
   updateConnectionEvidence(w);
   if (w.type === 'external' && w.id) w.timer = setInterval(() => pollConnectionEvidence(w), 2000);
+}
+function localAgentChoices() {
+  return [...new Map([...CONTACTS, ...((agCat && agCat.discovered_presets) || [])]
+    .filter(a => ['cli', 'acp', 'claude', 'codex'].includes(a.driver) && a.enabled).map(a => [a.id, a])).values()];
 }
 function captureConnectionForm(w) {
   const value = id => { const e = document.getElementById(id); return e ? e.value.trim() : undefined; };
@@ -641,7 +691,7 @@ async function assignConnection(w) {
 function renderConnectionComplete(w) {
   if (w.type === 'mydevice') {
     wizardFrame(w, '<div class="connection-complete"><span class="connection-symbol">✓</span><h3>我的设备</h3>'
-      + '<p class="hint">在要接入的设备上打开接入码链接。接入后，这台设备会获得完整界面，并以「我」的身份参与会话。</p>'
+      + '<p class="hint">在要接入的设备上打开个人链接，即可使用完整界面并以「我」的身份参与会话。</p>'
       + ((w.devices || []).length ? '<p class="hint">已接入 ' + w.devices.length + ' 台设备。可随时在接入页撤销。</p>' : '')
       + '</div><div class="btns"><button id="connDone">完成</button></div>');
     document.getElementById('connDone').onclick = () => { hideModal(); refreshContacts(); loadState(); };

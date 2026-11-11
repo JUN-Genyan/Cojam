@@ -36,6 +36,15 @@ class InviteStore(unittest.TestCase):
         clear_files()
         self.room = R.rooms.create("游客邀请测试", "", DATA, participants=[])
 
+    def test_guest_credential_survives_registry_reload(self):
+        issued = invites.create(self.room.id, {"read": True}, "朋友", 7)
+        joined = invites.redeem(issued["token"], device_key="phone-key", name="手机", device="iPhone")
+        pid = joined["contact"]["id"]
+        registry.SPECS.clear()
+        registry.load()
+        self.assertEqual(access.identify(joined["token"]), pid)
+        self.assertIn(self.room.id, [room["id"] for room in access.visible_rooms(pid)])
+
     def test_create_returns_token_and_stores_only_digest(self):
         issued = invites.create(self.room.id, {"read": True, "post": False}, "朋友", 7)
         self.assertRegex(issued["token"], r"^inv_[0-9a-f]{24}\.")

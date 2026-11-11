@@ -55,6 +55,10 @@ def _compose(spec, base_ctx, session_id, images, mode, prompt):
     a = spec["args"]
     seq = list(a["base"])
     seq += list(a["work"] if mode == "work" else a["read"])
+    if base_ctx.get("model"):
+        seq += list(a.get("model") or [])
+    if base_ctx.get("effort"):
+        seq += list(a.get("effort") or [])
     seq += list(a["resume"] if session_id else a["new"])
     out = []
     if images and spec["images"]:
@@ -186,6 +190,8 @@ def call_http(pid, spec, prompt, session_id, images, mode, room):
     if room is not None:
         from .access import permissions
         body["permissions"] = permissions(room, pid)
+    model, effort = room.effective_models(pid) if room is not None else tuple(spec["default"])
+    body["model"], body["effort"] = model, effort
     headers = {"Content-Type": "application/json"}
     headers.update(spec.get("headers") or {})
     if spec.get("token"):

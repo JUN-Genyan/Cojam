@@ -359,6 +359,11 @@ def _member_room_class():
 
 
 def main(argv=None):
+    # Redirected output uses the Windows locale by default. Chinese connection
+    # messages must not terminate the worker on an English-language machine.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="把本设备的 Harness 加入共享会议室，自动接收任务并回复")
     parser.add_argument("--server", required=True)
     parser.add_argument("--agent", required=True)

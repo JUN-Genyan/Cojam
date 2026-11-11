@@ -18,8 +18,19 @@
 本机 CLI 先检测程序，不需要接入密钥；HTTP 回调会测试实际回复。
 外部 Harness 在收到认证请求后确认连接；其他用户可以打开网页邀请自动连接。
 可以直接选择已有会话或新建项目与会话，权限只授予你选择的成员。
-左侧「⋯」管理全局联系人，点击已有联系人可继续接入、重置或撤销密钥。
+点击左侧已有联系人可继续接入、重置或撤销密钥；联系人旁的删除按钮用于移除接入。
 完整流程见 [CONTACTS.md](CONTACTS.md)。高级驱动配置仍保存在 `data/agents.d/<id>.json`。
+
+### 模型与思考强度
+
+点击会话顶部的 Agent，在详情最上方用下拉列表设置当前会话的模型与思考强度，自定义模型 ID 可单独填写。保存后下一轮生效；恢复默认也需要保存。
+CLI 只有在 `args` 参数模板中包含 `{model}` / `{effort}` 时才允许对应设置，防止保存后驱动实际忽略参数。
+HTTP / 外部成员可在接入配置中声明 `models`、`efforts`；HTTP 请求包含 `model` 和 `effort`，服务端负责执行。
+外部成员连接协议仍使用会话明确选择的设置，模型的账户权限由成员端确认。
+
+模型可用的思考强度不同，可添加 `"model_efforts": {"fast": [], "reasoning": ["low", "high"]}`。
+空数组表示该模型不提供思考强度；未单独声明的模型沿用 `efforts`。
+Codex 使用本机模型缓存提供各模型的思考强度。其他 Agent 的列表仍来自接入配置，尚未实现统一账户模型检索，界面会说明来源。
 
 ---
 
@@ -47,7 +58,7 @@
 
 | 工具 | 写到哪 | 备注 |
 |---|---|---|
-| Google Antigravity | `~/.gemini/config/mcp_config.json` | 格式是从它自己的可执行文件里扒出来的：`mcpServers` + Streamable HTTP 的 `url` |
+| Google Antigravity | `~/.gemini/config/mcp_config.json` | 格式是从它自己的可执行文件里扒出来的：`mcpServers` + Streamable HTTP 的 `url`。平时不用这一步：Antigravity 的 `agy` CLI 会被自动发现并作为本机 Agent 调用；这里只用于让 Antigravity 的 IDE agent 自己经 MCP 发言 |
 | Cursor | `~/.cursor/mcp.json` | |
 | Claude Code | 由 `claude mcp add` 写 | 不手改它的配置 |
 | Codex | `~/.codex/config.toml` | 加一段 `[mcp_servers.ai-bridge]` |
@@ -117,14 +128,14 @@
 
 | 顺序 | 位置 | 用途 |
 |---|---|---|
-| 1 | `bridge\presets\*.json` | 仓库自带的内置预置（gemini、opencode、crush、aider、qwen、cursor） |
+| 1 | `bridge\presets\*.json` | 仓库自带的内置预置（gemini、opencode、crush、aider、qwen、cursor、antigravity） |
 | 2 | `<数据目录>\agents.d\*.json` | 自己加的，一个 agent 一个文件 |
 | 3 | `<数据目录>\agents.json` | 一个文件写几个：`{"agents": [ … ]}` |
 | 4 | 环境变量 `ROUNDTABLE_AGENTS` | 指向一个目录或一个文件（调试、覆盖用） |
 
 数据目录默认是项目里的 `data\`（可用 `ROUNDTABLE_LOG_DIR` 改）。
 
-**启用规则**：配置里没写 `enabled` 时，看 `bin` 里的命令在不在 PATH 里。装了就是启用，没装就不出现。
+**启用规则**：配置里没写 `enabled` 时，看 `bin` 里的命令在不在 PATH 里，也会找常见安装目录（如 Antigravity 的 `~/.gemini/bin`）。`bin` 里可以直接写绝对路径或带环境变量的路径（如 `%USERPROFILE%\.gemini\bin\agy.exe`）。装了就是启用，没装就不出现。
 所以把预置文件全拷进仓库也不会冒出七个用不了的 agent。
 
 改完不用重启服务器：点开会议室的"参会者"，或者 `GET /api/agents` 看新配置有没有读到。
@@ -304,6 +315,7 @@
 | id | 命令参数来源 | 实测 |
 |---|---|---|
 | `opencode` | 照本机 `opencode run --help` 抄的，会话 id 从 JSON 每行取（跑通过） | 文本事件没跑通（免费额度用完），可能要用 doctor 微调 `parse.text` |
+| `antigravity` | Antigravity 自带的 `agy` CLI v1.4.12：`-p` 非交互、`--output-format json` 取 `response` / `conversation_id`、`--conversation` 续接；预置里清空 `SSH_*`，否则 agy 会改用文件令牌、读不到 Windows 已登录的凭据 | 已实测讨论、续接、干活三种模式 |
 | `cursor` | 照本机 `cursor-agent --help` 抄的 | 没登录，JSON 形状没验到 |
 | `gemini` | 照 gemini-cli 的 headless 文档 | 没实测 |
 | `qwen` | gemini-cli 的分支，同款参数 | 没实测 |

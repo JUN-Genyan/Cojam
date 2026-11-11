@@ -1,0 +1,22 @@
+{
+  "id": "devin",
+  "label": "Devin",
+  "letter": "D",
+  "color": "#7b61ff",
+  "driver": "external",
+  "detect": [
+    "%LOCALAPPDATA%\\Programs\\Devin\\Devin.exe",
+    "%ProgramFiles%\\Devin\\Devin.exe",
+    "/Applications/Devin.app/Contents/MacOS/Devin",
+    "~/Applications/Devin.app/Contents/MacOS/Devin"
+  ],
+  "shortcuts": ["Devin"],
+  "note": "会外参与者：会议室不主动叫它。检测到 Devin 桌面端即出现在联系人里；它支持 MCP 或 HTTP 时，用联系人接入密钥即可参与受邀会话。",
+  "context": "full",
+  "models": [],
+  "efforts": [],
+  "default": [
+    "",
+    ""
+  ]
+}

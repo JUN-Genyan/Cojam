@@ -73,6 +73,17 @@ class DeviceCredentials(unittest.TestCase):
         saved = json.loads(Path(DATA, "account.json").read_text(encoding="utf-8"))
         self.assertEqual(saved["id"], first["id"])
 
+    def test_reusable_device_link_survives_time_and_is_revocable(self):
+        with patch.object(devices.time, 'time', return_value=100000):
+            link = devices.create_link('iPhone')
+        token, device = link['token'], link['device']
+        self.assertNotIn(token, Path(DATA, 'devices.json').read_text(encoding='utf-8'))
+        with patch.object(devices.time, 'time', return_value=100000 + 86400 * 60):
+            self.assertEqual(devices.verify(token)['id'], device['id'])
+            self.assertEqual(devices.verify(token)['id'], device['id'])
+        devices.revoke(device['id'])
+        self.assertIsNone(devices.verify(token))
+
     def test_code_is_one_time_and_creates_a_device(self):
         code = devices.create_code("我的手机")
         self.assertRegex(code["token"], r"^code_[0-9a-f]{24}\.")
@@ -107,8 +118,52 @@ class DeviceCredentials(unittest.TestCase):
         self.assertIsNone(devices.verify(enrolled["token"]))
         self.assertEqual(devices.listing(), [])
 
+    def test_reenroll_same_client_replaces_record(self):
+        first = devices.enroll(devices.create_code("iPhone")["token"], "iPhone", "dc_same")
+        second = devices.enroll(devices.create_code("iPhone 新")["token"], "iPhone 新", "dc_same")
+        self.assertEqual(first["device"]["id"], second["device"]["id"])
+        self.assertIsNone(devices.verify(first["token"]))            # 旧凭证立即换新
+        self.assertIsNotNone(devices.verify(second["token"]))
+        saved = json.loads(Path(DATA, "devices.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(saved["devices"]), 1)                    # 同一台设备只有一条记录
+        self.assertEqual(saved["devices"][0]["label"], "iPhone 新")
+        self.assertEqual(devices.listing()[0]["label"], "iPhone 新")
+
+    def test_reenroll_same_client_revives_revoked_record(self):
+        first = devices.enroll(devices.create_code("iPad")["token"], "iPad", "dc_pad")
+        devices.revoke(first["device"]["id"])
+        second = devices.enroll(devices.create_code("iPad")["token"], "iPad", "dc_pad")
+        self.assertEqual(first["device"]["id"], second["device"]["id"])
+        self.assertEqual([d["id"] for d in devices.listing()], [first["device"]["id"]])
+
+    def test_different_clients_are_separate_devices(self):
+        devices.enroll(devices.create_code("iPhone")["token"], "iPhone", "dc_a")
+        devices.enroll(devices.create_code("Windows")["token"], "Windows", "dc_b")
+        self.assertEqual(len(devices.listing()), 2)
+
+    def test_enroll_without_client_id_appends(self):
+        devices.enroll(devices.create_code("a")["token"], "a")
+        devices.enroll(devices.create_code("b")["token"], "b")
+        self.assertEqual(len(devices.listing()), 2)
+
 
 class DeviceHTTP(unittest.TestCase):
+    def test_reusable_link_across_two_browsers_and_revocation(self):
+        from urllib.parse import urlsplit, parse_qs
+        self.assertEqual(call('/api/devices/link', {'label':'iPhone', 'base':'http://192.168.1.9:8766'})[0], 403)
+        status, body, _ = call('/api/devices/link', {'label':'iPhone', 'base':'http://192.168.1.9:8766'}, token=web.RT_TOKEN)
+        self.assertEqual(status, 200)
+        link = body_json(body)
+        token = parse_qs(urlsplit(link['url']).fragment)['device'][0]
+        for _ in range(2):
+            status, _, headers = call('/api/devices/restore', {'token':token})
+            self.assertEqual(status, 200)
+            self.assertIn('cojam_device=', headers['Set-Cookie'])
+            self.assertEqual(call('/api/rooms', token=token)[0], 200)
+        self.assertEqual(call('/api/devices/revoke', {'id':link['id']}, token=web.RT_TOKEN)[0], 200)
+        self.assertEqual(call('/api/devices/restore', {'token':token})[0], 401)
+        self.assertEqual(call('/api/rooms', token=token)[0], 403)
+
     def make_device(self, label="我的手机"):
         status, body, _ = call("/api/devices/code", {"label": label, "base": "http://192.168.1.9:8766"}, token=web.RT_TOKEN)
         self.assertEqual(status, 200)
@@ -116,6 +171,17 @@ class DeviceHTTP(unittest.TestCase):
         status, body, headers = call("/api/devices/enroll", {"code": code, "label": label})
         self.assertEqual(status, 200)
         return body_json(body)["token"], body_json(body)["device"], headers
+
+    def test_enroll_route_dedupes_by_client_id(self):
+        ids = []
+        for _ in range(2):
+            status, body, _ = call("/api/devices/code", {"label": "iPhone", "base": "http://192.168.1.9:8766"}, token=web.RT_TOKEN)
+            self.assertEqual(status, 200)
+            code = body_json(body)["code"]
+            status, body, _ = call("/api/devices/enroll", {"code": code, "label": "iPhone", "client_id": "dc_http"})
+            self.assertEqual(status, 200)
+            ids.append(body_json(body)["device"]["id"])
+        self.assertEqual(ids[0], ids[1])
 
     def test_code_and_device_routes(self):
         token, device, headers = self.make_device()
@@ -209,6 +275,17 @@ class DeviceHTTP(unittest.TestCase):
         self.assertIn("/api/devices/enroll", html)
         self.assertIn("location.replace('/')", html)
         self.assertIn("cojam_owner_device_token", html)
+
+    def test_enroll_page_redirects_already_enrolled_devices(self):
+        request = urllib.request.Request(BASE + "/enroll", headers={"Host": "192.168.1.9"})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            html = response.read().decode("utf-8")
+        # 重开旧接入链接的设备：先认已有凭证（cookie 或本地备份），不再逼着要新码
+        self.assertIn("alreadyEnrolled", html)
+        self.assertIn("/api/devices/restore", html)
+        self.assertIn('name="rt-token"', html)
+        self.assertIn('id="enter"', html)
+        self.assertIn("不需要新的接入码", html)
 
 
 if __name__ == "__main__":

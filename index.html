@@ -531,6 +531,7 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
 <script src="/static/workspace.js"></script>
 <script src="/static/qrcode.min.js"></script>
 <script src="/static/connections.js"></script>
+<script src="/static/model-settings.js"></script>
 <script>
 (function(){const m=document.querySelector('meta[name=rt-token]'),t=m?m.content:'';if(!t)return;if(t.startsWith('dev_')){try{localStorage.setItem('cojam_owner_device_token',t)}catch(e){}}const f=window.fetch;window.fetch=function(u,o){o=o||{};const h=new Headers(o.headers||{});h.set('X-RT-Token',t);o.headers=h;return f.call(this,u,o)}})();
 // Each owner tab registers separately. A short grace period permits reload and tab handoff.
@@ -897,13 +898,13 @@ function drawCaps(){
     capsEl.dataset.k=key;capsEl.innerHTML='';
     ids.forEach(a=>{
       const b=document.createElement('button');b.type='button';b.className='cap';b.dataset.ai=a;
-      b.style.setProperty('--c',agentColor(a));b.onclick=()=>((agentMeta(a)||{}).driver==='external'?openAgents():openAi(a));capsEl.appendChild(b);
+      b.style.setProperty('--c',agentColor(a));b.onclick=()=>((agentMeta(a)||{}).kind==='user'?openAgents():openAi(a));capsEl.appendChild(b);
     });
   }
   ids.forEach(a=>{
     const b=capsEl.querySelector('.cap[data-ai="'+a+'"]');if(!b)return;
     const [t,c]=capText(a);if(b.innerHTML!==t)b.innerHTML=t;
-    b.className=c;b.title=ctxTitle(S&&S.ais&&S.ais[a]);
+    b.className=c;b.title='点击设置模型与思考强度。'+ctxTitle(S&&S.ais&&S.ais[a]);
   });
 }
 const quickEl=document.getElementById('quick');
@@ -1026,7 +1027,18 @@ function copyText(t){
 }
 function openAi(a){
   const x=S&&S.ais&&S.ais[a];if(!x)return;
-  let h='<h3>'+a+'</h3>';
+  let h='<h3>'+esc((CONTACTS.find(c=>c.id===a)||{}).label||a)+'</h3>';
+  const mo=x.model||{models:[],efforts:[],model:'',effort:''};
+  const anyBusy=!!(S&&((S.running||[]).length||S.queued));
+  h+=modelSettingsMarkup(mo,anyBusy);
+  const spec=agentMeta(a)||{};
+  if(!['claude','codex'].includes(spec.driver)&&!x.handoff){
+    h+='<div class="btns"><button type="button" id="aClose">关闭</button></div>';
+    showModal(h);bindModelSettings(a,mo,anyBusy);
+    document.getElementById('aClose').onclick=hideModal;
+    return;
+  }
+  h+='<h3 style="margin-top:14px">会话与终端</h3>';
   if(!x.session)h+='<div class="hint">还没叫过它，先在会议里 @ 它一次。</div>';
   else h+='<div class="hint">'+(x.handed_off?'现在在终端里，网页里不会叫它。':'在会议里。')+'</div><code>'+esc(x.cmd||'')+'</code>';
   h+='<div class="btns"><button type="button" id="aClose">关闭</button>';
@@ -1036,23 +1048,10 @@ function openAi(a){
   const canC=x.session&&!x.handed_off&&!x.compacting;
   h+='<h3 style="margin-top:14px">压缩上下文</h3><div class="hint">'+(x.compacting?'正在压缩，压完会议里会插一条消息。':!x.session?'还没建会话，不用压。':x.handed_off?'在终端里，收回来再压。':'聊久了会变慢、变贵。压完它只记要点，另一个 AI 不受影响。'+(x.ctx&&x.ctx.used?'<br>现在上下文用了 '+fmtK(x.ctx.used)+(x.ctx.window?' / '+fmtK(x.ctx.window)+'（'+Math.round(x.ctx.used*100/x.ctx.window)+'%）':'')+'。':''))+'</div>'+
     '<div class="btns"><button type="button" id="aCompact"'+(canC?'':' disabled')+'>压缩 '+a+'</button></div>';
-  const mo=x.model||{models:[],efforts:[],model:'',effort:''};
-  const anyBusy=!!(S&&((S.running||[]).length||S.queued));
-  h+='<h3 style="margin-top:14px">模型和 effort（这场会议）</h3><div class="hint">现在生效：'+esc(mo.label||'默认 · 默认')+'。空 = 用会议室默认（'+esc(mo.default||'')+'）。</div>'+
-    '<input class="mi" id="mModel" list="mModels" placeholder="会议室默认（可手填模型名）" value="'+esc(mo.model)+'"><datalist id="mModels">'+mo.models.map(v=>'<option value="'+esc(v)+'">').join('')+'</datalist>'+
-    '<select id="mEffort"><option value="">默认</option>'+mo.efforts.map(v=>'<option value="'+esc(v)+'"'+(v===mo.effort?' selected':'')+'>'+esc(v)+'</option>').join('')+'</select>'+
-    '<div class="btns"><button type="button" id="mSave"'+(anyBusy?' disabled':'')+'>保存模型设置</button></div>'+
-    '<div class="hint" id="mHint">'+(anyBusy?'有 AI 在跑或排队，说完才能改。':'中途换模型，下一轮会慢一点、费一点。')+'</div>';
   h+='<h3 style="margin-top:14px">工具（这场会议）</h3><div id="toolsBox"><div class="hint">读取中…</div></div>';
   showModal(h);
   loadTools(a,x);
-  document.getElementById('mSave').onclick=async()=>{
-    const nm=document.getElementById('mModel').value.trim(),ne=document.getElementById('mEffort').value;
-    if(nm!==mo.model&&x.session&&!confirm('中途换模型，下一轮会慢一点、费一点。继续？'))return;
-    const [ok,j]=await post(api('models'),{ai:a,model:nm,effort:ne});
-    if(!ok){alert(j.error||'失败');return}
-    await loadState();poll();openAi(a);
-  };
+  bindModelSettings(a,mo,anyBusy);
   document.getElementById('aClose').onclick=hideModal;
   document.getElementById('aCompact').onclick=async()=>{
     if(!confirm('压缩 '+a+' 的上下文？压完它只记要点。'+(x.busy?'\n\n它手上有活，会等这一轮说完再压。':'')))return;

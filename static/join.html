@@ -12,7 +12,7 @@
 <script>
 let token='',rid='',since=0,generation=0,permission=false,busy=false,autoOpen=false,presetRoom='',pendingInvite='';
 const el=id=>document.getElementById(id);
-const KEYS={token:'cojam_guest_token',deviceKey:'cojam_guest_device_key',name:'cojam_guest_name'};
+const KEYS={token:'cojam_guest_token',deviceKey:'cojam_guest_device_key',name:'cojam_guest_name',room:'cojam_guest_last_room'};
 function saved(key){try{return localStorage.getItem(key)||''}catch(e){return ''}}
 function save(key,value){try{if(value)localStorage.setItem(key,value);else localStorage.removeItem(key)}catch(e){}}
 function guestDeviceName(){const ua=navigator.userAgent,device=/iPhone/i.test(ua)?'iPhone':/iPad/i.test(ua)?'iPad':/Android/i.test(ua)?'Android':/Macintosh|Mac OS X/i.test(ua)?'Mac':/Windows/i.test(ua)?'Windows':'新设备',browser=/Edg\//i.test(ua)?'Edge':/Chrome\//i.test(ua)?'Chrome':/Safari\//i.test(ua)?'Safari':'浏览器';return device+' · '+browser}
@@ -24,8 +24,8 @@ function invitationValue(value) {
 }
 async function request(url,body,auth){const r=await fetch(url,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+(auth===undefined?token:auth),'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const j=await r.json();if(!r.ok){const error=Error(j.error||'请求失败');error.status=r.status;throw error}return j}
 function clear(){generation++;rid='';since=0;permission=false;el('feed').replaceChildren();el('text').value='';el('text').disabled=el('submit').disabled=true;el('title').textContent='选择一个会话'}
-function openRoom(room){clear();rid=room.id;el('title').textContent=room.title;poll();refresh()}
-async function refresh(){if(!token)return;const gen=generation;try{const j=await request('/api/external/rooms');if(gen!==generation)return;el('identity').textContent='当前身份：'+j.contact.label+' · 此设备已记住';el('list').replaceChildren();for(const room of j.rooms){const b=document.createElement('button');b.textContent=room.title;b.classList.toggle('on',room.id===rid);b.onclick=()=>openRoom(room);el('list').append(b)}const first=autoOpen;autoOpen=false;const wanted=presetRoom&&j.rooms.find(r=>r.id===presetRoom);presetRoom='';if(wanted){openRoom(wanted);return}if(first&&!rid&&j.rooms.length===1){openRoom(j.rooms[0]);return}if(rid&&!j.rooms.some(r=>r.id===rid)){clear();el('status').textContent='此会话的访问权限已撤销'}else if(!rid)el('status').textContent=j.rooms.length?'选择左侧会话开始交流':'还没有受邀的会话，请联系管理员。';el('error').textContent=''}catch(e){autoOpen=false;if(e.status===401){token='';save(KEYS.token,'');clear();el('identity').textContent='';el('error').textContent='身份已失效，请重新打开邀请链接。';return}clear();el('list').replaceChildren();el('error').textContent=e.message}}
+function openRoom(room){clear();rid=room.id;save(KEYS.room,rid);el('title').textContent=room.title;poll();refresh()}
+async function refresh(){if(!token)return;const gen=generation;try{const j=await request('/api/external/rooms');if(gen!==generation)return;el('identity').textContent='当前身份：'+j.contact.label+' · 此设备已记住';el('list').replaceChildren();for(const room of j.rooms){const b=document.createElement('button');b.textContent=room.title;b.classList.toggle('on',room.id===rid);b.onclick=()=>openRoom(room);el('list').append(b)}const first=autoOpen;autoOpen=false;const wanted=presetRoom&&j.rooms.find(r=>r.id===presetRoom);presetRoom='';if(wanted){openRoom(wanted);return}if(first&&!rid&&j.rooms.length===1){openRoom(j.rooms[0]);return}if(rid&&!j.rooms.some(r=>r.id===rid)){clear();el('status').textContent='此会话的访问权限已撤销'}else if(!rid)el('status').textContent=j.rooms.length?'选择左侧会话开始交流':'还没有受邀的会话，请联系管理员。';el('error').textContent=''}catch(e){autoOpen=false;if(e.status===401){clear();el('list').replaceChildren();el('identity').textContent='';el('error').textContent='身份暂时无法验证或已被撤销，请检查连接或联系管理员。';return}clear();el('list').replaceChildren();el('error').textContent=e.message}}
 async function poll(){if(!rid||busy)return;const gen=generation,room=rid;busy=true;try{const j=await request('/api/external/messages?room='+encodeURIComponent(room)+'&since='+since);if(gen!==generation)return;for(const m of j.messages){const box=document.createElement('div');box.className='msg';const who=document.createElement('div');who.className='who';who.textContent=m.speaker+' · '+m.time;const text=document.createElement('div');text.textContent=m.text;box.append(who,text);el('feed').append(box)}if(j.messages.length)el('feed').scrollTop=el('feed').scrollHeight;since=j.next;permission=j.permissions.post;el('text').disabled=el('submit').disabled=!permission;el('status').textContent=permission?'以自己的联系人身份发言':'此会话为只读'}catch(e){if(gen===generation){clear();el('error').textContent=e.message}}finally{busy=false}}
 async function redeemInvite(invite){clear();el('error').textContent='';try{const body={invite,device_key:guestDeviceKey(),name:saved(KEYS.name),device:guestDeviceName()};if(token)body.token=token;const j=await request('/api/guest/redeem',body,'');if(j.token){token=j.token;save(KEYS.token,token)}save(KEYS.name,j.contact.label);el('key').value='';history.replaceState(null,'',location.pathname+location.search);presetRoom=j.room||'';autoOpen=!presetRoom;await refresh()}catch(e){el('error').textContent=e.message}}
 function askName(invite){pendingInvite=invite;el('namePrompt').hidden=false;el('guestName').value=saved(KEYS.name)||'访客';el('guestName').focus();el('nameConfirm').onclick=()=>{const name=el('guestName').value.trim()||'访客';save(KEYS.name,name);el('namePrompt').hidden=true;const value=pendingInvite;pendingInvite='';redeemInvite(value)}}
@@ -36,28 +36,45 @@ function invitationKey(value) {
   return text;
 }
 el('connect').onclick=()=>{const value=el('key').value,invite=invitationValue(value);if(invite){if(token||saved(KEYS.name))redeemInvite(invite);else askName(invite)}else connectClient(value)};
-el('logout').onclick=()=>{token='';save(KEYS.token,'');save(KEYS.deviceKey,'');save(KEYS.name,'');clear();el('list').replaceChildren();el('identity').textContent='';el('status').textContent='已退出此设备'};
+el('logout').onclick=()=>{token='';save(KEYS.token,'');save(KEYS.deviceKey,'');save(KEYS.name,'');save(KEYS.room,'');clear();el('list').replaceChildren();el('identity').textContent='';el('status').textContent='已退出此设备'};
 el('send').onsubmit=async e=>{e.preventDefault();const text=el('text').value.trim(),room=rid,gen=generation;if(!text||!permission)return;el('submit').disabled=true;try{await request('/api/post',{room,text});if(gen===generation){el('text').value='';await poll()}}catch(e){el('error').textContent=e.message}finally{el('submit').disabled=!permission}};
 setInterval(poll,1500);setInterval(refresh,5000);
-setInterval(()=>{if(token)request('/api/external/hello',{client:'Cojam 游客'}).catch(e=>{if(e.status===401){token='';save(KEYS.token,'');clear();el('identity').textContent='';el('error').textContent='身份已失效，请重新打开邀请链接。'}})},20000);
+setInterval(()=>{if(token)request('/api/external/hello',{client:'Cojam 游客'}).catch(e=>{if(e.status===401){clear();el('list').replaceChildren();el('identity').textContent='';el('error').textContent='身份暂时无法验证或已被撤销，请检查连接或联系管理员。'}})},20000);
   // A remembered own-device credential can restore the HttpOnly cookie after
   // a browser restart; it is scoped to this browser and this exact origin.
   async function restoreOwnDevice(){
-    const key='cojam_owner_device_token', own=saved(key);
-    if(!own||location.hash)return false;
+    const key='cojam_owner_device_token';
+    let own=saved(key);
     try {
+      // A valid HttpOnly cookie may survive even when Safari cleared localStorage.
+      if(!own){
+        const page=await (await fetch('/',{cache:'no-store'})).text();
+        const match=page.match(/<meta\s+name="rt-token"\s+content="(dev_[^"]+)"/);
+        if(!match)return false;
+        own=match[1];save(key,own);
+      }
       const response=await fetch('/api/devices/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:own})});
       if(response.status===401){save(key,'');return false}
       if(!response.ok)return false;
       const html=await (await fetch('/',{cache:'no-store'})).text();
       if(!html.includes('name="rt-'+'token" content="'+own+'"'))return false;
-      location.replace('/');return true;
+      let destination='/';
+      const invite=new URLSearchParams(location.hash.slice(1)).get('invite');
+      if(invite){
+        try{
+          const resolved=await fetch('/api/invites/resolve-owner',{method:'POST',headers:{'Content-Type':'application/json','X-RT-Token':own},body:JSON.stringify({invite})});
+          if(resolved.ok){const data=await resolved.json();if(data.room)destination='/?r='+encodeURIComponent(data.room)}
+        }catch(e){}
+      }
+      location.replace(destination);return true;
     }catch(e){return false}
   }
-  restoreOwnDevice();
-  token=saved(KEYS.token);
-const hash=new URLSearchParams(location.hash.slice(1)),invite=hash.get('invite')||'',initialKey=hash.get('key')||'';
-if(invite){history.replaceState(null,'',location.pathname+location.search);if(token||saved(KEYS.name))redeemInvite(invite);else askName(invite)}
-else if(initialKey){history.replaceState(null,'',location.pathname+location.search);connectClient(initialKey)}
-else if(token){refresh()}
+  (async()=>{
+    if(await restoreOwnDevice())return;
+    token=saved(KEYS.token);
+    const hash=new URLSearchParams(location.hash.slice(1)),invite=hash.get('invite')||'',initialKey=hash.get('key')||'';
+    if(invite){history.replaceState(null,'',location.pathname+location.search);if(token||saved(KEYS.name))redeemInvite(invite);else askName(invite)}
+    else if(initialKey){history.replaceState(null,'',location.pathname+location.search);connectClient(initialKey)}
+    else if(token){presetRoom=saved(KEYS.room);autoOpen=true;refresh()}
+  })();
 </script></html>

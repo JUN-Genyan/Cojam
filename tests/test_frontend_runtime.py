@@ -136,6 +136,7 @@ const context = vm.createContext({
   history: { replaceState: (state, title, url) => historyCalls.push(url) },
   setInterval: () => 0,
   fetch: async (url, options) => {
+    if (url === '/') return {text: async () => 'guest page'};
     calls.push({ url, auth: (options.headers || {}).Authorization, body: options.body });
     if (url === '/api/external/hello') return { ok: true, json: async () => ({ contact: { label: '测试联系人', kind: 'user' } }) };
     if (url === '/api/external/rooms') return { ok: true, json: async () => ({
@@ -166,6 +167,58 @@ setTimeout(() => {
 
 
 class GuestIdentity(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to test guest reconnection')
+    def test_temporary_unauthorized_response_preserves_credential_and_recovers(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const source=fs.readFileSync('static/join.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+const storage={cojam_guest_token:'guest-token',cojam_guest_last_room:'room-2'},elements={},timers=[];
+const node=id=>elements[id]||(elements[id]={value:'',textContent:'',disabled:false,hidden:false,
+ children:[],replaceChildren(){this.children=[]},append(v){this.children.push(v)},
+ classList:{toggle(){}},scrollTop:0,scrollHeight:0});
+let available=false;
+const ctx=vm.createContext({URL,URLSearchParams,document:{getElementById:node,createElement:()=>node('child'+Math.random())},
+ location:{hash:'',pathname:'/join',search:''},history:{replaceState(){}},setInterval(fn){timers.push(fn)},
+ localStorage:{getItem:k=>storage[k]||null,setItem:(k,v)=>storage[k]=v,removeItem:k=>delete storage[k]},
+ fetch:async(url)=>{if(url==='/')return {text:async()=> 'guest page'};
+ if(url==='/api/external/rooms')return available?{ok:true,json:async()=>({contact:{label:'访客'},rooms:[{id:'room-2',title:'会话'}]})}:{ok:false,status:401,json:async()=>({error:'暂时无法验证'})};
+ if(url.startsWith('/api/external/messages'))return {ok:true,json:async()=>({messages:[],next:0,permissions:{post:true}})};
+ throw Error('unexpected '+url)}});
+vm.runInContext(source,ctx);
+setTimeout(()=>{try{assert.equal(storage.cojam_guest_token,'guest-token');assert.match(node('error').textContent,/无法验证/);
+ available=true;timers[1]();setTimeout(()=>{try{assert.equal(node('title').textContent,'会话');assert.equal(storage.cojam_guest_token,'guest-token')}
+ catch(e){console.error(e);process.exitCode=1}},30)}catch(e){console.error(e);process.exitCode=1}},30);
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to test restoring a guest room')
+    def test_reopening_remembered_guest_restores_last_room(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const source=fs.readFileSync('static/join.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+const storage={cojam_guest_token:'guest-token',cojam_guest_last_room:'room-2'},elements={};
+const node=id=>elements[id]||(elements[id]={value:'',textContent:'',disabled:false,hidden:false,
+ children:[],replaceChildren(){this.children=[]},append(v){this.children.push(v)},
+ classList:{toggle(){}},scrollTop:0,scrollHeight:0});
+const calls=[];
+const ctx=vm.createContext({URL,URLSearchParams,document:{getElementById:node,createElement:()=>node('child'+Math.random())},
+ location:{hash:'',pathname:'/join',search:''},history:{replaceState(){}},setInterval(){},
+ localStorage:{getItem:k=>storage[k]||null,setItem:(k,v)=>storage[k]=v,removeItem:k=>delete storage[k]},
+ fetch:async(url,opts)=>{calls.push(url);if(url==='/')return {text:async()=> 'guest page'};
+ if(url==='/api/external/rooms')return {ok:true,json:async()=>({contact:{label:'访客'},rooms:[{id:'room-1',title:'一'},{id:'room-2',title:'二'}]})};
+ if(url.startsWith('/api/external/messages'))return {ok:true,json:async()=>({messages:[],next:0,permissions:{post:true}})};
+ throw Error('unexpected '+url)}});
+vm.runInContext(source,ctx);
+setTimeout(()=>{try{assert.equal(node('title').textContent,'二');assert.ok(calls.some(x=>x.includes('room=room-2')));
+ assert.equal(storage.cojam_guest_token,'guest-token');assert.equal(storage.cojam_guest_last_room,'room-2');
+ }catch(e){console.error(e);process.exitCode=1}},30);
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
     def test_helpers_and_page_redeem_flow(self):
         root = Path(__file__).resolve().parents[1]
@@ -203,6 +256,7 @@ const context = vm.createContext({
   navigator: { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Safari/604.1' },
   crypto: { getRandomValues: array => { array.fill(7); return array; } },
   fetch: async (url, options) => {
+    if (url === '/') return {text: async () => 'guest page'};
     calls.push({ url, auth: (options.headers || {}).Authorization, body: options.body ? JSON.parse(options.body) : null });
     if (url === '/api/guest/redeem') return { ok: true, json: async () => ({
       ok: true, token: 'guest-secret', contact: { id: 'guest-11111111', label: '访客' },
@@ -258,14 +312,17 @@ class GuestWizard(unittest.TestCase):
 const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
 const html=fs.readFileSync('static/join.html','utf8');
 const source=html.match(/async function restoreOwnDevice\(\)\{[\s\S]*?\n  \}/)[0];
-async function run(revoked, acceptsCookie) {
- let removed=false, redirected=false, requests=[]; const own='dev_abc';
- const ctx=vm.createContext({saved:()=>own,save:()=>{removed=true},location:{hash:'',replace:()=>{redirected=true}},
+async function run(revoked, acceptsCookie, hash='', remembered=true) {
+ let removed=false, redirected=false, destination='', requests=[]; const own='dev_abc';
+ const ctx=vm.createContext({URLSearchParams,saved:()=>remembered?own:'',save:(key,value)=>{if(!value)removed=true},location:{hash,replace:value=>{redirected=true;destination=value}},
   fetch:async (url,options)=>{requests.push(url); if(url==='/api/devices/restore')return {status:revoked?401:200,ok:!revoked};
+   if(url==='/api/invites/resolve-owner')return {ok:true,json:async()=>({room:'room-1'})};
    return {text:async()=>acceptsCookie?'<meta name="rt-token" content="dev_abc">':'join page'};}});
- vm.runInContext(source,ctx); const result=await ctx.restoreOwnDevice(); return {result,removed,redirected,requests};
+ vm.runInContext(source,ctx); const result=await ctx.restoreOwnDevice(); return {result,removed,redirected,destination,requests};
 }
 (async()=>{let a=await run(false,true);assert.equal(a.redirected,true);assert.equal(a.result,true);
+ a=await run(false,true,'#invite=inv_test');assert.equal(a.destination,'/?r=room-1');assert.ok(a.requests.includes('/api/invites/resolve-owner'));
+ a=await run(false,true,'#invite=inv_test',false);assert.equal(a.destination,'/?r=room-1');
  a=await run(true,false);assert.equal(a.removed,true);assert.equal(a.redirected,false);
  a=await run(false,false);assert.equal(a.redirected,false);assert.equal(a.removed,false);})().catch(e=>{console.error(e);process.exitCode=1});
 '''
@@ -292,6 +349,26 @@ assert.equal(context.connectionInviteStatus({expires: 9999999999, guest_count: 0
 
 
 class LanInvite(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to test reusable links')
+    def test_reusable_device_link_is_exchanged_and_removed_from_address(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const source=fs.readFileSync('static/enroll.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+let saved={},calls=[],redirect='',clean='';const els={};
+const el=id=>els[id]||(els[id]={value:'',textContent:'',disabled:false,hidden:false});
+const ctx=vm.createContext({URLSearchParams,navigator:{userAgent:'iPhone'},document:{getElementById:el},
+ location:{hash:'#device=dev_test',pathname:'/enroll',search:'',origin:'http://example',replace:x=>redirect=x},
+ history:{replaceState:(a,b,c)=>clean=c},localStorage:{getItem:k=>saved[k]||'',setItem:(k,v)=>saved[k]=v,removeItem:k=>delete saved[k]},
+ fetch:async(url,options)=>{calls.push({url,body:JSON.parse(options.body)});return {ok:true,status:200}}});
+vm.runInContext(source,ctx);
+setTimeout(()=>{try{assert.equal(clean,'/enroll');assert.equal(calls[0].url,'/api/devices/restore');
+ assert.equal(calls[0].body.token,'dev_test');assert.equal(saved.cojam_owner_device_token,'dev_test');assert.equal(redirect,'/');
+ }catch(e){console.error(e);process.exitCode=1}},20);
+'''
+        result = subprocess.run(['node','-e',script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to test the device wizard')
     def test_enrollment_completion_closes_wizard_after_refresh(self):
         root = Path(__file__).resolve().parents[1]
@@ -299,12 +376,13 @@ class LanInvite(unittest.TestCase):
 const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
 const js=fs.readFileSync('static/connections.js','utf8');
 const fn=js.match(/async function pollDeviceEnrollment\(w, id\) \{[\s\S]*?\n\}/)[0];
-let closed=0, refreshed=0, cleared=0, status={used:false};
+let closed=0, refreshed=0, cleared=0, status={devices:[]}, message={textContent:''};
 const ctx=vm.createContext({wizardCurrent:()=>true, clearInterval:()=>cleared++,
- connectionGet:async()=>[true,status], refreshContacts:async()=>{refreshed++},hideModal:()=>closed++,encodeURIComponent});
+ connectionGet:async()=>[true,status], refreshContacts:async()=>{refreshed++},hideModal:()=>closed++,document:{getElementById:()=>message}});
 vm.runInContext(fn,ctx);
-(async()=>{const w={type:'mydevice',step:2,timer:1};await ctx.pollDeviceEnrollment(w,'code_x');
- assert.equal(closed,0);status={used:true};await ctx.pollDeviceEnrollment(w,'code_x');
+(async()=>{const w={type:'mydevice',step:2,timer:1};await ctx.pollDeviceEnrollment(w,'dev_x');
+ assert.equal(closed,0);status={devices:[{id:'dev_x',last_seen:123}]};await ctx.pollDeviceEnrollment(w,'dev_x');
+ assert.equal(closed,0);assert.match(message.textContent,/复制/);w.deviceCopied=true;await ctx.pollDeviceEnrollment(w,'dev_x');
  assert.equal(closed,1);assert.equal(refreshed,1);assert.equal(cleared,1)})().catch(e=>{console.error(e);process.exitCode=1});
 '''
         result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
@@ -323,10 +401,12 @@ const context = vm.createContext({URL, uiIcon:()=>'', esc:s=>s,
   fetch:async()=>({ok:true,json:async()=>({account:{},devices:[]})})});
 vm.runInContext(fs.readFileSync('static/connections.js','utf8'), context);
 (async()=>{
-  const w={base:'http://100.64.0.5:8767',info:{tailscale_url:'http://100.64.0.5:8767'},form:{}};
+  const w={base:'http://100.64.0.5:8767',info:{lan_url:'http://192.168.1.5:8766',tailscale_url:'http://100.64.0.5:8767'},form:{}};
   await context.renderDeviceSetup(w);
   const select=node('connDeviceBase'), custom=node('connDeviceCustomBase');
   assert.match(select.innerHTML, /自定义 HTTPS 地址/);
+  assert.ok(select.innerHTML.indexOf('192.168.1.5:8766') < select.innerHTML.indexOf('100.64.0.5:8767'));
+  assert.match(node('connDeviceBaseHint').textContent, /只有这台电脑能打开/);
   select.value='__custom__'; select.onchange();
   assert.equal(custom.hidden,false);
   custom.value='https://host.example.ts.net/'; custom.oninput();
@@ -353,10 +433,13 @@ assert.equal(context.connectionDefaultBase('external', {lan_url: lan}, origin), 
 assert.equal(context.connectionDefaultBase('http', {lan_url: lan}, origin), origin);
 assert.equal(context.connectionDefaultBase('user', {}, origin), origin);
 assert.equal(context.connectionDefaultBase('mydevice',
-  {tailscale_url: 'http://100.64.0.5:8767', lan_url: lan}, origin),
-  'http://100.64.0.5:8767');
+  {tailscale_url: 'http://100.64.0.5:8767', lan_url: lan}, origin), lan);   // 同一 WiFi 默认局域网
+assert.equal(context.connectionDefaultBase('mydevice',
+  {tailscale_url: 'http://100.64.0.5:8767'}, origin), 'http://100.64.0.5:8767');
 assert.equal(context.connectionDefaultBase('mydevice', {lan_url: lan}, origin), lan);
 assert.equal(context.connectionDefaultBase('mydevice', {}, origin), origin);
+assert.equal(context.connectionDefaultBase('mydevice',
+  {lan_url: lan, tailscale_url: 'http://100.64.0.5:8767'}, 'http://100.64.0.5:8767'), 'http://100.64.0.5:8767');
 const remote = 'https://bridge.example.test';
 for (const type of ['user', 'external', 'mydevice'])
   assert.equal(context.connectionDefaultBase(type, {lan_url: lan, tailscale_url: 'http://100.64.0.5:8767'}, remote), remote);

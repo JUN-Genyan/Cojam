@@ -556,6 +556,8 @@ class Room:
         """实际生效的 (模型, effort)：会议自己设了用自己的，没设用会议室默认 ROOM_DEFAULTS。"""
         m, e = self.own_models(ai)
         dm, de = agents.ROOM_DEFAULTS[ai]
+        if m and de and de not in agents.effort_options(ai, m):
+            de = ""
         return (m or dm), (e or de)
 
     def model_label(self, ai):
@@ -564,14 +566,27 @@ class Room:
 
     def model_info(self, ai):
         m, e = self.own_models(ai)
-        return {"model": m, "effort": e, "label": self.model_label(ai), "default": " · ".join(agents.ROOM_DEFAULTS[ai]),
-                "models": agents.model_options(ai), "efforts": agents.effort_options(ai, self.effective_models(ai)[0])}
+        capabilities = agents.model_capabilities(ai)
+        effective_model = self.effective_models(ai)[0]
+        if capabilities["effort_supported"]:
+            capabilities["efforts_by_model"][effective_model] = agents.effort_options(ai, effective_model)
+        label = self.model_label(ai) if capabilities["model_supported"] or capabilities["effort_supported"] else "由 Agent 自己管理"
+        return {"model": m, "effort": e, "label": label, "default": " · ".join(agents.ROOM_DEFAULTS[ai]),
+                "default_model": agents.ROOM_DEFAULTS[ai][0],
+                "default_effort": agents.ROOM_DEFAULTS[ai][1],
+                "efforts": agents.effort_options(ai, effective_model) if capabilities["effort_supported"] else [],
+                **capabilities}
 
     def set_models(self, ai, model, effort):
         """改某个 AI 在这场会议的模型 / effort（空 = 用会议室默认）。返回 (ok, 错误, 是否换了模型)。"""
         if ai not in self.ais:
             return False, "未知 AI", False
         model, effort = (model or "").strip(), (effort or "").strip()
+        capabilities = agents.model_capabilities(ai)
+        if model and not capabilities["model_supported"]:
+            return False, "此 Agent 的接入方式尚不支持切换模型，请在 Agent 中设置", False
+        if effort and not capabilities["effort_supported"]:
+            return False, "此 Agent 的接入方式尚不支持设置思考强度", False
         if model and not agents.MODEL_RE.match(model):
             return False, "模型名不合法", False
         cur_model = model or agents.ROOM_DEFAULTS[ai][0]

@@ -80,7 +80,21 @@ def create_code(label="新设备", ttl=CODE_TTL):
         return {"id": record_id, "token": record_id + "." + secret, "expires": expires, "label": clean_label}
 
 
-def enroll(token, label=""):
+def create_link(label="我的设备"):
+    """Create a revocable, reusable owner credential; plaintext is returned once."""
+    with LOCK:
+        now = int(time.time())
+        token = "dev_" + secrets.token_urlsafe(32)
+        row = {"id": "dev_" + secrets.token_hex(12), "label": _clean(label, "我的设备"),
+               "secret_hash": _digest(token), "account_id": account()["id"],
+               "created": now, "last_seen": 0, "revoked": False}
+        rows = _devices()
+        rows.append(row)
+        _save("devices.json", {"devices": rows})
+        return {"token": token, "device": public(row)}
+
+
+def enroll(token, label="", client_id=""):
     record_id, _, secret = str(token or "").partition(".")
     with LOCK:
         rows = _codes()
@@ -95,11 +109,24 @@ def enroll(token, label=""):
             raise DeviceError(401, "接入码无效，请让主机重新生成")
         device_token = "dev_" + secrets.token_urlsafe(32)
         now = int(time.time())
-        row = {"id": "dev_" + secrets.token_hex(12), "label": _clean(label or record.get("label"), "我的设备"),
-               "secret_hash": _digest(device_token), "account_id": account()["id"],
-               "created": now, "last_seen": now, "revoked": False}
+        cid = _clean(client_id, "", limit=64)
         current = _devices()
-        current.append(row)
+        # 同一台设备（接入页存在浏览器里的 ID）重复接入：覆盖原记录换新密钥，不新增一行
+        row = None
+        if cid:
+            row = next((r for r in current if r.get("client_id") == cid and not r.get("revoked")), None)
+            if row is None:
+                row = next((r for r in current if r.get("client_id") == cid), None)
+        if row is None:
+            row = {"id": "dev_" + secrets.token_hex(12), "label": _clean(label or record.get("label"), "我的设备"),
+                   "secret_hash": _digest(device_token), "account_id": account()["id"],
+                   "created": now, "last_seen": now, "revoked": False}
+            current.append(row)
+        else:
+            row.update({"label": _clean(label or row.get("label"), str(row.get("label") or "我的设备")),
+                        "secret_hash": _digest(device_token), "last_seen": now, "revoked": False})
+        if cid:
+            row["client_id"] = cid
         _save("devices.json", {"devices": current})
         record["used"] = True
         _save("device_codes.json", {"codes": rows})

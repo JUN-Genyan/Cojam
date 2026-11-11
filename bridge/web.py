@@ -372,7 +372,8 @@ class Handler(BaseHTTPRequestHandler):
             if data is None:
                 return
             try:
-                result = devices.enroll(str(data.get("code") or ""), str(data.get("label") or ""))
+                result = devices.enroll(str(data.get("code") or ""), str(data.get("label") or ""),
+                                        str(data.get("client_id") or ""))
             except devices.DeviceError as error:
                 return self._json(error.code, {"error": str(error)})
             return self._json(200, {"ok": True, "token": result["token"], "device": result["device"]},
@@ -386,6 +387,17 @@ class Handler(BaseHTTPRequestHandler):
             if not device:
                 return self._json(401, {"error": "设备凭证无效或已撤销"})
             return self._json(200, {"ok": True}, {"Set-Cookie": self._device_cookie_header(token)})
+        if path == "/api/invites/resolve-owner":
+            if not self._from_browser():
+                return self._json(403, {"error": USER_ONLY_MSG})
+            data = self._read_json()
+            if data is None:
+                return
+            try:
+                invite = invites.find(str(data.get("invite") or ""))
+            except invites.InviteError as error:
+                return self._json(error.code, {"error": str(error)})
+            return self._json(200, {"room": invite.get("room") or ""})
         if path == "/api/agents/add":         # 页面上"手动添加"，不让人碰 json
             data = self._read_json()
             if data is None:
@@ -524,6 +536,13 @@ class Handler(BaseHTTPRequestHandler):
             result = devices.create_code(str(data.get("label") or ""))
             return self._json(200, {"ok": True, "id": result["id"], "code": result["token"], "expires": result["expires"],
                                     "url": (base.rstrip("/") + "/enroll#code=" + quote(result["token"])) if base else ""})
+        if path == "/api/devices/link":
+            base = self._base_url(data.get("base")) or getattr(self.server, "lan_url", None) or ""
+            if not base:
+                return self._json(400, {"error": "请填写设备可以访问的地址"})
+            result = devices.create_link(str(data.get("label") or ""))
+            return self._json(200, {"ok": True, "id": result["device"]["id"],
+                                    "url": base.rstrip("/") + "/enroll#device=" + quote(result["token"])})
         if path == "/api/devices/revoke":
             try:
                 devices.revoke(str(data.get("id") or ""))

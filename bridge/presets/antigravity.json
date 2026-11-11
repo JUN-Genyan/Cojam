@@ -3,17 +3,46 @@
   "label": "Antigravity",
   "letter": "A",
   "color": "#34a853",
-  "driver": "external",
+  "driver": "cli",
+  "bin": [
+    "agy",
+    "%USERPROFILE%\\.gemini\\bin\\agy.exe"
+  ],
   "detect": [
+    "%USERPROFILE%\\.gemini\\bin\\agy.exe",
     "%LOCALAPPDATA%\\Programs\\antigravity\\resources\\bin\\language_server.exe",
     "%LOCALAPPDATA%\\Programs\\Antigravity\\resources\\bin\\language_server.exe"
   ],
-  "note": "会外参与者：会议室不叫它，你在 Antigravity 里让它用 MCP 的 ai-bridge 工具（list_rooms / read_room / post_to_room）发言。接法：python -m bridge.install antigravity，然后重启 Antigravity。",
-  "context": "full",
+  "shortcuts": ["Antigravity"],
+  "env": {
+    "SSH_CONNECTION": "",
+    "SSH_CLIENT": "",
+    "SSH_TTY": ""
+  },
+  "note": "本机 CLI（Antigravity 自带的 agy）：会议室直接叫它，非交互跑一轮。读模式用 --mode plan（只读），干活模式用 --mode accept-edits --dangerously-skip-permissions。会话 id 取自 JSON 输出的 conversation_id，续接用 --conversation。清空 SSH_* 是因为 agy 一看到 SSH 环境变量就改用文件令牌、读不到 Windows 已登录的凭据（从 SSH 会话里启动会议室时会认证失败）。",
+  "args": {
+    "base": [],
+    "read": ["--mode", "plan"],
+    "work": ["--mode", "accept-edits", "--dangerously-skip-permissions"],
+    "new": ["-p", "{prompt}", "--output-format", "json"],
+    "resume": ["--conversation", "{session}", "-p", "{prompt}", "--output-format", "json"]
+  },
+  "prompt": "arg",
+  "images": [],
+  "parse": {
+    "type": "json",
+    "text": "response",
+    "session": "conversation_id"
+  },
+  "context": "delta",
   "models": [],
   "efforts": [],
   "default": [
     "",
     ""
-  ]
+  ],
+  "caps": {
+    "handoff": true
+  },
+  "handoff": "agy --conversation {session}"
 }

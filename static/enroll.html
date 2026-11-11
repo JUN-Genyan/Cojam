@@ -18,27 +18,80 @@ button:disabled{opacity:.5;cursor:not-allowed}#error{color:#fca5a5;min-height:1.
   <label for="name">设备名称</label>
   <input id="name" maxlength="40" autocomplete="off">
   <button id="join">接入</button>
+  <button id="enter" hidden>直接进入合拍</button>
   <p id="error" role="alert"></p>
   <p id="address" class="hint"></p>
 </main>
 <script>
 const params = new URLSearchParams(location.hash.slice(1));
 const code = params.get('code') || '';
+const deviceLink = params.get('device') || '';
 const el = id => document.getElementById(id);
 function defaultName() {
   const ua = navigator.userAgent;
-  const device = /iPhone/i.test(ua) ? 'iPhone' : /iPad/i.test(ua) ? 'iPad' : /Android/i.test(ua) ? 'Android'
+  return /iPhone/i.test(ua) ? 'iPhone' : /iPad/i.test(ua) ? 'iPad' : /Android/i.test(ua) ? 'Android'
     : /Macintosh|Mac OS X/i.test(ua) ? 'Mac' : /Windows/i.test(ua) ? 'Windows' : '新设备';
-  const browser = /Edg\//i.test(ua) ? 'Edge' : /Chrome\//i.test(ua) ? 'Chrome' : /Safari\//i.test(ua) ? 'Safari' : '浏览器';
-  return device + ' · ' + browser;
+}
+function clientId() {
+  // 同一浏览器的持久设备号：重复接入时主机端覆盖旧记录，不新增一条设备
+  try {
+    let v = localStorage.getItem('cojam_device_id');
+    if (!v) { v = 'dc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12); localStorage.setItem('cojam_device_id', v); }
+    return v;
+  } catch (e) { return ''; }
 }
 el('name').value = defaultName();
 el('address').textContent = '当前地址：' + location.origin + '。以后请固定用这个地址打开；换地址需要重新生成接入码。';
-if (!code) {
+if (!code && !deviceLink) {
   el('join').disabled = true;
   el('error').textContent = '接入码无效，请让主机重新生成。';
 }
 history.replaceState(null, '', location.pathname + location.search);
+
+// 这台设备可能早就接入过了（cookie 或本地凭证还在）：
+// 重新点开旧接入链接时不用再要新码，直接进。
+async function alreadyEnrolled() {
+  try {
+    const page = await (await fetch('/', {cache: 'no-store'})).text();
+    if (page.includes('name="rt-token"')) return true;   // cookie 仍有效，首页直接给了完整界面
+  } catch (e) {}
+  let own = '';
+  try { own = localStorage.getItem('cojam_owner_device_token') || ''; } catch (e) {}
+  if (!own) return false;
+  try {
+    const response = await fetch('/api/devices/restore', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({token: own})});
+    if (response.ok) return true;
+    if (response.status === 401) { try { localStorage.removeItem('cojam_owner_device_token'); } catch (e) {} }
+  } catch (e) {}
+  return false;
+}
+(async () => {
+  if (deviceLink) {
+    el('join').disabled = true;
+    el('address').textContent = '正在接入…';
+    try {
+      const response = await fetch('/api/devices/restore', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({token:deviceLink})});
+      if (!response.ok) throw Error(response.status === 401 ? '此设备链接已撤销，请联系屋主。' : '接入失败，请稍后重试。');
+      try { localStorage.setItem('cojam_owner_device_token', deviceLink); } catch(e) {}
+      location.replace('/');
+    } catch(e) { el('error').textContent=e.message; el('address').textContent=''; }
+    return;
+  }
+  if (!await alreadyEnrolled()) return;
+  if (code) {
+    el('error').textContent = '';
+    el('address').textContent = '这台设备已经接入过，不需要新的接入码。';
+    const enter = el('enter');
+    enter.hidden = false;
+    enter.onclick = () => location.replace('/');
+  } else {
+    el('error').textContent = '';
+    el('address').textContent = '这台设备已经接入过，正在进入…';
+    location.replace('/');
+  }
+})();
 el('join').onclick = async () => {
   const label = el('name').value.trim() || defaultName();
   el('join').disabled = true;
@@ -47,7 +100,7 @@ el('join').onclick = async () => {
     const response = await fetch('/api/devices/enroll', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({code, label})
+      body: JSON.stringify({code, label, client_id: clientId()})
     });
     const data = await response.json();
     if (!response.ok) throw Error(data.error || '接入失败');
