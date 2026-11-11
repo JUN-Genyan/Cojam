@@ -10,6 +10,10 @@
   "note": "参数照 cursor-agent --help 抄的。--output-format json 的实际形状没验到（这台机器上没登录：agent login）。用 python -m bridge.doctor cursor 跑一次，按它打出来的 JSON 调 parse.text / parse.session。",
   "args": {
     "base": [],
+    "model": [
+      "--model",
+      "{model}"
+    ],
     "read": [
       "--mode",
       "plan"
@@ -35,11 +39,15 @@
   "prompt": "arg",
   "parse": {
     "type": "json",
-    "text": "",
-    "session": "chatId"
+    "text": "result",
+    "session": "session_id"
   },
   "context": "full",
-  "models": [],
+  "models": [
+    "claude-3.5-sonnet",
+    "gpt-4o",
+    "cursor-fast"
+  ],
   "efforts": [],
   "default": [
     "",

@@ -1080,7 +1080,12 @@ class Room:
                     else:
                         self.handle_message(ai, out)
                 else:
-                    if new_sid and new_sid != sid:   # 会话建好了但回复出错（比如额度不足）：记下会话 id，下轮接着用，不再开新的
+                    err_str = str(out).lower()
+                    if "session not found" in err_str or "invalid params: session" in err_str:
+                        with self.lock:
+                            self.meta.pop(ai + "_session", None)
+                            self.save_meta()
+                    elif new_sid and new_sid != sid:   # 会话建好了但回复出错（比如额度不足）：记下会话 id，下轮接着用，不再开新的
                         with self.lock:
                             self.meta[ai + "_session"] = new_sid
                             self.save_meta()

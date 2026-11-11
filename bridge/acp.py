@@ -236,6 +236,19 @@ class AcpProcess:
                     "headers": [{"name": "Authorization", "value": "Bearer " + key}] if key else [],
                 })
             sid = self.ensure_session(wanted_sid, mcp_servers)
+            mo_m, mo_e = ("", "")
+            if room is not None:
+                mo_m, mo_e = room.effective_models(self.pid)
+                if mo_m:
+                    try:
+                        self.request("session/set_config_option", {"sessionId": sid, "configId": "model", "value": mo_m}, timeout=10)
+                    except Exception:
+                        pass
+                if mo_e:
+                    try:
+                        self.request("session/set_config_option", {"sessionId": sid, "configId": "thought_level", "value": mo_e}, timeout=10)
+                    except Exception:
+                        pass
             blocks = [{"type": "text", "text": text}]
             for img in images or ():
                 if os.path.isfile(img):
@@ -269,7 +282,21 @@ class AcpProcess:
                         room.push_live(self.pid, {"tool": title})
 
             idle, total = timeout_for(mode, self.pid)
-            res = self.request("session/prompt", {"sessionId": sid, "prompt": blocks}, timeout=total, on_note=on_note)
+            try:
+                res = self.request("session/prompt", {"sessionId": sid, "prompt": blocks}, timeout=total, on_note=on_note)
+            except Exception as e:
+                err_str = str(e).lower()
+                if "session not found" in err_str or "invalid params: session" in err_str:
+                    self.session_id = None
+                    sid = self.ensure_session(None, mcp_servers)
+                    if mo_m:
+                        try:
+                            self.request("session/set_config_option", {"sessionId": sid, "configId": "model", "value": mo_m}, timeout=10)
+                        except Exception:
+                            pass
+                    res = self.request("session/prompt", {"sessionId": sid, "prompt": blocks}, timeout=total, on_note=on_note)
+                else:
+                    raise
             if not chunks and isinstance(res.get("text"), str):
                 chunks.append(res["text"])
             reply = "".join(chunks).strip()
@@ -385,6 +412,10 @@ def call(pid, spec, prompt, session_id=None, images=(), mode="discuss", room=Non
                 if _pool.get(key) is proc:
                     _pool.pop(key, None)
             proc.close()
+        err_str = str(e).lower()
+        if "session not found" in err_str or "invalid params: session" in err_str:
+            proc.session_id = None
+            session_id = None
         return False, "%s (ACP) 调用出错：%s" % (pid, e), proc.session_id or session_id, []
     finally:
         proc.active_room = None

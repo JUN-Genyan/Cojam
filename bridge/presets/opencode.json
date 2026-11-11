@@ -10,6 +10,10 @@
   "note": "命令和参数照这台机器上 opencode run --help 抄的；会话 id 从 --format json 每行的 sessionID 取（实测到）。文本事件的形状没跑通（免费额度用完），parse.text 可能要按实际输出调一下：用 python -m bridge.doctor opencode 看。",
   "args": {
     "base": [],
+    "model": [
+      "--model",
+      "{model}"
+    ],
     "read": [],
     "work": [
       "--auto"
@@ -44,7 +48,12 @@
     "join": ""
   },
   "context": "delta",
-  "models": [],
+  "models": [
+    "zhipu/glm-5.3",
+    "zhipu/glm-5.3-flash",
+    "anthropic/claude-3-5-sonnet",
+    "openai/gpt-4o"
+  ],
   "efforts": [],
   "default": [
     "",

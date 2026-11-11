@@ -299,6 +299,8 @@ def _build_direct_spec(entry, via, exe):
     cli_cfg = entry.get("cli") or {}
     acp_cfg = entry.get("acp") or {}
     if via == "acp" and acp_cfg:
+        preset_name = cli_cfg.get("preset") or pid
+        base = _preset_spec(preset_name) if preset_name else None
         return {
             "id": pid,
             "label": entry.get("label") or pid,
@@ -306,6 +308,7 @@ def _build_direct_spec(entry, via, exe):
             "driver": "acp",
             "bin": [exe] if exe else list(acp_cfg.get("bin") or [pid]),
             "args": {"acp": list(acp_cfg.get("args") or ["acp"])},
+            "models": list((base or {}).get("models") or []),
             "verified": bool(acp_cfg.get("verified")),
         }
     preset_name = cli_cfg.get("preset")

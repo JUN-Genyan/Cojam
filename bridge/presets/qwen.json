@@ -10,6 +10,10 @@
   "note": "Qwen Code 是 gemini-cli 的分支，命令和输出格式基本一样（-p + --output-format json → {response}）。没实测。",
   "args": {
     "base": [],
+    "model": [
+      "--model",
+      "{model}"
+    ],
     "read": [],
     "work": [
       "--approval-mode",
@@ -28,7 +32,11 @@
     "text": "response"
   },
   "context": "full",
-  "models": [],
+  "models": [
+    "qwen-max",
+    "qwen-plus",
+    "qwen-turbo"
+  ],
   "efforts": [],
   "default": [
     "",
