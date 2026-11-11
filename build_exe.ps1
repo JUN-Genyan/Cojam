@@ -21,7 +21,12 @@ $args = @(
     "--add-data", "index.html;.",
     "--add-data", "static;static",
     "--add-data", "bridge\presets;bridge\presets",
+    "--add-data", "bridge\catalog;bridge\catalog",
     "--hidden-import", "bridge.web",
+    "--hidden-import", "bridge.acp",
+    "--hidden-import", "bridge.discovery",
+    "--hidden-import", "bridge.conn_settings",
+    "--hidden-import", "bridge.mcp_stdio",
     "roundtable.py"
 )
 Write-Host "pyinstaller $($args -join ' ')" -ForegroundColor Cyan
