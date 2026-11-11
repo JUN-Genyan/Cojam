@@ -1,6 +1,6 @@
 # 合拍 Windows 安装程序
 
-官网的 Windows 下载入口使用 `Cojam-Setup-2.5.1.exe`。安装程序基于 Inno Setup 6.7.4 构建，当前使用的编译器显示“Non-commercial use only”；如果项目将商业分发，需要先核对并满足 Inno Setup 的商业使用许可。
+官网的 Windows 下载入口使用 `Cojam-Setup-2.7.0.exe`。安装程序基于 Inno Setup 6.7.4 构建，当前使用的编译器显示“Non-commercial use only”；如果项目将商业分发，需要先核对并满足 Inno Setup 的商业使用许可。
 
 安装程序默认安装到当前用户的 `%LOCALAPPDATA%\Programs\Cojam`，无需管理员权限；创建开始菜单快捷方式，并默认提供桌面快捷方式。运行中的应用需要先退出。应用首次启动时在安装目录旁创建 `data` 文件夹。
 
@@ -10,6 +10,6 @@
 
 ## 构建与验证
 
-先构建 `dist/Cojam.exe`，然后使用经过签名验证的官方 Inno Setup 编译 `packaging/cojam.iss`。默认输出 `dist/Cojam-Setup-2.5.1.exe`。编译时定义 `TEST_BUILD` 会生成独立 AppId 的测试安装程序，避免覆盖正常安装登记。
+先构建 `dist/Cojam.exe`，然后使用经过签名验证的官方 Inno Setup 编译 `packaging/cojam-desktop.iss`。默认输出 `dist/Cojam-Setup-2.7.0.exe`。编译时定义 `TEST_BUILD` 会生成独立 AppId 的测试安装程序，避免覆盖正常安装登记。
 
 最终安装程序已在项目临时目录中实际完成静默安装、EXE 哈希校验、卸载和数据保留检查，并验证测试用卸载登记已清理。官网发布后下载公开安装程序，其 SHA-256 与本地验证过的文件一致。官网通过现有 `gh-pages` 分支发布，主页和下载链接已验证可访问。

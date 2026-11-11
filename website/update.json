@@ -2,7 +2,7 @@
   "app": "Cojam",
   "version": "2.7.0",
   "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.7.0.exe",
-  "sha256": "2c8807ea435049ef0ddc0974d007b8313c7fadc4f0bb8d350de681351757164f",
-  "size": 31191163,
+  "sha256": "03ef387fb2d5993eb202a0dd02db5feb71bdcb1731c888c36191bc175bf9f503",
+  "size": 31209834,
   "notes": "全新的本机 Agent 发现：自动扫描 Claude、Codex、Cursor 等 20 种工具并一键接入；桌面端可用 /cojam_standby 待命接单，Claude/Codex 桌面开着时优先走桌面，关掉自动回落命令行。连接与心跳策略统一由合拍管理，支持停止待命、按联系人设置超时；ACP 接入改为真实握手；扫描与一键接入共用同一份安装检测，修复装在非默认目录时误报未安装；待命端默认只读，需要改文件时显式允许。"
 }
