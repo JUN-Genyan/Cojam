@@ -377,8 +377,15 @@ def call(pid, spec, prompt, session_id=None, images=(), mode="discuss", room=Non
         stop(room, pid)
         return False, timeout_text(pid, "total", mode), session_id, []
     except Exception as e:
-        stop(room, pid)
-        return False, "%s (ACP) 调用出错：%s" % (pid, e), session_id, []
+        # 模型侧报错（额度不足之类）不代表进程坏了：进程和会话留着下轮接着用，别每次都重开进程再开新会话
+        if proc.alive():
+            proc.cancel()
+        else:
+            with _pool_lock:
+                if _pool.get(key) is proc:
+                    _pool.pop(key, None)
+            proc.close()
+        return False, "%s (ACP) 调用出错：%s" % (pid, e), proc.session_id or session_id, []
     finally:
         proc.active_room = None
     if not reply:

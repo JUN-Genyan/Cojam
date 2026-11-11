@@ -1080,6 +1080,10 @@ class Room:
                     else:
                         self.handle_message(ai, out)
                 else:
+                    if new_sid and new_sid != sid:   # 会话建好了但回复出错（比如额度不足）：记下会话 id，下轮接着用，不再开新的
+                        with self.lock:
+                            self.meta[ai + "_session"] = new_sid
+                            self.save_meta()
                     self.add_message("系统", out)
                 if pre is not None:
                     self.record_step(ai, pre, edits, t0, time.time())
