@@ -1,0 +1,53 @@
+name: Deploy website
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "website/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble site
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path _site/downloads | Out-Null
+          Copy-Item website/* _site -Recurse -Force
+          $version = (Get-Content website/update.json -Raw | ConvertFrom-Json).version
+          # 安装包不放进仓库：从同名 Release 取，站点仍按 /Cojam/downloads/ 提供
+          gh release download "v$version" --repo "${{ github.repository }}" `
+            --pattern "Cojam-Setup-*.exe" --pattern "Cojam-Portable-*.exe" `
+            --dir _site/downloads --clobber
+          if (-not (Test-Path "_site/downloads/Cojam-Setup-$version.exe")) {
+            throw "Cojam-Setup-$version.exe 不在 Release v$version 里"
+          }
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

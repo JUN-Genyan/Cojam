@@ -4,5 +4,5 @@
   "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.7.1.exe",
   "sha256": "ac41b86321cc5823265fff65641572cef34f11a0be9ede475a05d2f13766966f",
   "size": 31210286,
-  "notes": "支持会议室全 Agent 模型动态切换（OpenCode / Cursor / Antigravity / Gemini 等）；修复 OpenCode 欠费后会话失效死锁与动态切模型；修复 Cursor Agent 原始 JSON 输出与会话丢失。"
+  "notes": "修复 ACP 成员（opencode 等）调用出错后反复新建会话的问题：进程与会话保留复用，出错轮次也记住会话 id。"
 }
