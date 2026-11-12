@@ -516,16 +516,20 @@ class Room:
                  if (m["speaker"] != ai or m.get("origin") == "external") and not m.get("quiet") and m.get("not_for") != ai]
         return d, upto
 
-    def build_prompt(self, ai, mode=None):
+    def build_prompt(self, ai, mode=None, fresh=False):
         """返回 (prompt, upto, ann_ver, images)。会话还没建 = 第一次叫，带前言和目标；否则只递增量。
-        配置里 context = full 的（没有会话概念的 CLI：gemini、crush 之类）每轮都递整份会议记录，它自己没有记忆。"""
+        配置里 context = full 的（没有会话概念的 CLI：gemini、crush 之类）每轮都递整份会议记录，它自己没有记忆。
+        fresh=True：会话刚失效、要按第一次叫重来，即使旧会话还在也带前言并递整份记录。"""
         with self.lock:
             full = (registry.get(ai) or {}).get("context") == "full"
-            first = not self.meta.get(ai + "_session")
+            first = fresh or not self.meta.get(ai + "_session")
             d, upto = self.delta_for(ai)
             if full:                      # 没会话的：给整份记录，太长的截掉前面
                 d = [m for m in self.messages if not m.get("quiet") and m.get("not_for") != ai][-MAX_CONTEXT:]
                 first = True
+            elif fresh:
+                d = [m for m in self.messages
+                     if (m["speaker"] != ai or m.get("origin") == "external") and not m.get("quiet") and m.get("not_for") != ai]
             ver = self.meta["ann_ver"]
             parts = []
             parts.append("本会话授予你的权限：" + json.dumps(access.permissions(self, ai), ensure_ascii=False) +
@@ -1057,6 +1061,17 @@ class Room:
                 if was_stopped and not ok:
                     ok, out = False, "%s 被你打断了" % ai
                 edits = res[3] if len(res) > 3 else []
+                if not ok and not was_stopped and (registry.get(ai) or {}).get("driver") == "acp" and new_sid is None:
+                    # ACP 会话已失效（欠费、过期等）：丢掉旧会话，按"第一次叫"带完整上下文重试一次。
+                    # 只认这个结构化信号；CLI / HTTP / external 驱动出错时仍走下面的原逻辑。
+                    with self.lock:
+                        self.meta.pop(ai + "_session", None)
+                        self.meta["last_seen"][ai] = -1   # 新会话没看过任何东西，下次也要给整份记录
+                        self.save_meta()
+                    prompt, upto, ver, imgs = self.build_prompt(ai, mode, fresh=True)
+                    res = ai_caller(ai, prompt, None, imgs, mode, self)
+                    ok, out, new_sid = res[0], res[1], res[2]
+                    edits = res[3] if len(res) > 3 else []
                 if ok:
                     with self.lock:
                         self.meta[ai + "_session"] = new_sid
@@ -1080,12 +1095,7 @@ class Room:
                     else:
                         self.handle_message(ai, out)
                 else:
-                    err_str = str(out).lower()
-                    if "session not found" in err_str or "invalid params: session" in err_str:
-                        with self.lock:
-                            self.meta.pop(ai + "_session", None)
-                            self.save_meta()
-                    elif new_sid and new_sid != sid:   # 会话建好了但回复出错（比如额度不足）：记下会话 id，下轮接着用，不再开新的
+                    if new_sid and new_sid != sid:   # 会话建好了但回复出错（比如额度不足）：记下会话 id，下轮接着用，不再开新的
                         with self.lock:
                             self.meta[ai + "_session"] = new_sid
                             self.save_meta()

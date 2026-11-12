@@ -19,7 +19,7 @@
     "SSH_CLIENT": "",
     "SSH_TTY": ""
   },
-  "note": "本机 CLI（Antigravity 自带的 agy）：会议室直接叫它，非交互跑一轮。读模式用 --mode plan（只读），干活模式用 --mode accept-edits --dangerously-skip-permissions。会话 id 取自 JSON 输出的 conversation_id，续接用 --conversation。清空 SSH_* 是因为 agy 一看到 SSH 环境变量就改用文件令牌、读不到 Windows 已登录的凭据（从 SSH 会话里启动会议室时会认证失败）。",
+  "note": "本机 CLI（Antigravity 自带的 agy）：会议室直接叫它，非交互跑一轮。读模式用 --mode plan（只读），干活模式用 --mode accept-edits --dangerously-skip-permissions。会话 id 取自 JSON 输出的 conversation_id，续接用 --conversation。--model 和 --effort 已实测（agy --help / agy models）；模型清单来自本机 agy models，也可自定义模型 ID。清空 SSH_* 是因为 agy 一看到 SSH 环境变量就改用文件令牌、读不到 Windows 已登录的凭据（从 SSH 会话里启动会议室时会认证失败）。",
   "args": {
     "base": [],
     "model": [
@@ -44,10 +44,10 @@
   },
   "context": "delta",
   "models": [
-    "gemini-3.8-flash",
-    "gemini-3.8-pro",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash"
+    "gemini-4-argon-medium",
+    "gemini-3.8-flash-medium",
+    "claude-sonnet-5-5-medium",
+    "gpt-oss-120b-medium"
   ],
   "efforts": [
     "low",

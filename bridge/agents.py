@@ -117,14 +117,6 @@ def model_options(ai):
         out = [s for s, _ in codex_catalog()]
     else:
         out = list((registry.get(ai) or {}).get("models") or [])
-        if not out:
-            preset_file = os.path.join(registry.PRESET_DIR, "%s.json" % ai)
-            if os.path.isfile(preset_file):
-                try:
-                    with open(preset_file, encoding="utf-8") as f:
-                        out = list(json.load(f).get("models") or [])
-                except Exception:
-                    pass
     d = ROOM_DEFAULTS[ai][0]
     if d and d not in out:
         out.insert(0, d)
@@ -140,8 +132,13 @@ def model_capabilities(ai):
     templates = [value for values in args.values() for value in values]
     remote = driver in ("http", "external")
     is_acp = driver == "acp"
-    model = builtin or is_acp or any("{model}" in value for value in templates) or (remote and bool(spec.get("models")))
-    effort = builtin or is_acp or any("{effort}" in value for value in templates) or (remote and bool(spec.get("efforts") or spec.get("model_efforts")))
+    # ACP 能不能切模型 / effort，只看 agent 在 spec 里声明了哪些；不能因为走 ACP 就假装都支持。
+    if is_acp:
+        model = bool(spec.get("models"))
+        effort = bool(spec.get("efforts") or spec.get("model_efforts"))
+    else:
+        model = builtin or any("{model}" in value for value in templates) or (remote and bool(spec.get("models")))
+        effort = builtin or any("{effort}" in value for value in templates) or (remote and bool(spec.get("efforts") or spec.get("model_efforts")))
     default_model = ROOM_DEFAULTS[ai][0]
     if ai == "codex":
         catalog = codex_catalog()
@@ -159,7 +156,7 @@ def model_capabilities(ai):
     elif builtin:
         note = "可选择常用模型，也可填写模型 ID；账户权限以实际调用为准。"
     elif is_acp:
-        note = "通过 ACP 协议动态设置模型；也可自定义模型 ID（如 provider/model）。"
+        note = "通过 ACP 协议动态设置模型和思考强度；也可自定义模型 ID（如 provider/model）。agent 不认的值会沿用 agent 默认，以 agent 实际接受为准。"
     else:
         note = "选项来自此 Agent 的接入配置；账户权限以实际调用为准。"
     return {"model_supported": bool(model), "effort_supported": bool(effort),

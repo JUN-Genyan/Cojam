@@ -7,7 +7,7 @@
     "cursor-agent"
   ],
   "verified": false,
-  "note": "参数照 cursor-agent --help 抄的。--output-format json 的实际形状没验到（这台机器上没登录：agent login）。用 python -m bridge.doctor cursor 跑一次，按它打出来的 JSON 调 parse.text / parse.session。",
+  "note": "参数照 cursor-agent --help 抄的。--output-format json 的 JSON 形状已实测（result / session_id）；模型清单来自本机 cursor-agent --list-models，也可自定义模型 ID。",
   "args": {
     "base": [],
     "model": [
@@ -44,9 +44,10 @@
   },
   "context": "full",
   "models": [
-    "claude-3.5-sonnet",
-    "gpt-4o",
-    "cursor-fast"
+    "auto",
+    "composer-2.5",
+    "claude-opus-5-5-medium",
+    "gpt-5.6-sol-medium"
   ],
   "efforts": [],
   "default": [

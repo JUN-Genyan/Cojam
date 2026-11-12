@@ -23,6 +23,14 @@ class AcpError(Exception):
     pass
 
 
+class AcpSessionLost(AcpError):
+    """agent 不认这个会话了（欠费、会话过期等）。调用方应换新会话重发完整上下文。"""
+    pass
+
+
+_LOST_MARKERS = ("session not found", "invalid params: session")
+
+
 class AcpProcess:
     def __init__(self, pid, cmd, cwd, env=None, init_timeout=20):
         self.pid = pid
@@ -35,6 +43,8 @@ class AcpProcess:
         self.notes = queue.Queue()
         self.last_used = time.time()
         self.session_id = None
+        self.applied = None   # (session_id, model, effort)：上次成功下发的配置，没变就不重复发
+        self.config_options = []   # 当前会话 agent 声明的 configOptions
         self.active_room = None
         self.active_mode = "discuss"
         self.active_edits = []
@@ -194,6 +204,8 @@ class AcpProcess:
                 if "error" in resp and resp["error"]:
                     err = resp["error"]
                     msg = err.get("message") if isinstance(err, dict) else str(err)
+                    if any(m in (msg or "").lower() for m in _LOST_MARKERS):
+                        raise AcpSessionLost(msg or "ACP 请求失败")
                     raise AcpError(msg or "ACP 请求失败")
                 return resp.get("result") or {}
         finally:
@@ -213,12 +225,44 @@ class AcpProcess:
             try:
                 res = self.request("session/load", {"sessionId": wanted_sid, "cwd": self.cwd, "mcpServers": mcp_servers}, timeout=timeout)
                 self.session_id = str(res.get("sessionId") or wanted_sid)
+                self._remember_options(res)
                 return self.session_id
             except Exception:
                 pass
         res = self.request("session/new", {"cwd": self.cwd, "mcpServers": mcp_servers}, timeout=timeout)
         self.session_id = str(res.get("sessionId") or wanted_sid or ("acp-" + str(int(time.time()))))
+        self._remember_options(res)
         return self.session_id
+
+    def _remember_options(self, res):
+        """记下 agent 在会话里声明的配置项（ACP configOptions）：按 category 找真实 id。"""
+        opts = res.get("configOptions") if isinstance(res, dict) else None
+        if isinstance(opts, list):
+            self.config_options = [o for o in opts if isinstance(o, dict) and o.get("id")]
+        self.applied = None
+
+    def _option_id(self, category):
+        """category（model / thought_level）对应的配置 id；agent 没声明就返回 None，不瞎发。"""
+        for o in self.config_options:
+            if o.get("category") == category or o.get("id") == category:
+                return o["id"]
+        return None
+
+    def apply_config(self, sid, model, effort):
+        """把会议室选的模型 / 思考强度下发给会话。和上次一样就跳过，agent 没声明的配置项不发。"""
+        if (sid, model, effort) == self.applied:
+            return
+        for category, value in (("model", model), ("thought_level", effort)):
+            cid = value and self._option_id(category)
+            if not cid:
+                continue
+            try:
+                self.request("session/set_config_option", {"sessionId": sid, "configId": cid, "value": value}, timeout=10)
+            except AcpSessionLost:
+                raise
+            except AcpError:
+                pass   # 值不被接受时沿用 agent 自己的设置，不让整轮失败
+        self.applied = (sid, model, effort)
 
     def prompt(self, text, images, mode, room, wanted_sid=None):
         with self.lock:
@@ -236,19 +280,8 @@ class AcpProcess:
                     "headers": [{"name": "Authorization", "value": "Bearer " + key}] if key else [],
                 })
             sid = self.ensure_session(wanted_sid, mcp_servers)
-            mo_m, mo_e = ("", "")
-            if room is not None:
-                mo_m, mo_e = room.effective_models(self.pid)
-                if mo_m:
-                    try:
-                        self.request("session/set_config_option", {"sessionId": sid, "configId": "model", "value": mo_m}, timeout=10)
-                    except Exception:
-                        pass
-                if mo_e:
-                    try:
-                        self.request("session/set_config_option", {"sessionId": sid, "configId": "thought_level", "value": mo_e}, timeout=10)
-                    except Exception:
-                        pass
+            mo_m, mo_e = room.effective_models(self.pid) if room is not None else ("", "")
+            self.apply_config(sid, mo_m, mo_e)
             blocks = [{"type": "text", "text": text}]
             for img in images or ():
                 if os.path.isfile(img):
@@ -284,19 +317,12 @@ class AcpProcess:
             idle, total = timeout_for(mode, self.pid)
             try:
                 res = self.request("session/prompt", {"sessionId": sid, "prompt": blocks}, timeout=total, on_note=on_note)
-            except Exception as e:
-                err_str = str(e).lower()
-                if "session not found" in err_str or "invalid params: session" in err_str:
-                    self.session_id = None
-                    sid = self.ensure_session(None, mcp_servers)
-                    if mo_m:
-                        try:
-                            self.request("session/set_config_option", {"sessionId": sid, "configId": "model", "value": mo_m}, timeout=10)
-                        except Exception:
-                            pass
-                    res = self.request("session/prompt", {"sessionId": sid, "prompt": blocks}, timeout=total, on_note=on_note)
-                else:
-                    raise
+            except AcpSessionLost:
+                # 不在这里重建会话：这轮的 prompt 只含增量，新会话收不到前言和历史。
+                # 交回给调用方丢掉旧会话、按"第一次叫"重发完整上下文。
+                self.session_id = None
+                self.applied = None
+                raise
             if not chunks and isinstance(res.get("text"), str):
                 chunks.append(res["text"])
             reply = "".join(chunks).strip()
@@ -412,10 +438,11 @@ def call(pid, spec, prompt, session_id=None, images=(), mode="discuss", room=Non
                 if _pool.get(key) is proc:
                     _pool.pop(key, None)
             proc.close()
-        err_str = str(e).lower()
-        if "session not found" in err_str or "invalid params: session" in err_str:
+        if isinstance(e, AcpSessionLost):
             proc.session_id = None
-            session_id = None
+            proc.applied = None
+            # 第三个返回值 None 是"会话已失效"的信号：会议室丢掉旧会话、按第一次叫重发完整上下文
+            return False, "%s (ACP) 会话已失效，正在换新会话重试" % pid, None, []
         return False, "%s (ACP) 调用出错：%s" % (pid, e), proc.session_id or session_id, []
     finally:
         proc.active_room = None

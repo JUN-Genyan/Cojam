@@ -309,6 +309,8 @@ def _build_direct_spec(entry, via, exe):
             "bin": [exe] if exe else list(acp_cfg.get("bin") or [pid]),
             "args": {"acp": list(acp_cfg.get("args") or ["acp"])},
             "models": list((base or {}).get("models") or []),
+            "efforts": list((base or {}).get("efforts") or []),
+            "model_efforts": dict((base or {}).get("model_efforts") or {}),
             "verified": bool(acp_cfg.get("verified")),
         }
     preset_name = cli_cfg.get("preset")

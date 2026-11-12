@@ -50,11 +50,13 @@
   "context": "delta",
   "models": [
     "zhipu/glm-5.3",
-    "zhipu/glm-5.3-flash",
-    "anthropic/claude-3-5-sonnet",
-    "openai/gpt-4o"
+    "zhipu/glm-5.3-flash"
   ],
-  "efforts": [],
+  "efforts": [
+    "low",
+    "medium",
+    "high"
+  ],
   "default": [
     "",
     ""
