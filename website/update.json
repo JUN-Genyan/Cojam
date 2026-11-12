@@ -1,8 +1,8 @@
 {
   "app": "Cojam",
-  "version": "2.7.1",
-  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.7.1.exe",
-  "sha256": "ac41b86321cc5823265fff65641572cef34f11a0be9ede475a05d2f13766966f",
-  "size": 31210286,
-  "notes": "修复 ACP 成员（opencode 等）调用出错后反复新建会话的问题：进程与会话保留复用，出错轮次也记住会话 id。"
+  "version": "2.7.2",
+  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.7.2.exe",
+  "sha256": "52139c3e8df9b17588e073807f8556dd5f1b1aa21c6279e60ee6ace7d08483d0",
+  "size": 31214721,
+  "notes": "会议室里所有 Agent 都能动态切换模型（OpenCode / Cursor / Antigravity / Gemini 等）。修复 ACP 会话失效后反复新建会话的问题：失效时丢掉旧会话、带完整上下文重试一次；修复模型与思考强度设置发错配置名导致不生效的问题；Cursor / OpenCode 接入与输出解析修复。"
 }
