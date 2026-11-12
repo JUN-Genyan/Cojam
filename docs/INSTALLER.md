@@ -12,4 +12,4 @@
 
 先构建 `dist/Cojam.exe`，然后使用经过签名验证的官方 Inno Setup 编译 `packaging/cojam-desktop.iss`。默认输出 `dist/Cojam-Setup-2.7.0.exe`。编译时定义 `TEST_BUILD` 会生成独立 AppId 的测试安装程序，避免覆盖正常安装登记。
 
-最终安装程序已在项目临时目录中实际完成静默安装、EXE 哈希校验、卸载和数据保留检查，并验证测试用卸载登记已清理。官网发布后下载公开安装程序，其 SHA-256 与本地验证过的文件一致。官网通过现有 `gh-pages` 分支发布，主页和下载链接已验证可访问。
+最终安装程序已在项目临时目录中实际完成静默安装、EXE 哈希校验、卸载和数据保留检查，并验证测试用卸载登记已清理。官网发布后下载公开安装程序，其 SHA-256 与本地验证过的文件一致。官网由 `.github/workflows/pages.yml` 从 `website/` 构建并部署到 GitHub Pages；安装包不放进仓库，构建时从同名 Release（如 `v2.7.1`）下载到站点的 `downloads/` 目录。
