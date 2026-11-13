@@ -472,23 +472,23 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
 <body>
 <div id="navShade"></div>
 <nav id="rooms" aria-label="联系人和项目"><div class="brand"><img src="/static/logo.svg" width="42" height="42" alt=""><span class="brand-word">cojam<small>合拍 · 让想法一起发生</small></span><button id="navClose" aria-label="关闭导航">×</button></div><label class="nav-search" for="navSearch"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="navSearch" type="search" placeholder="搜索项目或会话" autocomplete="off"><kbd aria-hidden="true">⌘ K</kbd></label>
-<section class="contacts-section"><div class="rh">联系人 <span id="contactCount"></span><span class="rh-actions"><button id="agentSettingsBtn" title="修改 Agent 程序位置、模型与加入设置" aria-label="Agent 与连接管理">管理</button><button id="contactsAdd" aria-label="接入联系人">＋ 接入</button></span></div><ul id="contactList"></ul></section>
+<details class="contacts-section" id="contactsSection"><summary>联系人 <span id="contactCount"></span><span class="contacts-chevron" aria-hidden="true">⌄</span></summary><div class="rh"><span class="rh-actions"><button id="agentSettingsBtn" title="修改 Agent 程序位置、模型与加入设置" aria-label="Agent 与连接管理">管理</button><button id="contactsAdd" aria-label="接入联系人">＋ 接入</button></span></div><ul id="contactList"></ul></details>
 <section class="projects-section"><div class="rh">我的项目<button id="projectAdd" aria-label="新建项目">＋</button></div><ul class="rl" id="roomList"></ul></section><button id="rNew" class="nav-new">＋ 新建会话<span aria-hidden="true">↗</span></button><div class="nav-foot"><img src="/static/logo.svg" width="26" height="26" alt=""><span>本机会议室<small>由这台设备托管</small></span><button type="button" id="updateApp" title="检查并下载更新">更新</button><button type="button" id="quitApp" title="停止本机合拍服务">退出</button></div></nav>
 <header>
   <button id="navToggle" aria-label="打开联系人和项目">☰</button>
   <div class="room-heading"><div class="room-overline"><div id="roomContext">会话空间</div><span class="room-type"><span aria-hidden="true">✳</span> 一起合拍</span></div><div id="title">会议室</div><div class="room-detail"><div id="roomMemberFaces" aria-hidden="true"></div><div id="roomSummary">人和 AI，在同一张桌上</div></div></div><div id="wd"></div><span id="modeTag">干活模式</span>
-  <button type="button" id="menu" aria-label="菜单">&#9776;</button>
-  <div id="bar">
-    <button type="button" id="bList">会话管理</button><button type="button" id="bNew">新会话</button><button type="button" id="bMode">讨论模式</button><button type="button" id="bAgents">成员与权限</button><button type="button" id="bWrap">落盘</button><button type="button" id="bSide">面板</button>
-    <div id="caps"></div>
+  <button type="button" id="menu" aria-label="会议工具与设置" aria-controls="bar" aria-expanded="false" aria-haspopup="dialog">⋯</button>
+  <div id="bar" role="dialog" aria-label="会议工具与设置"><div class="meeting-tools-heading">会议工具</div>
+    <button type="button" id="bList">会话管理</button><button type="button" id="bNew">新会话</button><button type="button" id="bMode">讨论模式</button><button type="button" id="bAgents">成员与权限</button><button type="button" id="bWrap" title="整理会议记录并保存到项目">整理并落盘</button><button type="button" id="bSide" aria-controls="side" aria-expanded="false">会议详情与看板</button>
+    <div class="meeting-tools-label">参会成员 · 模型与思考强度</div><div id="caps"></div>
   </div>
   <div class="session-brief" id="sessionBrief" hidden><span class="brief-marker" aria-hidden="true">↗</span><div><span class="brief-label">这次的共同目标</span><p id="sessionBriefText"></p></div></div>
 </header>
 <div id="modal"><div id="mbox" role="dialog" aria-modal="true" aria-label="会话设置" tabindex="-1"></div></div>
 <div id="cmenu"></div>
 <div id="sideBg"></div>
-<aside id="side" aria-label="这场会议的面板">
-  <div class="sh">这场会议<button type="button" id="sideX" aria-label="关闭面板">&times;</button></div>
+<aside id="side" role="dialog" aria-modal="true" aria-label="会议详情与看板" tabindex="-1" inert>
+  <div class="sh">会议详情与看板<button type="button" id="sideX" aria-label="关闭会议详情">&times;</button></div>
   <section class="card" data-k="goal"><h4><span class="ct">目标</span><button type="button" id="annBtn">编辑</button></h4>
     <div class="cb" id="ann"><div class="top"><div id="annText">（还没写这场会议的目标）</div><button type="button" id="boardBtn" hidden>看板</button></div>
       <div id="annEdit"><textarea id="annTa" placeholder="这场会议要做成什么…（两个 AI 每次被叫时都会看到最新的）"></textarea>
@@ -909,7 +909,58 @@ bText.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){e.preve
 // 会议状态 / 顶部按钮
 const bar=document.getElementById('bar'),titleEl=document.getElementById('title');
 const modal=document.getElementById('modal'),mbox=document.getElementById('mbox');
-document.getElementById('menu').onclick=()=>bar.classList.toggle('show');
+const meetingToolsButton=document.getElementById('menu');
+function closeMeetingTools(restoreFocus=false){
+  bar.classList.remove('show');meetingToolsButton.setAttribute('aria-expanded','false');
+  if(restoreFocus)meetingToolsButton.focus();
+}
+function placeMeetingTools(){
+  const r=meetingToolsButton.getBoundingClientRect();
+  bar.style.top=Math.min(r.bottom+8,innerHeight-80)+'px';
+  bar.style.right=Math.max(12,innerWidth-r.right)+'px';
+  bar.style.maxHeight=Math.max(60,innerHeight-r.bottom-24)+'px';
+}
+meetingToolsButton.onclick=()=>{
+  if(bar.classList.contains('show'))return closeMeetingTools(true);
+  document.body.classList.remove('nav-open');bar.classList.add('show');
+  meetingToolsButton.setAttribute('aria-expanded','true');placeMeetingTools();
+  const first=bar.querySelector('button:not(:disabled)');if(first)first.focus();
+};
+bar.addEventListener('click',e=>{if(e.target.closest('button')&&!e.target.closest('button').disabled)closeMeetingTools()});
+document.addEventListener('pointerdown',e=>{if(!bar.contains(e.target)&&!meetingToolsButton.contains(e.target))closeMeetingTools()});
+addEventListener('resize',()=>{if(bar.classList.contains('show'))placeMeetingTools()});
+const meetingSide=document.getElementById('side'),meetingSideBg=document.getElementById('sideBg');
+let sideReturnFocus=null;
+function setMeetingSide(open){
+  if(open){sideReturnFocus=document.activeElement;closeMeetingTools();document.body.classList.remove('nav-open')}
+  meetingSide.classList.toggle('on',open);meetingSideBg.classList.toggle('on',open);
+  meetingSide.inert=!open;document.getElementById('bSide').setAttribute('aria-expanded',String(open));
+  if(open){drawMeetingDetails();document.getElementById('sideX').focus();}
+  else if(sideReturnFocus){meetingToolsButton.focus();sideReturnFocus=null;}
+}
+document.getElementById('bSide').onclick=()=>setMeetingSide(true);
+document.getElementById('sideX').onclick=()=>setMeetingSide(false);
+meetingSideBg.onclick=()=>setMeetingSide(false);
+meetingSide.querySelectorAll('.card').forEach(card=>{
+  const heading=card.querySelector('h4'),button=document.createElement('button');
+  const label=heading.querySelector('.ct').textContent;
+  button.type='button';button.className='card-fold';button.textContent='⌄';button.setAttribute('aria-label','收起'+label);button.setAttribute('aria-expanded','true');
+  button.onclick=()=>{const closed=card.classList.toggle('shut');button.setAttribute('aria-expanded',String(!closed));button.setAttribute('aria-label',(closed?'展开':'收起')+label)};
+  heading.appendChild(button);
+});
+meetingSide.addEventListener('click',e=>{const button=e.target.closest('[data-detail-agent]');if(button){const id=button.dataset.detailAgent;setMeetingSide(false);openAi(id)}});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    if(meetingSide.classList.contains('on')){e.preventDefault();setMeetingSide(false)}
+    else if(bar.classList.contains('show')){e.preventDefault();closeMeetingTools(true)}
+  }
+  if(e.key==='Tab'&&meetingSide.classList.contains('on')&&!modal.classList.contains('show')){
+    const buttons=[...meetingSide.querySelectorAll('button,input,textarea,select,a[href]')].filter(el=>!el.disabled&&el.getClientRects().length);
+    const first=buttons[0],last=buttons[buttons.length-1];
+    if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
+    else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}
+  }
+});
 function fmtK(n){return n>=1e6?(n/1e6).toFixed(n%1e6?1:0)+'M':Math.round(n/1000)+'k'}
 function ctxHtml(x){
   const c=x&&x.ctx;if(!c||!c.used)return '';
@@ -995,6 +1046,21 @@ function drawState(){
   drawBoard();
   drawStops();
   drawClaims();
+  drawMeetingDetails();
+}
+function drawMeetingDetails(){
+  const state=S||{},ais=Object.entries(state.ais||{}),empty=text=>'<p class="hint">'+esc(text)+'</p>';
+  const label=id=>(agentMeta(id)||{}).label||id;
+  const put=(id,html)=>{const el=document.getElementById(id);if(el.innerHTML!==html)el.innerHTML=html};
+  const git=state.git;
+  put('envBox',state.workdir?'<p class="detail-path">'+esc(state.workdir)+'</p><p class="hint">'+(git?'分支 '+esc(git.branch)+' · '+esc(git.changed)+' 处未提交改动'+(git.track?' · '+esc(git.track):''):'此工作目录未提供 Git 状态')+'</p>':empty('尚未选择会议工作目录。'));
+  put('ctxBox',ais.map(([id,x])=>'<div class="detail-agent"><b>'+esc(label(id))+'</b><p class="hint">'+esc(ctxTitle(x))+'</p><button data-detail-agent="'+esc(id)+'">模型、effort 与上下文</button></div>').join('')||empty('邀请 Agent 后可查看其上下文状态。'));
+  put('toolBox',ais.map(([id,x])=>'<div class="detail-agent"><b>'+esc(label(id))+'</b><p class="hint">'+esc(x.tools||'暂未提供工具信息')+'</p><button data-detail-agent="'+esc(id)+'">查看 Agent 设置</button></div>').join('')||empty('当前会议还没有 Agent。'));
+  const steps=(state.steps||[]).filter(step=>!step.undone&&step.files&&step.files.length);
+  const files=steps.slice(-8).reverse().map(step=>'<div class="detail-agent"><b>'+esc(label(step.ai))+' · 第 '+esc(step.seq)+' 步</b>'+step.files.map(file=>'<p class="detail-path">'+esc(file.st)+' · '+esc(file.path)+'</p>').join('')+'</div>').join('');
+  put('outBox',files||empty('暂无已记录的文件改动；共享附件请在消息中查看。'));
+  document.getElementById('outN').textContent=steps.length?steps.length+' 步':'';
+  document.getElementById('claimN').textContent=(state.claims||[]).length||'';
 }
 function syncUndo(){
   const done=new Set((S&&S.steps_undone)||[]);
@@ -1015,7 +1081,7 @@ async function toggleMode(){
   if(to==='work'&&!confirm('切到干活模式？\n\nclaude 和 codex 拿到完整权限，跟你平时在桌面版里用一样：改文件、跑命令、联网、用 git。只有 MCP 工具不加载（为了回得快）。\n它们用编辑工具改的文件每一步都记下来，可以一键撤回；用命令写的文件、删掉的文件、git 操作撤不回。'))return;
   const [ok,j]=await post(api('mode'),{mode:to});
   if(!ok)alert(j.error||'失败');
-  bar.classList.remove('show');await loadState();poll();
+  closeMeetingTools();await loadState();poll();
 }
 async function loadState(){
   if(!RID)return;const rid=RID;
@@ -1054,7 +1120,7 @@ async function openList(showTrash){
     el.querySelector('.db').onclick=async e=>{e.stopPropagation();
       if(!confirm('把「'+el.querySelector('.tt').textContent+'」移到回收站？（可以恢复）\n\n清空回收站时，这场会议里 claude、codex 各自的会话也会一起删掉。'))return;
       if(await act('/api/rooms/delete',{id:el.dataset.id})){pollRooms();openList(true)}};
-    el.onclick=()=>{hideModal();bar.classList.remove('show');switchRoom(el.dataset.id)};
+    el.onclick=()=>{hideModal();closeMeetingTools();switchRoom(el.dataset.id)};
   });
 }
 function fallbackCopy(t){
@@ -1133,7 +1199,7 @@ async function stopAi(a){
 }
 document.getElementById('bWrap').onclick=async()=>{
   if(!confirm('落盘？\n\nclaude 会把这场会议定下的结论写进工作文件夹里的文档（文件夹里有 wrapup 技能就照它做），然后 git 提交并推送。\n这一轮它有完整权限，不管现在是讨论还是干活模式。'))return;
-  const [ok,j]=await post(api('wrapup'));if(!ok)alert(j.error||'失败');bar.classList.remove('show');poll();
+  const [ok,j]=await post(api('wrapup'));if(!ok)alert(j.error||'失败');closeMeetingTools();poll();
 };
 document.getElementById('bAgents').onclick=openAgents;
 document.getElementById('send').onclick=send;
@@ -1400,7 +1466,7 @@ roomList.addEventListener('click',e=>{
   e.preventDefault();switchRoom(a.dataset.id);
 });
 function resetRoomView(){
-  hideMenu();selectionTools.hidden=true;
+  hideMenu();selectionTools.hidden=true;closeMeetingTools();setMeetingSide(false);
   since=0;curMeeting=undefined;S=null;feed.innerHTML='';
   for(const k in msgById)delete msgById[k];
   pend=[];drawPend();setQuote(null);lastRun={running:[],queued:0};
