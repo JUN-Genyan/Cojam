@@ -11,7 +11,7 @@ import copy, json, os, queue, re, secrets, shutil, threading, time
 from datetime import datetime
 from urllib.parse import quote
 
-from . import access, agents, drivers, registry, workspace as ws
+from . import access, agents, drivers, execution, model_catalog, registry, workspace as ws
 from .common import (AIS, ATT_BASE, LAST_FILE, LOG_DIR, MAX_ATTACH, MAX_IMAGES, MAX_UPLOAD, MEET_DIR, MODES, PROJECT,
                      ROOM_RE, SID_RE, TRASH_DIR, in_dir, is_archived, kill_tree, kind_of, mentions, mode_key, mode_text,
                      norm, now_str, preamble, read_json, ref_safe, safe_title, sanitize_name, write_json)
@@ -560,7 +560,8 @@ class Room:
         """实际生效的 (模型, effort)：会议自己设了用自己的，没设用会议室默认 ROOM_DEFAULTS。"""
         m, e = self.own_models(ai)
         dm, de = agents.ROOM_DEFAULTS[ai]
-        if m and de and de not in agents.effort_options(ai, m):
+        options = model_catalog.capabilities(self, ai).get("efforts_by_model", {})
+        if m and de and de not in options.get(m, agents.effort_options(ai, m)):
             de = ""
         return (m or dm), (e or de)
 
@@ -570,40 +571,51 @@ class Room:
 
     def model_info(self, ai):
         m, e = self.own_models(ai)
-        capabilities = agents.model_capabilities(ai)
+        capabilities = model_catalog.capabilities(self, ai)
         effective_model = self.effective_models(ai)[0]
         if capabilities["effort_supported"]:
-            capabilities["efforts_by_model"][effective_model] = agents.effort_options(ai, effective_model)
-        label = self.model_label(ai) if capabilities["model_supported"] or capabilities["effort_supported"] else "由 Agent 自己管理"
+            capabilities["efforts_by_model"].setdefault(effective_model, agents.effort_options(ai, effective_model))
+        label = self.model_label(ai) if capabilities["model_supported"] or capabilities["effort_supported"] else "模型未回报"
+        actual = capabilities.get("observed")
+        if actual and actual.get("model"):
+            label = actual["model"] + (" · " + actual["effort"] if actual.get("effort") else "")
         return {"model": m, "effort": e, "label": label, "default": " · ".join(agents.ROOM_DEFAULTS[ai]),
                 "default_model": agents.ROOM_DEFAULTS[ai][0],
                 "default_effort": agents.ROOM_DEFAULTS[ai][1],
-                "efforts": agents.effort_options(ai, effective_model) if capabilities["effort_supported"] else [],
-                **capabilities}
+                "efforts": capabilities["efforts_by_model"].get(effective_model, agents.effort_options(ai, effective_model)) if capabilities["effort_supported"] else [],
+                **capabilities, **model_catalog.state(self, ai), **({"observed": actual} if actual else {})}
 
     def set_models(self, ai, model, effort):
         """改某个 AI 在这场会议的模型 / effort（空 = 用会议室默认）。返回 (ok, 错误, 是否换了模型)。"""
         if ai not in self.ais:
             return False, "未知 AI", False
         model, effort = (model or "").strip(), (effort or "").strip()
-        capabilities = agents.model_capabilities(ai)
+        capabilities = model_catalog.capabilities(self, ai)
         if model and not capabilities["model_supported"]:
-            return False, "此 Agent 的接入方式尚不支持切换模型，请在 Agent 中设置", False
+            return False, "当前执行端没有模型写入接口，会议室不能修改其模型", False
         if effort and not capabilities["effort_supported"]:
             return False, "此 Agent 的接入方式尚不支持设置思考强度", False
         if model and not agents.MODEL_RE.match(model):
             return False, "模型名不合法", False
         cur_model = model or agents.ROOM_DEFAULTS[ai][0]
-        if effort and (not agents.EFFORT_RE.match(effort) or effort not in agents.effort_options(ai, cur_model)):
+        if effort and (not agents.EFFORT_RE.match(effort) or effort not in capabilities["efforts_by_model"].get(cur_model, agents.effort_options(ai, cur_model))):
             return False, "effort 不在可选范围内", False
         with self.lock:
             if self.busy_for():
                 return False, "AI 还在回复，等它们说完再改", False
+            if execution.binding(self, ai)["phase"] != "ready":
+                return False, "执行端正在交接，结束后再修改模型", False
+            if (model or effort) and execution.binding(self, ai)["endpoint"] == "desktop":
+                return False, "当前桌面接入没有模型写入接口", False
             old_m, old_e = self.own_models(ai)
             if (old_m, old_e) == (model, effort):
                 return True, "", False
             self.meta["models"][ai] = {"model": model, "effort": effort}
-            self.save_meta()
+            try:
+                self.save_meta()
+            except OSError:
+                self.meta["models"][ai] = {"model": old_m, "effort": old_e}
+                raise
             self.add_message("系统", "%s 换成了 %s" % (ai, self.model_label(ai)), quiet=True)
         return True, "", old_m != model
 
@@ -957,7 +969,7 @@ class Room:
             if speaker in self.ais:
                 if access.permissions(self, speaker)["board"]:
                     text, changes = self.apply_board_cmds(speaker, text)
-                if access.permissions(self, speaker)["files"] and (registry.get(speaker) or {}).get("driver") != "external":
+                if access.permissions(self, speaker)["files"] and not execution.remote(self, speaker):
                     text, sent, send_errs = self.apply_send_cmds(text)
                     attachments = (attachments or []) + sent
                 if not access.permissions(self, speaker)["trigger"]:
@@ -1023,6 +1035,9 @@ class Room:
                 self.state["force_work"].discard(ai)
                 if self.closed or ai not in self.ais or not access.allowed(self, ai, "read") or not access.allowed(self, ai, "post") or tag != self.job_tag(ai) or self.meta["handed_off"][ai]:
                     return
+                if execution.binding(self, ai)["phase"] != "ready":
+                    self.system_note("%s 正在交接执行端，本条消息已保留；接管完成后再 @ 它处理" % ai)
+                    return
                 if not user and self.meta.get(ai + "_session") and not self.delta_for(ai)[0]:
                     return   # AI 之间的对话排到它时，该看的它已经看过了，不白叫
                 self.state["running"].append(ai)
@@ -1030,7 +1045,7 @@ class Room:
             try:
                 mode = self.member_mode(ai, "work" if forced else self.mode())
                 wd = self.workdir()
-                remote = (registry.get(ai) or {}).get("driver") == "external"
+                remote = execution.remote(self, ai)
                 pre = None
                 t0 = time.time()
                 if mode == "work" and not remote and not ws.in_git(wd):
@@ -1048,6 +1063,7 @@ class Room:
                         return
                 prompt, upto, ver, imgs = self.build_prompt(ai, mode)
                 sid = self.meta.get(ai + "_session")
+                model_revision = model_catalog.request_id(self, ai)
                 try:
                     res = ai_caller(ai, prompt, sid, imgs, mode, self)   # 明着传：落盘那一轮是强制干活模式，跟会议的模式不一样
                 except BaseException:
@@ -1055,6 +1071,7 @@ class Room:
                         self.add_message("系统", "%s 调用中途崩了，这一步改了什么没能记录" % ai)
                     raise
                 ok, out, new_sid = res[0], res[1], res[2]
+                model_catalog.result(self, ai, model_revision, ok, out, new_sid)
                 with self.lock:
                     was_stopped = ai in self.state["stopped"]
                     self.state["stopped"].discard(ai)
@@ -1125,6 +1142,8 @@ class Room:
     def compact_one(self, ai):
         """压缩一个 AI 的会话。返回给人看的结果描述。"""
         with self.lock:
+            if execution.binding(self, ai)["endpoint"] == "desktop" or execution.binding(self, ai)["phase"] != "ready":
+                return "%s 当前不由 CLI 执行，请在当前执行端压缩" % ai
             sid = self.meta.get(ai + "_session")
             handed = self.meta["handed_off"][ai]
         if handed:
@@ -1262,6 +1281,8 @@ class Room:
             if on == self.meta["handed_off"][ai]:
                 return True, ""
             if on:
+                if not execution.local(self, ai):
+                    return False, "当前执行端不是 CLI，不能再交给终端"
                 if not (registry.get(ai) or {}).get("caps", {}).get("handoff"):
                     return False, "这个 AI 不支持交给终端"
                 if not self.meta.get(ai + "_session"):
@@ -1281,7 +1302,7 @@ class Room:
     def can_handoff(self, ai):
         """这个 AI 能不能"交给终端"：得有会话，而且驱动支持（配置里给了 handoff 命令模板）。"""
         spec = registry.get(ai) or {}
-        return bool(self.meta.get(ai + "_session")) and bool((spec.get("caps") or {}).get("handoff"))
+        return execution.local(self, ai) and bool(self.meta.get(ai + "_session")) and bool((spec.get("caps") or {}).get("handoff"))
 
     def handoff_cmd(self, ai):
         """在终端里接着聊这个会话的命令；不支持返回 None。"""
@@ -1325,7 +1346,8 @@ class Room:
                           "tools": agents.tools_summary(a, self.meta["tools"][a])}
             return {"meeting": self.id, "title": self.meta["title"], "status": self.meta["status"],
                     "participants": list(self.ais), "agents": registry.catalog()["agents"],
-                    "members": {a: dict(broker.status(a), transport="member") if (registry.get(a) or {}).get("driver") == "external" and (registry.get(a) or {}).get("kind") != "user" else {"automatic": (registry.get(a) or {}).get("kind") != "user", "transport": "human" if (registry.get(a) or {}).get("kind") == "user" else "http" if (registry.get(a) or {}).get("driver") == "http" else "local"} for a in self.ais},
+                    "execution": {a: execution.describe(self, a) for a in self.ais if (registry.get(a) or {}).get("kind") != "user"},
+                    "members": {a: dict(broker.status(a, self.id if execution.binding(self, a)["endpoint"] == "desktop" else None), transport="desktop" if execution.binding(self, a)["endpoint"] == "desktop" else "member") if execution.remote(self, a) and (registry.get(a) or {}).get("kind") != "user" else {"automatic": (registry.get(a) or {}).get("kind") != "user", "transport": "human" if (registry.get(a) or {}).get("kind") == "user" else "http" if (registry.get(a) or {}).get("driver") == "http" else "local"} for a in self.ais},
                     "project": self.meta.get("project", ""), "permissions": {a: access.permissions(self, a) for a in self.ais},
                     "archived": is_archived(self.meta["status"]),
                     "announcement": self.meta["announcement"], "ann_ver": self.meta["ann_ver"], "ais": ais,
@@ -1467,7 +1489,9 @@ class Rooms:
             meta["project"] = project
             if participants is not None:
                 meta["participants"] = list(participants)
-                meta["permissions"] = {a: dict(access.PERMISSIONS) for a in participants}
+            if participants is not None or any((registry.get(a) or {}).get("default_permissions") for a in meta["participants"]):
+                meta["permissions"] = {a: dict(access.PERMISSIONS, **((registry.get(a) or {}).get("default_permissions") or {}))
+                                       for a in meta["participants"]}
             write_json(os.path.join(d, "meeting.json"), meta)
             with open(os.path.join(d, "log.md"), "w", encoding="utf-8") as f:
                 f.write("# %s\n\n创建于 %s\n\n" % (title, meta["created"]))

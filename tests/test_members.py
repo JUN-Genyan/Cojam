@@ -44,6 +44,22 @@ def wait_until(predicate, timeout=5):
 
 
 class Members(unittest.TestCase):
+    def test_remote_model_reset_clears_previous_local_overrides(self):
+        import hashlib
+        from types import SimpleNamespace
+        from bridge.member import LocalExecutor
+        room=self.room(['member-a'])
+        executor=object.__new__(LocalExecutor)
+        executor.agent='member-a';executor.workdir=support.DATA
+        executor.client=SimpleNamespace(server='http://test-server',allow_work=False)
+        task={'member':'member-a','room':'upstream','model':'selected-model','effort':'high','permissions':{}}
+        rid='member-'+hashlib.sha256((executor.client.server+task['member']+task['room']+executor.agent+executor.workdir).encode()).hexdigest()[:24]
+        executor.rooms={rid:room}
+        executor._room(task)
+        self.assertEqual(room.own_models('member-a'),('selected-model','high'))
+        executor._room(dict(task,model='',effort=''))
+        self.assertEqual(room.own_models('member-a'),('',''))
+
     def setUp(self):
         self.original = R.ai_caller
         R.ai_caller = drivers.call

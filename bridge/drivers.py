@@ -244,9 +244,14 @@ def call(pid, prompt, session_id=None, images=(), mode=None, room=None):
     driver = spec["driver"]
     if mode is None:
         mode = room.mode() if room is not None else "discuss"
-    if room is not None and standby_worker(pid):
-        from .members import broker
-        return broker.call(pid, prompt, session_id, mode, room)
+    if room is not None:
+        from . import execution
+        owner = execution.binding(room, pid)
+        if owner["phase"] != "ready":
+            return False, "会话正在交接执行端，请先完成或取消接管", session_id, []
+        if owner["endpoint"] == "desktop":
+            from .members import broker
+            return broker.call(pid, prompt, session_id, mode, room)
     if driver in ("claude", "codex"):
         return agents.call_ai(pid, prompt, session_id, images, mode, room)
     try:

@@ -123,18 +123,31 @@ def _host_for(entry, has_cli, has_desktop):
 
 def _inspect_entry(entry, installed_names, specs, conn_cat, host_map, dismissed):
     pid = entry["id"]
+    spec = specs.get(pid)
     cli_cfg = entry.get("cli") if isinstance(entry.get("cli"), dict) else None
     acp_cfg = entry.get("acp") if isinstance(entry.get("acp"), dict) else None
     cli_exe = _find_cli(cli_cfg)
     acp_exe = _find_cli({"bin": acp_cfg.get("bin"), "paths": (cli_cfg or {}).get("paths")}) if acp_cfg else None
     desktop_loc = _find_desktop(entry.get("desktop"), installed_names)
-    host_id = _host_for(entry, bool(cli_exe or acp_exe), bool(desktop_loc))
+    if spec and "bin" in spec.get("settings_fields", []) and spec.get("driver") in ("cli", "acp", "claude", "codex"):
+        configured = registry.exe_of(spec)
+        cli_exe = configured[0] if configured else None
+        acp_exe = cli_exe if spec["driver"] == "acp" else None
+    desktop = (spec or {}).get("desktop") or {}
+    if desktop.get("path"):
+        desktop_loc = _find_desktop({"detect": [desktop["path"]]}, installed_names)
+    host_id = desktop.get("host") or _host_for(entry, bool(cli_exe or acp_exe), bool(desktop_loc))
     host_info = host_map.get(host_id) if host_id else None
     mcp_installed = bool(host_info and host_info.get("installed"))
+    if desktop.get("mcp_path"):
+        host = next((dict(row) for row in install.HOSTS if row["id"] == host_id), None)
+        if host:
+            host["path"] = os.path.expandvars(os.path.expanduser(desktop["mcp_path"]))
+            mcp_installed = install.installed(host)
 
     has_direct = bool(cli_exe or acp_exe)
     has_desktop = bool(desktop_loc)
-    present = has_direct or has_desktop or mcp_installed
+    present = has_direct or has_desktop
 
     options = []
     if cli_cfg and cli_cfg.get("driver") in ("claude", "codex") and cli_exe:
@@ -161,14 +174,14 @@ def _inspect_entry(entry, installed_names, specs, conn_cat, host_map, dismissed)
         via = options[0] if options else "none"
 
     kind = "both" if (has_direct and has_desktop) else ("desktop" if has_desktop else "cli")
-    spec = specs.get(pid)
     conn = conn_cat.get(pid) or {}
 
     if level == "direct":
         connected = bool(spec and spec.get("enabled") and spec.get("driver") in ("claude", "codex", "acp", "cli")
-                         and (conn.get("state") == "ready" or spec.get("user")))
+                         and conn.get("state") == "ready")
     elif level == "mcp":
-        connected = bool(spec and spec.get("enabled") and mcp_installed and conn.get("has_key"))
+        from . import members
+        connected = bool(spec and spec.get("enabled") and members.broker.status(pid)["automatic"])
     else:
         connected = False
 
@@ -194,6 +207,7 @@ def _inspect_entry(entry, installed_names, specs, conn_cat, host_map, dismissed)
         "desktop_path": desktop_loc or "",
         "mcp_host": host_id or "",
         "mcp_installed": mcp_installed,
+        "mcp_configured": bool(spec and mcp_installed and conn.get("has_key")),
         "connected": connected,
         "verified": verified,
         "dismissed": pid in dismissed,
@@ -207,6 +221,7 @@ def scan():
     with _lock:
         _state["scanning"] = True
     try:
+        from . import members
         registry.load()
         specs = {s["id"]: s for s in registry.all_specs()}
         conn_cat = connections.catalog()
@@ -236,7 +251,7 @@ def scan():
                 "desktop_path": "",
                 "mcp_host": "",
                 "mcp_installed": False,
-                "connected": bool(s.get("enabled") and (conn.get("state") in ("ready", "connected") or s.get("user"))),
+                "connected": bool(s.get("enabled") and (members.broker.status(pid)["automatic"] if s.get("driver") == "external" else conn.get("state") == "ready")),
                 "verified": bool(s.get("verified")),
                 "dismissed": pid in dismissed,
                 "reason": "自定义配置的 Agent",
@@ -272,7 +287,8 @@ def status():
     with _lock:
         items = [dict(x) for x in _state["items"]]
         detected = [x for x in items if x.get("present")]
-        pending = [x for x in detected if not x.get("connected") and not x.get("dismissed") and x.get("level") in ("direct", "mcp")]
+        pending = [x for x in detected if not x.get("dismissed") and not x.get("connected") and
+                   not x.get("mcp_configured") and x.get("level") in ("direct", "mcp")]
         return {
             "scanning": _state["scanning"],
             "last_scan": _state["last_scan"],
@@ -333,70 +349,59 @@ def _build_direct_spec(entry, via, exe):
     }
 
 
-def connect(pid, via=None):
-    """一键配置并连接某个发现的 Agent。"""
+def prepare(pid, via=None):
+    """Create a candidate once, then use the same editable settings as every other entrypoint."""
+    from . import agent_settings
     pid = str(pid or "").strip().lower()
     if not _state["items"]:
         scan()
-    entries = {e["id"]: e for e in load_catalog()}
-    entry = entries.get(pid)
+    entry = next((e for e in load_catalog() if e["id"] == pid), None)
     item = next((x for x in _state["items"] if x["id"] == pid), None)
-    if not entry and not item:
-        return False, {"error": "未找到此 Agent：%s" % pid}
-
-    chosen = (via or (item or {}).get("via") or "cli").strip().lower()
-    if chosen == "mcp":
-        host_id = (item or {}).get("mcp_host") or (entry.get("mcp") or {}).get("id") or (entry.get("mcp_desktop") or {}).get("id") or pid
-        cur = registry.get(pid)
-        if not cur or ( not cur.get("builtin") and cur.get("driver") != "external"):
-            detect_paths = list(((entry or {}).get("desktop") or {}).get("detect") or [])
-            spec = {
-                "id": pid,
-                "label": (entry or item or {}).get("label") or pid,
-                "color": (entry or item or {}).get("color") or "#34a853",
-                "driver": "external",
-                "enabled": True,
-                "detect": detect_paths,
-                "note": "通过 MCP 插件接入；可在该软件内运行 /cojam_standby 进入待命模式，由 Cojam 直接派发任务。",
-            }
-            if not (cur and cur.get("builtin")):
-                ok, err = registry.save_agent(spec)
-                if not ok:
-                    return False, {"error": err}
-        token = access.credential(pid)
-        ok, msg = install.host_install(host_id, token)
-        scan()
-        standby_cmd = "请调用 ai-bridge 的 cojam_standby 工具进入合拍待命模式：收到任务后执行并用 reply_task 提交结果，再继续调用 cojam_standby。"
-        return ok, {
-            "ok": ok,
-            "id": pid,
-            "via": "mcp",
-            "host": host_id,
-            "msg": msg,
-            "token": token,
-            "standby_prompt": "/cojam_standby",
-            "standby_instruction": standby_cmd,
-            "discovery": status(),
-        }
-
-    # 直连（claude / codex / acp / cli）
+    if not item or not item.get("present"):
+        raise ValueError("未找到已安装的 Agent")
+    chosen = str(via or item.get("via") or "cli").lower()
+    if chosen not in item.get("options", []) and chosen != item.get("via"):
+        raise ValueError("此 Agent 未检测到所选接入方式")
     registry.restore_preset(pid)
-    cur = registry.get(pid)
-    exe = (item or {}).get("exe") or ""
-    if not (cur and cur.get("builtin")):
-        if entry:
-            spec = _build_direct_spec(entry, chosen, exe)
-            ok, err = registry.save_agent(spec)
-            if not ok:
-                return False, {"error": err}
-    conn = connections.check(pid)
-    scan()
-    ok = conn.get("state") == "ready"
-    return ok, {
-        "ok": ok,
-        "id": pid,
-        "via": chosen,
-        "connection": conn,
-        "msg": conn.get("detail") or conn.get("label") or ("已连接" if ok else "连接验证失败"),
-        "discovery": status(),
-    }
+    current = registry.get(pid)
+    if not current:
+        if chosen == "mcp":
+            spec = {"id":pid, "label":item["label"], "driver":"external", "enabled":True}
+        elif entry:
+            spec = _build_direct_spec(entry, chosen, item.get("exe") or "")
+        else:
+            raise ValueError("请在接入界面添加此程序")
+        ok, error = registry.save_agent(spec)
+        if not ok:
+            raise ValueError(error)
+    if chosen == "mcp":
+        config = agent_settings.view(pid)
+        desktop = dict(config["values"].get("desktop") or {})
+        desktop["host"] = desktop.get("host") or item.get("mcp_host") or ""
+        if not desktop.get("path") and os.path.isabs(item.get("desktop_path") or ""):
+            desktop["path"] = item["desktop_path"]
+        if desktop != config["values"].get("desktop"):
+            agent_settings.save(pid, {"desktop":desktop}, config["revision"])
+    return {"id":pid, "via":chosen, "tab":"desktop" if chosen == "mcp" else "cli"}
+
+
+def connect(pid, via=None, replace_key=False):
+    """Compatibility route; preserve saved drivers, and use the transactional settings installer."""
+    from . import agent_settings
+    try:
+        prepared = prepare(pid, via)
+        pid, chosen = prepared["id"], prepared["via"]
+        if chosen == "mcp":
+            config = agent_settings.view(pid)
+            message = agent_settings.install_mcp(pid, replace_key, config["revision"])
+            result = {"ok":True,"id":pid,"via":"mcp","msg":message,"standby_prompt":"/cojam_standby",
+                      "standby_instruction":"请调用 cojam_standby，按会议室给出的会话接管参数连接。"}
+        else:
+            connection = connections.check(pid)
+            result = {"ok":connection.get("state") == "ready", "id":pid,"via":chosen,
+                      "connection":connection,"msg":connection.get("detail") or connection.get("label")}
+        scan()
+        result["discovery"] = status()
+        return result["ok"], result
+    except (ValueError, OSError) as error:
+        return False, {"ok":False,"error":str(error),"discovery":status()}

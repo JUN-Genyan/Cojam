@@ -7,7 +7,7 @@ async function checkConnectionBackend(signal) {
     if (!response.ok) throw Error();
     info = await response.json();
   } catch (e) { if (signal && signal.aborted) throw e; throw Error('无法连接合拍后台，请重新打开合拍后重试。'); }
-  if (info.app !== 'AI Bridge' || info.version !== '2.7.2' || info.api_revision !== 2)
+  if (info.app !== 'AI Bridge' || info.version !== '2.8.0' || info.api_revision !== 3)
     throw Error('界面与后台版本不一致。请重新打开最新的合拍 Cojam，再刷新此页面。');
   return info;
 }
@@ -206,6 +206,7 @@ async function startConnectionWizard(id, type) {
       w.type = contact.kind === 'user' ? 'user' : contact.driver === 'external' ? 'external' : contact.driver === 'http' ? 'http' : 'local';
       w.status = (agCat.connections || {})[id] || null;
       w.localChoice = id; w.saved = true; w.step = 2;
+      w.permissions = {...w.permissions, ...(contact.default_permissions || {})};
     } else if (type) w.step = 2;
     w.info = info;
     w.base = connectionDefaultBase(w.type, info, location.origin);
@@ -217,7 +218,10 @@ async function startConnectionWizard(id, type) {
   } finally { clearTimeout(timeout); }
 }
 function addContact() { return startConnectionWizard(); }
-function openConnection(id) { return startConnectionWizard(id); }
+function openConnection(id) {
+  const contact = CONTACTS.find(a => a.id === id);
+  return contact && contact.kind !== 'user' && typeof openAgentSettings === 'function' ? openAgentSettings(id) : startConnectionWizard(id);
+}
 function connectionContact(w) { return CONTACTS.find(a => a.id === w.id); }
 function wizardCurrent(w) { return connectionWizard === w && !!document.getElementById('connectionWizard'); }
 function wizardError(message) { const e = document.getElementById('connError'); if (e) e.textContent = message || ''; }
@@ -245,6 +249,10 @@ function renderConnectionWizard() {
 function connectionNameFields(w) {
   if (w.saved) return '<div class="connection-identity"><b>' + esc((connectionContact(w) || {}).label || w.id) + '</b><small>@' + esc(w.id) + '</small></div>';
   return '<label>联系人名称<input id="connName" maxlength="40" placeholder="例如：我的 Harness" value="' + esc(w.form.label || '') + '"></label><details class="connection-advanced"><summary>高级：自定义联系人 ID</summary><input id="connId" maxlength="24" placeholder="留空自动生成，小写英文和数字" value="' + esc(w.form.id || '') + '"></details>';
+}
+function connectionArgsMarkup(w) {
+  const values = Array.isArray(w.form.args) ? w.form.args : w.form.localDriver === 'acp' ? ['acp'] : ['-p','{prompt}'];
+  return agentListEditor('wizard-args', values);
 }
 function renderConnectionSetup(w) {
   let content = '<h3>' + CONNECTION_TYPES[w.type][0] + '</h3>';
@@ -274,7 +282,7 @@ function renderConnectionSetup(w) {
       w.localChoice = (local[0] || {}).id || '__custom__';
       w.id = ''; w.saved = false; w.status = null;
     }
-    content += '<p class="hint">自动检测运行合拍的设备上的程序；安装或卸载后可重新检索，也可打开「本机 Agent 扫描」一键连接。</p><label>选择程序<select id="connLocal">' + local.map(a => '<option value="' + esc(a.id) + '"' + (w.localChoice === a.id ? ' selected' : '') + '>' + esc(a.label) + ' · 已检测到</option>').join('') + '<option value="__custom__"' + (w.localChoice === '__custom__' ? ' selected' : '') + '>自定义 CLI / ACP 程序…</option></select></label><div class="btns" style="justify-content:flex-start;margin:6px 0"><button id="connRescan" type="button">重新检索已安装程序</button><button id="connOpenScan" type="button">打开本机 Agent 全盘扫描</button></div>' + (outside.length ? '<p class="hint">已检测到桌面应用。选择配置接入；桌面应用本身不能由会议室直接调用。</p>' + outside.map(a => '<button type="button" data-external-agent="' + esc(a.id) + '">配置 ' + esc(a.label) + '</button>').join('') : '') + '<div id="connCustom"' + (w.localChoice === '__custom__' ? '' : ' hidden') + '>' + connectionNameFields(w.localChoice === '__custom__' ? w : {...w, saved: false}) + '<label>协议类型<select id="connLocalDriver"><option value="cli"' + (w.form.localDriver !== 'acp' ? ' selected' : '') + '>无头命令行 (CLI)</option><option value="acp"' + (w.form.localDriver === 'acp' ? ' selected' : '') + '>ACP 协议 (Agent Client Protocol)</option></select></label><label>命令或可执行文件路径<input id="connCommand" placeholder="my-agent 或完整程序路径" value="' + esc(w.form.command || '') + '"></label><label>调用参数（JSON 数组）<textarea id="connArgs">' + esc(w.form.args || (w.form.localDriver === 'acp' ? '["acp"]' : '["-p", "{prompt}"]')) + '</textarea></label></div><button id="connCheck" class="pri">检测并验证程序</button><p class="hint">仅运行 --version，不调用模型；登录和额度在首次回复时确认。</p>';
+    content += '<p class="hint">自动检测运行合拍的设备上的程序；安装或卸载后可重新检索，也可打开「本机 Agent 扫描」一键连接。</p><label>选择程序<select id="connLocal">' + local.map(a => '<option value="' + esc(a.id) + '"' + (w.localChoice === a.id ? ' selected' : '') + '>' + esc(a.label) + ' · 已检测到</option>').join('') + '<option value="__custom__"' + (w.localChoice === '__custom__' ? ' selected' : '') + '>自定义 CLI / ACP 程序…</option></select></label><div class="btns" style="justify-content:flex-start;margin:6px 0"><button id="connRescan" type="button">重新检索已安装程序</button><button id="connOpenScan" type="button">打开本机 Agent 全盘扫描</button></div>' + (outside.length ? '<p class="hint">已检测到桌面应用。选择配置接入；桌面应用本身不能由会议室直接调用。</p>' + outside.map(a => '<button type="button" data-external-agent="' + esc(a.id) + '">配置 ' + esc(a.label) + '</button>').join('') : '') + '<div id="connCustom"' + (w.localChoice === '__custom__' ? '' : ' hidden') + '>' + connectionNameFields(w.localChoice === '__custom__' ? w : {...w, saved: false}) + '<label>协议类型<select id="connLocalDriver"><option value="cli"' + (w.form.localDriver !== 'acp' ? ' selected' : '') + '>无头命令行 (CLI)</option><option value="acp"' + (w.form.localDriver === 'acp' ? ' selected' : '') + '>ACP 协议 (Agent Client Protocol)</option></select></label><label>命令或可执行文件路径<input id="connCommand" placeholder="my-agent 或完整程序路径" value="' + esc(w.form.command || '') + '"></label><h4>调用参数</h4><p class="hint">每个参数单独添加，不需要引号或配置文件。</p><div id="connArgs">' + connectionArgsMarkup(w) + '</div></div><button id="connCheck" class="pri">检测并验证程序</button><p class="hint">仅运行 --version，不调用模型；登录和额度在首次回复时确认。</p>';
   } else {
     content += connectionNameFields(w);
     if (w.type === 'http') {
@@ -300,6 +308,15 @@ function renderConnectionSetup(w) {
     renderDeviceSetup(w);
   }
   if (w.type === 'local') {
+    const argsBox = document.getElementById('connArgs');
+    if (argsBox) argsBox.onclick = event => {
+      const remove = event.target.closest('[data-agent-remove]');
+      if (remove) remove.closest('.agent-value-row').remove();
+      const add = event.target.closest('[data-agent-add]');
+      if (add) { const rows = argsBox.querySelector('[data-agent-rows]'); rows.insertAdjacentHTML('beforeend', agentListRow('')); rows.lastElementChild.querySelector('input').focus(); }
+    };
+    const driverChoice = document.getElementById('connLocalDriver');
+    if (driverChoice) driverChoice.onchange = () => { captureConnectionForm(w); w.form.args = driverChoice.value === 'acp' ? ['acp'] : ['-p','{prompt}']; renderConnectionWizard(); };
     if (document.getElementById('connOpenScan')) document.getElementById('connOpenScan').onclick = () => openDiscoveryModal(true);
     document.querySelectorAll('[data-external-agent]').forEach(button => { button.onclick = async () => {
       const id = button.dataset.externalAgent;
@@ -375,13 +392,15 @@ function renderConnectionSetup(w) {
 }
 function localAgentChoices() {
   return [...new Map([...CONTACTS, ...((agCat && agCat.discovered_presets) || [])]
-    .filter(a => ['cli', 'acp', 'claude', 'codex'].includes(a.driver) && a.enabled).map(a => [a.id, a])).values()];
+    .filter(a => ['cli', 'acp', 'claude', 'codex'].includes(a.driver) && a.enabled && a.cli_available !== false).map(a => [a.id, a])).values()];
 }
 function captureConnectionForm(w) {
   const value = id => { const e = document.getElementById(id); return e ? e.value.trim() : undefined; };
-  for (const [field, id] of Object.entries({label:'connName', id:'connId', localDriver:'connLocalDriver', command:'connCommand', args:'connArgs', endpoint:'connEndpoint', serviceKey:'connServiceKey', deviceName:'connDeviceName'})) {
+  for (const [field, id] of Object.entries({label:'connName', id:'connId', localDriver:'connLocalDriver', command:'connCommand', endpoint:'connEndpoint', serviceKey:'connServiceKey', deviceName:'connDeviceName'})) {
     const v = value(id); if (v !== undefined) w.form[field] = v;
   }
+  const args = document.getElementById('connArgs');
+  if (args) w.form.args = [...args.querySelectorAll('[data-agent-value]')].map(input => input.value).filter(value => value !== '');
   if (document.getElementById('connBase')) w.base = value('connBase').replace(/\/+$/, '');
   if (document.getElementById('connHost')) w.host = value('connHost');
 }
@@ -396,8 +415,8 @@ async function saveConnectionContact(w) {
   const spec = {id, label: w.form.label, kind: w.type === 'user' ? 'user' : 'agent', driver: ['user','external'].includes(w.type) ? 'external' : w.type === 'local' ? localDrv : 'http', enabled: true};
   if (w.type === 'local') {
     if (!w.form.command) throw Error('请填写程序命令或路径');
-    let args; try { args = JSON.parse(w.form.args); } catch (e) { throw Error('调用参数应是 JSON 字符串数组'); }
-    if (!Array.isArray(args) || !args.every(x => typeof x === 'string')) throw Error('调用参数应是 JSON 字符串数组');
+    const args = w.form.args || [];
+    if (!Array.isArray(args) || !args.every(x => typeof x === 'string')) throw Error('请逐项填写启动参数');
     spec.bin = [w.form.command]; spec.args = localDrv === 'acp' ? {acp: args} : {base: args}; spec.context = 'full'; delete spec.enabled;
   }
   if (w.type === 'http') { const u = new URL(w.form.endpoint); if (!['http:','https:'].includes(u.protocol)) throw Error('回调地址必须以 http:// 或 https:// 开头'); spec.endpoint = w.form.endpoint; spec.token = w.form.serviceKey || ''; }
@@ -654,13 +673,13 @@ async function updateConnectionAssignment(w) {
   const seq = (w.assignmentSeq || 0) + 1; w.assignmentSeq = seq;
   w.target = document.getElementById('connRoom').value;
   document.getElementById('connNewRoom').hidden = w.target !== '__new__';
-  if (w.target === '__new__') { w.loadingAssignment = false; w.permissions = {read:true,post:true,trigger:true,board:false,files:false,work:false}; document.getElementById('connPermissions').innerHTML = renderPermissionChoices(w); document.getElementById('connAssign').disabled = w.busy; return; }
+  if (w.target === '__new__') { w.loadingAssignment = false; w.permissions = {read:true,post:true,trigger:true,board:false,files:false,work:false,...((connectionContact(w) || {}).default_permissions || {})}; document.getElementById('connPermissions').innerHTML = renderPermissionChoices(w); document.getElementById('connAssign').disabled = w.busy; return; }
   w.loadingAssignment = true;
   const save = document.getElementById('connAssign'); save.disabled = true;
   try {
     const r = await fetch('/api/r/' + encodeURIComponent(w.target) + '/state'); const state = await r.json(); if (!r.ok) throw Error(state.error || '读取会话失败');
     if (!wizardCurrent(w) || w.assignmentSeq !== seq || w.step !== 3) return;
-    w.permissions = (state.permissions || {})[w.id] || {read:true,post:true,trigger:true,board:false,files:false,work:false};
+    w.permissions = (state.permissions || {})[w.id] || {read:true,post:true,trigger:true,board:false,files:false,work:false,...((connectionContact(w) || {}).default_permissions || {})};
     w.loadingAssignment = false; document.getElementById('connPermissions').innerHTML = renderPermissionChoices(w); save.disabled = w.busy;
   } catch (e) { if (wizardCurrent(w) && w.assignmentSeq === seq) wizardError(e.message); }
 }
@@ -734,91 +753,33 @@ async function openDiscoveryModal(forceRescan = false) {
 
 function renderDiscoveryModal(disc) {
   const detected = (disc && disc.detected) || [];
-  const direct = detected.filter(x => x.level === 'direct');
-  const mcpList = detected.filter(x => x.level === 'mcp');
-  const other = detected.filter(x => x.level === 'unsupported');
-  const rowHtml = item => {
-    const m = (typeof agCat === 'object' && agCat && agCat.members && agCat.members[item.id]) || {};
-    const statusBadge = m.standby ? '<span class="badge ok">MCP 待命中</span>'
-      : item.connected ? '<span class="badge ok">已连接</span>'
-      : '<span class="badge">未连接</span>';
-    const viaSelect = item.options && item.options.length > 1
-      ? '<select data-disc-via="' + esc(item.id) + '" aria-label="连接方式">' + item.options.map(v => '<option value="' + esc(v) + '"' + (v === item.via ? ' selected' : '') + '>' + esc(v === 'acp' ? 'ACP 直连（推荐）' : v === 'mcp' ? 'MCP 插件兜底' : '命令行直连 (' + v + ')') + '</option>').join('') + '</select>'
-      : '';
-    const actionBtn = item.level === 'direct'
-      ? '<button type="button" class="pri" data-disc-connect="' + esc(item.id) + '" data-disc-default-via="' + esc(item.via) + '">' + (item.connected ? '重新验证' : '一键连接') + '</button>'
-      : item.level === 'mcp'
-      ? '<button type="button" class="pri" data-disc-connect="' + esc(item.id) + '" data-disc-default-via="mcp">' + (item.mcp_installed ? '更新插件密钥' : '一键写入插件') + '</button>'
-      : (item.install_hint ? '<a href="' + esc(item.install_hint) + '" target="_blank" rel="noopener">官方说明 ↗</a>' : '');
-    const stopBtn = m.standby ? '<button type="button" data-disc-stop-standby="' + esc(item.id) + '">停止待命</button>' : '';
-    const mcpHint = item.level === 'mcp' && item.mcp_installed
-      ? '<p class="hint" style="margin:4px 0 0">已写入 MCP 配置。重启该软件后，在对话中输入 <code>/cojam_standby</code>（或让它调用 <code>cojam_standby</code> 工具）即可由合拍直接调用。</p>'
-      : '';
-    return '<div class="disc-row" style="border:1px solid var(--bd,#e2e4e8);border-radius:10px;padding:10px 12px;margin:8px 0">'
-      + '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">'
-      + '<div><b>' + esc(item.label) + '</b> <small>@' + esc(item.id) + '</small> ' + statusBadge + (!item.verified ? ' <small class="hint">(预置未实测)</small>' : '') + '</div>'
-      + '<div style="display:flex;gap:6px;align-items:center">' + viaSelect + stopBtn + actionBtn + '</div>'
-      + '</div>'
-      + '<p class="hint" style="margin:4px 0 0">' + esc(item.reason || '') + (item.exe ? ' · <code>' + esc(item.exe) + '</code>' : item.desktop_path ? ' · <code>' + esc(item.desktop_path) + '</code>' : '') + '</p>'
-      + mcpHint
-      + '<div data-disc-result="' + esc(item.id) + '"></div>'
-      + '</div>';
-  };
-  let html = '<div id="discoveryModal"><div class="connection-heading"><span class="eyebrow">本机 Agent 自动发现</span><button id="discClose" aria-label="关闭">×</button></div>'
-    + '<h3>在这台电脑上发现 ' + detected.length + ' 个 Agent</h3>'
-    + '<p class="hint">支持直接驱动的 Agent 可由 Cojam 直接启动和调用；纯图形界面软件可一键写入 MCP 插件，并在软件内开启 <code>/cojam_standby</code> 待命模式接受调度。</p>';
-  if (!detected.length) {
-    html += '<p class="hint">暂未在常见路径检测到已安装的 Agent。你也可以点击下方「手动配置 / 接入」添加自定义程序。</p>';
-  }
-  if (direct.length) {
-    html += '<h4>可直接连接（Cojam 主动驱动 · ' + direct.length + '）</h4>' + direct.map(rowHtml).join('');
-  }
-  if (mcpList.length) {
-    html += '<h4>桌面软件（MCP 插件兜底 + 待命模式 · ' + mcpList.length + '）</h4>' + mcpList.map(rowHtml).join('');
-  }
-  if (other.length) {
-    html += '<h4>其他已检测软件</h4>' + other.map(rowHtml).join('');
-  }
-  html += '<div class="btns" style="margin-top:14px"><button type="button" id="discRescan">重新扫描</button><button type="button" id="discManual">手动配置 / 接入向导</button><button type="button" id="discDismiss">稍后再说（不再自动提示）</button><button type="button" id="discDone" class="pri">完成</button></div></div>';
-  showModal(html);
+  const rows = detected.map(item => {
+    const member = ((agCat || {}).members || {})[item.id] || {};
+    const direct = item.level === 'direct';
+    const desktop = item.level === 'mcp' || item.kind === 'desktop' || item.kind === 'both';
+    const label = member.standby ? 'MCP 待命中' : member.automatic ? '自动响应端在线' : direct && item.connected ? 'CLI 已验证' : item.mcp_installed ? 'MCP 已配置，等待待命' : '已检测，待配置';
+    const actions = (direct ? '<button data-disc-config="'+esc(item.id)+'" data-via="'+esc(item.via)+'">配置 CLI</button>' : '')
+      + (desktop && item.mcp_host ? '<button data-disc-config="'+esc(item.id)+'" data-via="mcp">配置桌面 / MCP</button>' : '')
+      + (item.level === 'unsupported' ? '<span class="hint">暂不支持接入</span>' : '');
+    return '<div class="disc-row agent-room-row"><div><b>'+esc(item.label)+'</b> <small>@'+esc(item.id)+'</small><p class="hint">'+esc(label)+'</p><small>'+esc(item.exe || item.desktop_path || '')+'</small></div><div class="btns">'+actions+'</div></div>';
+  }).join('');
+  showModal('<div id="discoveryModal"><div class="connection-heading"><span class="eyebrow">本机 Agent 自动发现</span><button id="discClose" aria-label="关闭">×</button></div><h3>在这台电脑上发现 '+detected.length+' 个 Agent</h3><p class="hint">CLI 走直连；桌面配置 MCP 后开启 /cojam_standby，以真实心跳保持接入。扫描只提供候选程序，所有修改均进入同一个 Agent 设置页。</p>'+rows+'<p id="discError" role="alert"></p><div class="btns"><button id="discRescan">重新扫描</button><button id="discManual">手动添加</button><button id="discDismiss">不再自动提示</button><button id="discDone" class="pri">完成</button></div></div>');
+  const current = document.getElementById('discoveryModal');
   document.getElementById('discClose').onclick = hideModal;
   document.getElementById('discDone').onclick = hideModal;
   document.getElementById('discRescan').onclick = () => openDiscoveryModal(true);
   document.getElementById('discManual').onclick = () => startConnectionWizard();
-  document.getElementById('discDismiss').onclick = async () => {
-    await post('/api/discovery/dismiss', {id: 'all'});
-    hideModal();
-  };
-  mbox.querySelectorAll('[data-disc-connect]').forEach(btn => {
-    btn.onclick = async () => {
-      const id = btn.dataset.discConnect;
-      const sel = mbox.querySelector('[data-disc-via="' + id + '"]');
-      const via = sel ? sel.value : btn.dataset.discDefaultVia;
-      const resBox = mbox.querySelector('[data-disc-result="' + id + '"]');
-      btn.disabled = true;
-      btn.textContent = '正在连接…';
-      const [ok, res] = await post('/api/discovery/connect', {id, via});
+  document.getElementById('discDismiss').onclick = async () => { await post('/api/discovery/dismiss',{id:'all'}); if(document.getElementById('discoveryModal')===current)hideModal(); };
+  mbox.querySelectorAll('[data-disc-config]').forEach(button => button.onclick = async () => {
+    button.disabled = true;
+    try {
+      const [ok,result] = await post('/api/discovery/prepare',{id:button.dataset.discConfig,via:button.dataset.via});
+      if(document.getElementById('discoveryModal')!==current)return;
+      if(!ok)throw Error(result.error || '无法准备 Agent 设置');
       await refreshContacts();
-      if (res && res.discovery) renderDiscoveryModal(res.discovery);
-      const boxAfter = mbox.querySelector('[data-disc-result="' + id + '"]') || resBox;
-      if (boxAfter) {
-        if (ok && res.via === 'mcp') {
-          boxAfter.innerHTML = '<div class="connection-evidence success" style="margin-top:6px"><b>✓ 已写入 MCP 插件</b><p>' + esc(res.msg || '') + '</p><p>下一步：重启该软件后，在对话里输入 <code>' + esc(res.standby_prompt || '/cojam_standby') + '</code>，或发送：<br><code>' + esc(res.standby_instruction || '') + '</code></p></div>';
-        } else if (ok) {
-          boxAfter.innerHTML = '<div class="connection-evidence success" style="margin-top:6px"><b>✓ 已连接并验证通过</b><p>' + esc(res.msg || '') + '</p></div>';
-        } else {
-          boxAfter.innerHTML = '<div class="connection-evidence failure" style="margin-top:6px"><b>○ 未通过验证</b><p>' + esc((res && (res.error || res.msg)) || '连接失败') + '</p></div>';
-        }
-      }
-    };
-  });
-  mbox.querySelectorAll('[data-disc-stop-standby]').forEach(btn => {
-    btn.onclick = async () => {
-      btn.disabled = true;
-      await post('/api/members/standby/stop', {id: btn.dataset.discStopStandby});
-      await refreshContacts();
-      openDiscoveryModal(false);
-    };
+      if(document.getElementById('discoveryModal')===current)openAgentSettings(result.id,result.tab);
+    } catch(error) { if(document.getElementById('discoveryModal')===current)document.getElementById('discError').textContent=error.message; }
+    finally { button.disabled=false; }
   });
 }
 

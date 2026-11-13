@@ -175,8 +175,8 @@ class TestStandbyAndPrompts(unittest.TestCase):
         t.start()
         return t, box
 
-    def test_standby_routes_for_builtin_driver_contact(self):
-        """Claude 这类内置驱动也应该能由桌面端待命接单，而不是再起一个 CLI。"""
+    def test_standby_does_not_steal_a_cli_conversation(self):
+        """桌面待命在线本身不能改变会话执行端。"""
         ok, err = registry.save_agent({"id": "claude-ide", "label": "Claude Desktop",
                                        "driver": "claude", "bin": ["python"], "enabled": True})
         self.assertTrue(ok, err)
@@ -188,19 +188,17 @@ class TestStandbyAndPrompts(unittest.TestCase):
         st = members.broker.status("claude-ide")
         self.assertTrue(st["standby"], st)
 
-        t, box = self._standby_once(key, reply="@用户 桌面端已处理")
-        time.sleep(0.1)
-        with patch.object(drivers.agents, "call_ai", side_effect=AssertionError("不该回落到本地 CLI")):
+        with patch.object(drivers.agents, "call_ai", return_value=(True,"@用户 CLI 已处理",None,[])) as cli:
             ok, text, sid, _ = drivers.call("claude-ide", "看一下 README", None, (), "discuss", self.room)
-        t.join(5)
         self.assertTrue(ok, text)
-        self.assertEqual(text, "@用户 桌面端已处理")
-        self.assertEqual(box["task"]["mode"], "discuss")
+        self.assertEqual(text, "@用户 CLI 已处理")
+        cli.assert_called_once()
+        self.assertEqual(members.broker.tasks,{})
 
     def test_standby_work_mode_needs_allow_work(self):
         """会话是干活模式时，待命端没显式允许改文件就只读参与。"""
         ok, err = registry.save_agent({"id": "claude-ide", "label": "Claude Desktop",
-                                       "driver": "claude", "bin": ["python"], "enabled": True})
+                                       "driver": "external", "enabled": True})
         self.assertTrue(ok, err)
         key = access.credential("claude-ide")
         self.room.set_participants(["ide-agent", "claude-ide"])

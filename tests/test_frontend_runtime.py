@@ -90,6 +90,30 @@ vm.runInContext(helper,context);context.attachWorkspaceFolderPicker('pWd');
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+class ToolSettingsResponseLifetime(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed for deferred UI responses')
+    def test_closed_or_replaced_agent_dialog_discards_old_tool_response(self):
+        root=Path(__file__).resolve().parents[1]
+        script=r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const html=fs.readFileSync('index.html','utf8');
+const source=html.match(/async function loadTools\(a,x\)\{[\s\S]*?\n\}/)[0];
+(async()=>{
+ for(const replace of [true,false]){
+  let pending,box={innerHTML:'original'},old=box;
+  const ctx=vm.createContext({RID:'room-a',api:()=>'/api/r/room-a/tools',fetch:()=>new Promise(resolve=>pending=resolve),document:{getElementById:id=>{if(id==='toolsBox')return box;throw Error('stale dialog access')}}});
+  vm.runInContext(source,ctx);
+  const request=ctx.loadTools('claude',{});
+  if(replace)box={innerHTML:'new dialog'};else ctx.RID='room-b';
+  pending({ok:true,json:async()=>({mcp:[],plugins:[],skills:[]})});await request;
+  assert.equal(old.innerHTML,'original');if(replace)assert.equal(box.innerHTML,'new dialog');
+ }
+})().catch(error=>{console.error(error);process.exitCode=1});
+'''
+        result=subprocess.run(['node','-e',script],cwd=root,capture_output=True,text=True,timeout=20)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+
 class GuestInvitation(unittest.TestCase):
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
     def test_full_invitation_url_can_be_pasted_as_key(self):

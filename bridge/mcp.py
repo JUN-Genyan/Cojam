@@ -91,6 +91,19 @@ EXT_TOOLS += [
      "inputSchema": _obj({"worker": {"type": "string"}, "task": {"type": "string"}, "lease": {"type": "string"}, "text": {"type": "string"}}, ["worker", "task", "lease", "text"])}
 ]
 
+# Scoped desktop sessions use an endpoint credential in addition to the contact key.
+ENDPOINT_FIELDS = {"room": {"type": "string"}, "worker": {"type": "string"},
+                   "binding_token": {"type": "string"}}
+for _tool in EXT_TOOLS:
+    if _tool["name"] in ("list_rooms", "read_room", "post_to_room", "wait_for_message", "member_heartbeat", "cojam_standby"):
+        _tool["inputSchema"]["properties"].update(ENDPOINT_FIELDS)
+    if _tool["name"] == "cojam_standby":
+        _tool["inputSchema"]["properties"].update(native_session={"type": "string"}, binding_challenge={"type": "string"})
+        _tool["description"] += " 桌面接管需从指定原生会话传入 room/native_session/binding_challenge；后续调用携带返回的 worker/binding_token 以及 room/native_session。status=release 时调用 release_session 并结束循环。"
+EXT_TOOLS.append({"name": "release_session", "title": "释放共享原生会话给 CLI",
+                  "description": "会议室请求切换 CLI 后停止待命并释放会话，成功后不要再读取或执行。",
+                  "inputSchema": _obj(ENDPOINT_FIELDS, ["room", "worker", "binding_token"])})
+
 STANDBY_PROMPTS = [
     {
         "name": "cojam_standby",
@@ -131,6 +144,10 @@ def call_room_tool(rid, ai, name, args):
     r = R.rooms.get(rid)
     if r is None:
         raise ToolError("这场会议已经不在了")
+    from . import execution
+    owner = execution.binding(r, ai)
+    if owner["endpoint"] == "desktop" or owner["phase"] != "ready":
+        raise ToolError("此原生会话已交给桌面或正在接管，原 CLI 工具凭据不可继续读取和执行")
     try:
         access.require(r, ai)
         needed = {"post": "post", "board": "board", "claim_files": "work", "release_files": "work"}.get(name)
@@ -209,7 +226,7 @@ def call_ext_tool(name, args, pid=None, key=""):
     if not pid:
         raise ToolError("请使用联系人接入密钥")
     actions = {"receive_task": "receive", "reply_task": "reply", "member_heartbeat": "heartbeat",
-               "task_progress": "progress", "cojam_standby": "standby"}
+               "task_progress": "progress", "cojam_standby": "standby", "release_session": "release"}
     if name in actions:
         try:
             if name == "receive_task":
@@ -221,11 +238,11 @@ def call_ext_tool(name, args, pid=None, key=""):
         r = _room_for(args.get("room"))
         if not args.get("room"):
             raise ToolError("room 必填，请先 list_rooms")
-        if not access.allowed(r, pid):
+        if not access.external_allowed(r, pid, str(args.get("worker") or ""), str(args.get("binding_token") or "")):
             raise ToolError("未加入此会话或没有读取权限")
     if name == "list_rooms":
         out = []
-        for x in access.visible_rooms(pid):
+        for x in access.visible_rooms(pid, str(args.get("worker") or ""), str(args.get("binding_token") or "")):
             if x["archived"] and not args.get("include_archived"):
                 continue
             out.append("- %s：%s（%s%s，%d 条消息%s）" % (x["id"], x["title"], x["workdir"], "，已归档" if x["archived"] else "",
@@ -267,7 +284,7 @@ def call_ext_tool(name, args, pid=None, key=""):
             raise ToolError("since / timeout 要是整数")
         end = time.time() + wait
         while True:
-            if not access.allowed(r, pid):
+            if not access.external_allowed(r, pid, str(args.get("worker") or ""), str(args.get("binding_token") or "")):
                 raise ToolError("会话权限已撤销")
             with r.lock:
                 msgs = [m for m in r.messages[since:] if not m.get("quiet")]
@@ -326,7 +343,9 @@ def handle_one(msg, who, key=""):
                         "1. 调用 cojam_standby。\n"
                         "2. 如果返回 status='task'，认真按 task.prompt 执行任务，完成后调用 reply_task（带上返回的 worker、task.id 和 task.lease，ok=true，text=你的回复），然后立即回到第 1 步再次调用 cojam_standby。\n"
                         "3. 如果返回 status='idle'，不要输出冗余解释，立即再次调用 cojam_standby。\n"
-                        "4. 如果返回 status='stopped' 或 'expired'，停止循环并告知我待命已结束。"
+                        "4. 如果返回 status='release'，调用 release_session 释放会话并结束循环。\n"
+                        "5. 如果返回 status='stopped' 或 'expired'，停止循环并告知我待命已结束。\n"
+                        "桌面接管需使用会议室提供的参数，在指定原生会话调用；后续待命和读取一直携带 room、worker、binding_token。"
                     ),
                 },
             }],

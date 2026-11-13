@@ -78,6 +78,42 @@ class TestDiscovery(unittest.TestCase):
         with patch.object(install, "app_installed", return_value=False):
             self.assertFalse(install.present(host))
 
+    def test_user_saved_cli_is_not_connected_after_failed_verification(self):
+        entry={'id':'failed-cli','cli':{'bin':['fake']}}
+        spec={'enabled':True,'driver':'cli','user':True}
+        with patch.object(discovery,'_find_cli',return_value='fake.exe'):
+            item=discovery._inspect_entry(entry,set(),{'failed-cli':spec},{'failed-cli':{'state':'failed'}},{},set())
+        self.assertFalse(item['connected'])
+
+    def test_configured_desktop_does_not_repeatedly_prompt_as_new(self):
+        discovery._state['items']=[{'id':'desktop','present':True,'level':'mcp','mcp_installed':True,'mcp_configured':True,'connected':False}]
+        self.assertEqual(discovery.status()['pending_count'],0)
+
+    def test_leftover_mcp_file_is_not_an_installed_desktop(self):
+        entry={'id':'removed-desktop','mcp':{'id':'old-host'}}
+        with patch.object(discovery,'_find_cli',return_value=None),patch.object(discovery,'_find_desktop',return_value=None):
+            item=discovery._inspect_entry(entry,set(),{},{},{'old-host':{'installed':True}},set())
+        self.assertFalse(item['present'])
+
+    def test_failed_mcp_install_preserves_direct_driver_and_credentials(self):
+        from bridge import agent_settings
+        desktop=Path(self.tmp.name,'desktop.exe');desktop.write_text('fake desktop',encoding='utf-8')
+        host={'id':'preserve-host','label':'Desktop','kind':'json-serverurl','path':str(Path(self.tmp.name,'mcp.json')),'detect':[str(desktop)]}
+        entry={'id':'preserve-agent','label':'Preserve','cli':{'bin':[sys.executable]},'desktop':{'detect':[str(desktop)]},'mcp':host}
+        registry.save_agent({'id':'preserve-agent','driver':'cli','bin':[sys.executable],'args':{'new':['custom','{prompt}']}})
+        old=access.credential('preserve-agent')
+        install.HOSTS.append(host)
+        try:
+            with patch.object(discovery,'load_catalog',return_value=[entry]),patch.object(discovery,'_uninstall_names',return_value=set()),patch.dict(install.INSTALLERS,{'json-serverurl':lambda host:(False,'failed host write')}):
+                discovery.scan()
+                ok,result=discovery.connect('preserve-agent','mcp',replace_key=True)
+            self.assertFalse(ok,result)
+            self.assertEqual(registry.get('preserve-agent')['driver'],'cli')
+            self.assertEqual(registry.get('preserve-agent')['args']['new'],['custom','{prompt}'])
+            self.assertEqual(access.identify(old),'preserve-agent')
+        finally:
+            install.HOSTS.remove(host)
+
     def test_connect_mcp_writes_config_and_returns_standby_prompt(self):
         mcp_path = os.path.join(self.tmp.name, "windsurf_mcp.json")
         fake_desk = os.path.join(self.tmp.name, "Windsurf.exe")

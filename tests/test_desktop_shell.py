@@ -251,10 +251,20 @@ class WindowAndFlow(unittest.TestCase):
         self.assertIsNone(api.choose_workdir())
         api._window.create_file_dialog.assert_called_with(20, allow_multiple=False)
 
-    def test_only_folder_picker_is_public_to_js_bridge(self):
+    def test_only_file_and_folder_pickers_are_public_to_js_bridge(self):
         api = shell_main.DesktopApi(Mock())
         api._window = Mock()
-        self.assertEqual([name for name in dir(api) if not name.startswith('_')], ['choose_workdir'])
+        self.assertEqual([name for name in dir(api) if not name.startswith('_')], ['choose_agent_file', 'choose_workdir'])
+
+    def test_agent_file_picker_returns_path_and_preserves_cancel(self):
+        webview = Mock()
+        webview.FileDialog.OPEN = 10
+        api = shell_main.DesktopApi(webview)
+        api._window = Mock()
+        api._window.create_file_dialog.side_effect = [(r'D:\Agent\agent.exe',), None]
+        self.assertEqual(api.choose_agent_file(), r'D:\Agent\agent.exe')
+        self.assertIsNone(api.choose_agent_file())
+        api._window.create_file_dialog.assert_called_with(10, allow_multiple=False)
 
     def test_open_window_uses_native_window_settings(self):
         fake = FakeWebview()

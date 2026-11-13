@@ -249,20 +249,27 @@ class AcpProcess:
         return None
 
     def apply_config(self, sid, model, effort):
-        """把会议室选的模型 / 思考强度下发给会话。和上次一样就跳过，agent 没声明的配置项不发。"""
+        """下发模型 / effort；未提供接口或拒绝设置时停止本轮，不缓存失败的配置。"""
         if (sid, model, effort) == self.applied:
             return
+        self.applied = None
         for category, value in (("model", model), ("thought_level", effort)):
+            if not value:
+                continue
             cid = value and self._option_id(category)
             if not cid:
-                continue
+                raise AcpError("此 ACP 会话未提供 %s 设置接口，未发送本轮请求" % category)
             try:
                 self.request("session/set_config_option", {"sessionId": sid, "configId": cid, "value": value}, timeout=10)
             except AcpSessionLost:
                 raise
-            except AcpError:
-                pass   # 值不被接受时沿用 agent 自己的设置，不让整轮失败
+            except AcpError as error:
+                raise AcpError("ACP 拒绝 %s=%s，未发送本轮请求：%s" % (category, value, error)) from error
         self.applied = (sid, model, effort)
+        room = getattr(self, "active_room", None)
+        if room is not None and hasattr(room, "save_meta"):
+            from . import model_catalog
+            model_catalog.accepted(room, self.pid, model_catalog.request_id(room, self.pid), "ACP 配置接口已确认")
 
     def prompt(self, text, images, mode, room, wanted_sid=None):
         with self.lock:
@@ -414,7 +421,7 @@ def call(pid, spec, prompt, session_id=None, images=(), mode="discuss", room=Non
     key = (room.id if room is not None else "_", pid)
     with _pool_lock:
         proc = _pool.get(key)
-        if proc and (not proc.alive() or os.path.normcase(proc.cwd) != os.path.normcase(cwd)):
+        if proc and (not proc.alive() or proc.cmd != cmd or os.path.normcase(proc.cwd) != os.path.normcase(cwd)):
             _pool.pop(key, None)
             proc.close()
             proc = None

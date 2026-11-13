@@ -122,7 +122,8 @@ def _shortcut_present(name):
 
 def _detected(spec):
     """检测实际程序文件或指向现存程序的快捷方式。"""
-    for p in spec.get("detect") or []:
+    desktop_path = (spec.get("desktop") or {}).get("path")
+    for p in ([desktop_path] if desktop_path else []) + list(spec.get("detect") or []):
         try:
             if os.path.isfile(os.path.expandvars(os.path.expanduser(p))):
                 return True
@@ -206,6 +207,9 @@ def _norm(raw, idx=0):
                   "filter": {str(k): v for k, v in flt.items()},
                   "join": str(parse.get("join") if parse.get("join") is not None else "\n")},
         "context": str(raw.get("context") or "delta").strip().lower(),
+        "desktop": dict(raw.get("desktop") or {}) if isinstance(raw.get("desktop"), dict) else {},
+        "default_join": raw.get("default_join") if isinstance(raw.get("default_join"), bool) else None,
+        "default_permissions": dict(raw.get("default_permissions") or {}) if isinstance(raw.get("default_permissions"), dict) else {},
         "models": _as_list(raw.get("models")),
         "efforts": _as_list(raw.get("efforts")),
         "model_efforts": {str(k): _as_list(v) for k, v in (raw.get("model_efforts") or {}).items()}
@@ -221,7 +225,9 @@ def _norm(raw, idx=0):
         "user": False,                      # 是不是用户自己在界面上加的（load 里按来源标）
         "note": str(raw.get("note") or ""),
         "enabled": None,      # 下面按 bin 能不能找到决定，配置里写了就听配置的
+        "cli_available": False,
         "source": str(raw.get("source") or ""),
+        "settings_fields": list(raw.get("settings_fields") or []),
     }
     while len(spec["default"]) < 2:
         spec["default"].append("")
@@ -242,7 +248,9 @@ def _norm(raw, idx=0):
     if driver in ("cli", "acp", "claude", "codex"):
         # A saved contact or pairing is not evidence that its executable is
         # still installed. Keep its configuration, but recheck availability.
-        spec["enabled"] = ra is not False and any(find_executable(b) for b in spec["bin"])
+        spec["cli_available"] = any(find_executable(b) for b in spec["bin"])
+        desktop_present = bool((spec.get("desktop") or {}).get("path") and _detected(spec))
+        spec["enabled"] = ra is not False and (spec["cli_available"] or desktop_present)
     elif isinstance(ra, bool):
         spec["enabled"] = ra
     elif driver == "http":
@@ -312,16 +320,18 @@ def load():
     """重新读一遍所有配置，返回 id -> spec。读坏的跳过并记进 ERRORS，不影响别的。"""
     global _loaded
     with _locker():
+        from . import agent_settings
+        saved = agent_settings.patches()
         ERRORS[:] = []
         specs = {}
         for i, s in enumerate(builtin()):
-            specs[s["id"]] = _norm(s, i)
+            specs[s["id"]] = _norm(agent_settings.overlay(s, saved), i)
         hidden = _hidden_ids()
         for where, files in _sources():
             for path in files:
                 try:
                     for i, raw in enumerate(_read_file(path)):
-                        spec = _norm(raw, len(specs))
+                        spec = _norm(agent_settings.overlay(raw, saved), len(specs))
                         spec["source"] = raw.get("source") or os.path.basename(path)
                         spec["user"] = (where == "agents.d")
                         if where == "presets" and spec["id"] in hidden:
@@ -369,7 +379,9 @@ def default_participants():
     别的 agent 装好了也不自动进每场会议：在页面上给某场会议勾上就进。"""
     ids = enabled_ids()
     core = [a for a in ("claude", "codex") if a in ids]
-    return core or list(ids)
+    original = core or list(ids)
+    return [pid for pid in ids if SPECS[pid].get("default_join") is True or
+            (SPECS[pid].get("default_join") is None and pid in original)]
 
 
 def public(spec):
@@ -379,15 +391,18 @@ def public(spec):
     return {"id": spec["id"], "label": spec["label"], "letter": spec["letter"], "color": spec["color"], "driver": spec["driver"],
             "kind": spec["kind"],
             "enabled": spec["enabled"], "caps": dict(spec["caps"]), "models": list(spec["models"]),
+            "cli_available": spec.get("cli_available", False),
             "efforts": list(spec["efforts"]), "default": list(spec["default"]),
             "source": spec["source"], "builtin": spec["builtin"],
             "verified": spec["verified"], "note": spec["note"], "user": spec["user"],
-            "context": spec["context"]}
+            "context": spec["context"], "default_join": spec.get("default_join"),
+            "default_permissions": dict(spec.get("default_permissions") or {})}
 
 
 def catalog():
     ensure()
     return {"agents": [public(v) for v in SPECS.values()], "errors": list(ERRORS),
+            "default_participants": default_participants(),
             "active": [pid for pid, s in SPECS.items() if s["enabled"]]}
 
 

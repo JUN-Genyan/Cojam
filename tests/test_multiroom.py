@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 os.environ["ROUNDTABLE_LOG_DIR"] = tempfile.mkdtemp(prefix="rt_multi_")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from bridge import room as R, web, common, access
+from bridge import room as R, web, common, access, registry
 
 WD = tempfile.mkdtemp(prefix="rt_multi_wd_")
 gate = {}      # 会议号 -> Event：放行它的 AI
@@ -149,17 +149,19 @@ class MultiRoom(unittest.TestCase):
             R.ai_caller = fake
 
     def test_external_post_room(self):
+        registry.save_agent({"id":"external-codex","driver":"external","enabled":True})
         a = R.rooms.create("外部甲", "", WD)
         b = R.rooms.create("外部乙", "", WD)
+        b.set_participants(list(b.ais)+['external-codex'])
         R.set_last(a.id)
-        key = access.credential("codex")
+        key = access.credential("external-codex")
         s, j = call("POST", "/api/post", {"speaker": "claude", "text": "不带会议号"}, auth=False)
         self.assertEqual(s, 401)
-        s, j = call("POST", "/api/post", {"speaker": "codex", "text": "带会议号", "room": b.id}, auth=False, key=key)
+        s, j = call("POST", "/api/post", {"speaker": "external-codex", "text": "带会议号", "room": b.id}, auth=False, key=key)
         self.assertEqual((s, j["room"]), (200, b.id))
         self.assertEqual(b.messages[-1]["text"], "带会议号")
         self.assertEqual(b.messages[-1].get("origin"), "external")
-        self.assertEqual(call("POST", "/api/post", {"speaker": "codex", "text": "x", "room": "没有"}, auth=False, key=key)[0], 404)
+        self.assertEqual(call("POST", "/api/post", {"speaker": "external-codex", "text": "x", "room": "没有"}, auth=False, key=key)[0], 404)
         self.assertEqual(call("POST", "/api/post", {"speaker": "你", "text": "冒充用户"}, auth=False, key=key)[0], 403)
 
     def test_stop_only_this_room(self):

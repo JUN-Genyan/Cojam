@@ -269,8 +269,8 @@ class LocalExecutor:
                       participants=[self.agent], permissions={self.agent:permissions}, board=task.get("board") or [],
                       mode="work" if task.get("mode") == "work" and permissions["work"] else "discuss")
         for field in ("model", "effort"):
-            if task.get(field):
-                r.meta["models"][self.agent][field] = task[field]
+            if field in task:
+                r.meta["models"][self.agent][field] = str(task.get(field) or "")
         r.save_meta()
         return r
 

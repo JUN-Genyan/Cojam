@@ -32,9 +32,12 @@ CODEX_EFFORTS_DEFAULT = ["low", "medium", "high"]
 MODEL_RE = re.compile(r"^[A-Za-z0-9][\w.\-:/\[\]]{0,79}$")
 EFFORT_RE = re.compile(r"^[A-Za-z0-9_\-]{1,20}$")
 # 会议没自己设时用的模型 / effort（用户 2026-10-16 定），不再跟随 ~/.claude、~/.codex 的全局设置。
-# 别的 agent 从注册表里那份配置的 default 取（内置这两个写死，保持原样）。
+# 应用内保存的默认设置优先；未设置时保留原有内置默认值。
 class _Defaults(dict):
     def __getitem__(self, ai):
+        if "default" in ((registry.get(ai) or {}).get("settings_fields") or []):
+            d = list((registry.get(ai) or {}).get("default") or ["", ""])
+            return (d[0], d[1])
         if dict.__contains__(self, ai):
             return dict.__getitem__(self, ai)
         d = list(((registry.get(ai) or {}).get("default") or [])) + ["", ""]
@@ -90,8 +93,11 @@ def codex_catalog():
 
 
 def effort_options(ai, model=None):
+    spec = registry.get(ai) or {}
+    if model in (spec.get("model_efforts") or {}):
+        return list(spec["model_efforts"][model])
     if ai == "claude":
-        return list(CLAUDE_EFFORTS)
+        return list(spec.get("efforts") or CLAUDE_EFFORTS)
     if ai != "codex":
         spec = registry.get(ai) or {}
         per_model = spec.get("model_efforts") or {}
@@ -112,9 +118,9 @@ def effort_options(ai, model=None):
 
 def model_options(ai):
     if ai == "claude":
-        out = list(CLAUDE_MODEL_PRESETS)
+        out = list(dict.fromkeys(CLAUDE_MODEL_PRESETS + list((registry.get(ai) or {}).get("models") or [])))
     elif ai == "codex":
-        out = [s for s, _ in codex_catalog()]
+        out = list(dict.fromkeys([s for s, _ in codex_catalog()] + list((registry.get(ai) or {}).get("models") or [])))
     else:
         out = list((registry.get(ai) or {}).get("models") or [])
     d = ROOM_DEFAULTS[ai][0]
@@ -142,21 +148,22 @@ def model_capabilities(ai):
     default_model = ROOM_DEFAULTS[ai][0]
     if ai == "codex":
         catalog = codex_catalog()
-        models = list(dict.fromkeys(([default_model] if default_model else []) + [slug for slug, _ in catalog]))
+        models = model_options(ai)
         effort_map = dict(catalog)
+        effort_map.update((spec.get("model_efforts") or {}))
         if default_model not in effort_map:
             effort_map[default_model] = effort_options(ai, default_model)
     else:
         models = model_options(ai) if model else []
         effort_map = {value: effort_options(ai, value) for value in dict.fromkeys([default_model] + models)} if effort else {}
     if not model:
-        note = "模型由 Agent 自己管理；当前接入方式未提供切换能力。"
+        note = "此 CLI 未设置模型参数，可在 Agent 设置中补充模型参数。" if driver == "cli" else "当前连接端未提供模型设置接口，可继续参与会话；会议室暂不能修改其模型。"
     elif ai == "codex":
         note = "模型与思考强度来自这台设备上的 Codex 模型缓存；账户权限以实际调用为准。"
     elif builtin:
         note = "可选择常用模型，也可填写模型 ID；账户权限以实际调用为准。"
     elif is_acp:
-        note = "通过 ACP 协议动态设置模型和思考强度；也可自定义模型 ID（如 provider/model）。agent 不认的值会沿用 agent 默认，以 agent 实际接受为准。"
+        note = "通过 ACP 协议设置模型和思考强度；不接受的设置会明确报错，不会静默改用默认模型。"
     else:
         note = "选项来自此 Agent 的接入配置；账户权限以实际调用为准。"
     return {"model_supported": bool(model), "effort_supported": bool(effort),
@@ -456,10 +463,18 @@ def claude_settings(room, mode, key):
     return json.dumps(s, ensure_ascii=False)
 
 
+def agent_executable(ai):
+    spec = registry.get(ai) or {}
+    if spec.get("bin") and spec["bin"] != [ai]:
+        return registry.exe_of(spec)
+    return resolve_cmd(ai)
+
+
 def build_cmd(ai, mode, sid, exe, images=(), outf=None, model="", effort="", room=None, key=""):
     """拼出某个 AI 在某个模式下的命令行（新建会话 / resume 在这里分）。claude 新建会话时由调用方再补 --session-id。
     model / effort 空 = 不加参数。room 给了就带上这场会议的 MCP / 插件 / 技能 / 钩子设置。"""
     exe = list(exe) if isinstance(exe, (list, tuple)) else [exe]
+    exe += list(((registry.get(ai) or {}).get("args") or {}).get("base") or [])
     if ai == "claude":
         cmd = exe + ["-p"]
         if model:
@@ -563,7 +578,7 @@ def call_ai(ai, prompt, session_id=None, images=(), mode=None, room=None):
     """返回 (ok, text, session_id, edits)。session_id 为空 = 新建会话，返回新会话 id。mode 缺省取这场会议的模式。
     edits = 这个 AI 自己的写文件操作记录 [{path, op}]（干活模式靠它认定"这一步改了什么"）；失败/超时也尽量带上。"""
     edits, res = [], {}
-    exe = resolve_cmd(ai)
+    exe = agent_executable(ai)
     if not exe:
         return False, "找不到 %s 命令" % ai, session_id, edits
     if mode is None:
@@ -666,7 +681,7 @@ def compact_native(ai, sid, room=None):
             raise
     if ai != "claude":
         return False
-    exe = resolve_cmd("claude")
+    exe = agent_executable("claude")
     if not exe:
         return False
     before = claude_boundaries(sid)
@@ -737,11 +752,12 @@ def codex_policy(mode):
 
 def codex_launch(room, mode):
     """这场会议的 app-server 启动参数：返回 (命令行, 额外环境变量)。同样的参数 = 同一份配置，不用重起。"""
-    exe = resolve_cmd("codex")
+    exe = agent_executable("codex")
     if not exe:
         raise RuntimeError("找不到 codex 命令")
     cfg = room.meta["tools"]["codex"] if room is not None else default_tools("codex")
-    cmd = exe + (["-c", CODEX_SANDBOX_OVERRIDE] if os.name == "nt" else []) + ["-c", "notify=[]"]
+    cmd = exe + list(((registry.get("codex") or {}).get("args") or {}).get("base") or [])
+    cmd += (["-c", CODEX_SANDBOX_OVERRIDE] if os.name == "nt" else []) + ["-c", "notify=[]"]
     for srv in codex_mcp_names():
         if not (mode == "work" and srv in cfg["mcp"]):
             cmd += ["-c", "mcp_servers.%s.enabled=false" % srv]   # 键名不能加引号（加了会被当成另一张表，codex 报 invalid transport）

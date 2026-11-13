@@ -472,7 +472,7 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
 <body>
 <div id="navShade"></div>
 <nav id="rooms" aria-label="联系人和项目"><div class="brand"><img src="/static/logo.svg" width="42" height="42" alt=""><span class="brand-word">cojam<small>合拍 · 让想法一起发生</small></span><button id="navClose" aria-label="关闭导航">×</button></div><label class="nav-search" for="navSearch"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="navSearch" type="search" placeholder="搜索项目或会话" autocomplete="off"><kbd aria-hidden="true">⌘ K</kbd></label>
-<section class="contacts-section"><div class="rh">联系人 <span id="contactCount"></span><span class="rh-actions"><button id="contactsScan" title="扫描本机已安装的 Agent 并一键连接" aria-label="扫描本机 Agent">扫描</button><button id="connSettingsBtn" title="连接与心跳设置" aria-label="连接与心跳设置">心跳</button><button id="contactsAdd" aria-label="接入联系人">＋ 接入</button></span></div><ul id="contactList"></ul></section>
+<section class="contacts-section"><div class="rh">联系人 <span id="contactCount"></span><span class="rh-actions"><button id="agentSettingsBtn" title="修改 Agent 程序位置、模型与加入设置" aria-label="Agent 设置">设置</button><button id="contactsScan" title="扫描本机已安装的 Agent 并一键连接" aria-label="扫描本机 Agent">扫描</button><button id="connSettingsBtn" title="连接与心跳设置" aria-label="连接与心跳设置">心跳</button><button id="contactsAdd" aria-label="接入联系人">＋ 接入</button></span></div><ul id="contactList"></ul></section>
 <section class="projects-section"><div class="rh">我的项目<button id="projectAdd" aria-label="新建项目">＋</button></div><ul class="rl" id="roomList"></ul></section><button id="rNew" class="nav-new">＋ 新建会话<span aria-hidden="true">↗</span></button><div class="nav-foot"><img src="/static/logo.svg" width="26" height="26" alt=""><span>本机会议室<small>由这台设备托管</small></span><button type="button" id="updateApp" title="检查并下载更新">更新</button><button type="button" id="quitApp" title="停止本机合拍服务">退出</button></div></nav>
 <header>
   <button id="navToggle" aria-label="打开联系人和项目">☰</button>
@@ -532,6 +532,8 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
 <script src="/static/qrcode.min.js"></script>
 <script src="/static/connections.js"></script>
 <script src="/static/model-settings.js"></script>
+<script src="/static/agent-settings.js"></script>
+<script src="/static/execution-settings.js"></script>
 <script>
 (function(){const m=document.querySelector('meta[name=rt-token]'),t=m?m.content:'';if(!t)return;if(t.startsWith('dev_')){try{localStorage.setItem('cojam_owner_device_token',t)}catch(e){}}const f=window.fetch;window.fetch=function(u,o){o=o||{};const h=new Headers(o.headers||{});h.set('X-RT-Token',t);o.headers=h;return f.call(this,u,o)}})();
 // Each owner tab registers separately. A short grace period permits reload and tab handoff.
@@ -1031,10 +1033,11 @@ function openAi(a){
   const mo=x.model||{models:[],efforts:[],model:'',effort:''};
   const anyBusy=!!(S&&((S.running||[]).length||S.queued));
   h+=modelSettingsMarkup(mo,anyBusy);
+  h+=executionSettingsMarkup(a,(S.execution||{})[a],anyBusy);
   const spec=agentMeta(a)||{};
   if(!['claude','codex'].includes(spec.driver)&&!x.handoff){
     h+='<div class="btns"><button type="button" id="aClose">关闭</button></div>';
-    showModal(h);bindModelSettings(a,mo,anyBusy);
+    showModal(h);bindModelSettings(a,mo,anyBusy);bindExecutionSettings(a,(S.execution||{})[a],anyBusy);
     document.getElementById('aClose').onclick=hideModal;
     return;
   }
@@ -1045,13 +1048,14 @@ function openAi(a){
   if(x.session)h+='<button type="button" id="aCopy">复制命令</button>';
   h+='<button type="button" class="pri" id="aToggle"'+((!x.session||(!x.handed_off&&x.busy)||(!x.handoff&&!x.handed_off))?' disabled':'')+'>'+(x.handed_off?'收回':'交给终端')+'</button></div>';
   if(x.session&&!x.handed_off&&x.busy)h+='<div class="hint">它正在跑或排着队，说完才能交。</div>';
-  const canC=x.session&&!x.handed_off&&!x.compacting;
+  const canC=x.session&&!x.handed_off&&!x.compacting&&(!S.execution||!S.execution[a]||S.execution[a].endpoint==='cli');
   h+='<h3 style="margin-top:14px">压缩上下文</h3><div class="hint">'+(x.compacting?'正在压缩，压完会议里会插一条消息。':!x.session?'还没建会话，不用压。':x.handed_off?'在终端里，收回来再压。':'聊久了会变慢、变贵。压完它只记要点，另一个 AI 不受影响。'+(x.ctx&&x.ctx.used?'<br>现在上下文用了 '+fmtK(x.ctx.used)+(x.ctx.window?' / '+fmtK(x.ctx.window)+'（'+Math.round(x.ctx.used*100/x.ctx.window)+'%）':'')+'。':''))+'</div>'+
     '<div class="btns"><button type="button" id="aCompact"'+(canC?'':' disabled')+'>压缩 '+a+'</button></div>';
   h+='<h3 style="margin-top:14px">工具（这场会议）</h3><div id="toolsBox"><div class="hint">读取中…</div></div>';
   showModal(h);
   loadTools(a,x);
   bindModelSettings(a,mo,anyBusy);
+  bindExecutionSettings(a,(S.execution||{})[a],anyBusy);
   document.getElementById('aClose').onclick=hideModal;
   document.getElementById('aCompact').onclick=async()=>{
     if(!confirm('压缩 '+a+' 的上下文？压完它只记要点。'+(x.busy?'\n\n它手上有活，会等这一轮说完再压。':'')))return;
@@ -1419,8 +1423,10 @@ document.getElementById('cMine').onclick=async()=>{
 // ===== 工具：这场会议里 MCP / 插件 / 技能开哪些 =====
 async function loadTools(a,x){
   const box=document.getElementById('toolsBox');if(!box)return;
+  const rid=RID,url=api('tools'),current=()=>RID===rid&&document.getElementById('toolsBox')===box;
   let t;
-  try{const r=await fetch(api('tools')+'?ai='+a,{cache:'no-store'});t=await r.json();if(!r.ok)throw 0}catch(e){box.innerHTML='<div class="hint">读不到工具清单</div>';return}
+  try{const r=await fetch(url+'?ai='+a,{cache:'no-store'});t=await r.json();if(!r.ok)throw 0}catch(e){if(current())box.innerHTML='<div class="hint">读不到工具清单</div>';return}
+  if(!current())return;
   const li=(id,on,name,sub,tags,locked)=>'<li class="'+(locked?'lk':'')+'"><input type="checkbox" data-id="'+esc(id)+'"'+(on?' checked':'')+(locked?' disabled':'')+'><span class="tn">'+esc(name)+(tags||[]).map(g=>'<span class="tg">'+esc(g)+'</span>').join('')+(sub?'<small>'+esc(sub)+'</small>':'')+'</span></li>';
   const empty='<li class="empty">（没有）</li>';
   const pName=id=>id.replace(/@.*$/,'');
@@ -1433,12 +1439,14 @@ async function loadTools(a,x){
     '<div class="hint">'+(x.busy?'它正在跑或排着队，说完才能改。':'带钩子的插件（比如 superpowers 开场会往会话里塞一大段说明）、从 claude.ai 同步来的插件，会议室里默认关。改了下一轮生效'+(a==='codex'?'（codex 的后台会重起一次）':'')+'。')+'</div>';
   const defOn=p=>(p.hooks||p.synced)?false:p.global;
   document.getElementById('tSave').onclick=async()=>{
+    if(!current())return;
     const val=sel=>[...box.querySelectorAll(sel+' input[data-id]')];
     const mcp=val('#tMcp').filter(i=>i.checked).map(i=>i.dataset.id);
     const plugins={};
     val('#tPlug').forEach(i=>{const p=t.plugins.find(q=>q.id===i.dataset.id);if(!p)return;if(i.checked!==defOn(p)||p.set)plugins[p.id]=i.checked});
     const skills_off=val('#tSkill').filter(i=>!i.disabled&&!i.checked).map(i=>i.dataset.id);
-    const [ok,j]=await post(api('tools'),{ai:a,tools:{mcp,plugins,skills_off}});
+    const [ok,j]=await post(url,{ai:a,tools:{mcp,plugins,skills_off}});
+    if(!current())return;
     if(!ok){alert(j.error||'失败');return}
     await loadState();openAi(a);
   };

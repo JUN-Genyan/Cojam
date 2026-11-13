@@ -62,6 +62,15 @@ def identify(token):
     return None
 
 
-def visible_rooms(pid):
+def external_allowed(room, pid, worker="", token=""):
+    if not allowed(room, pid):
+        return False
+    if (registry.get(pid) or {}).get("kind") == "user":
+        return True
+    from . import execution
+    return execution.authorize(room, pid, worker, token)
+
+
+def visible_rooms(pid, worker="", token=""):
     from .room import rooms
-    return [x for x in rooms.listing() if pid in x.get("participants", []) and allowed(rooms.get(x["id"]), pid)]
+    return [x for x in rooms.listing() if pid in x.get("participants", []) and external_allowed(rooms.get(x["id"]), pid, worker, token)]

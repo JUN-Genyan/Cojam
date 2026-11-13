@@ -4,7 +4,7 @@ import json, os, sys, tempfile, threading, time, unittest, urllib.error, urllib.
 
 os.environ["ROUNDTABLE_LOG_DIR"] = tempfile.mkdtemp(prefix="rt_guard_")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from bridge import room as R, web, guard as G, agents, access
+from bridge import room as R, web, guard as G, agents, access, registry
 from bridge.guard import FileGuard, guard
 
 WD = tempfile.mkdtemp(prefix="rt_guard_wd_")
@@ -218,6 +218,9 @@ class MCP(unittest.TestCase):
 
     def test_external_tools(self):
         r = R.rooms.create("给外面读", "目标E", WD)
+        registry.save_agent({"id":"external-codex","driver":"external","enabled":True})
+        r.set_participants(list(r.ais)+['external-codex'])
+        self.external_key = access.credential('external-codex')
         R.set_last(r.id)
         names = [t["name"] for t in self.rpc("tools/list")[1]["result"]["tools"]]
         self.assertEqual(names[:4], ["list_rooms", "read_room", "post_to_room", "wait_for_message"])
@@ -225,9 +228,9 @@ class MCP(unittest.TestCase):
         self.assertIn("reply_task", names)
         res = self.rpc("tools/call", {"name": "list_rooms", "arguments": {}})[1]["result"]
         self.assertIn(r.id, res["content"][0]["text"])
-        res = self.rpc("tools/call", {"name": "post_to_room", "arguments": {"speaker": "codex", "text": "外面的 codex 说话", "room": r.id}})[1]["result"]
+        res = self.rpc("tools/call", {"name": "post_to_room", "arguments": {"speaker": "external-codex", "text": "外面的 codex 说话", "room": r.id}})[1]["result"]
         self.assertFalse(res["isError"])
-        self.assertEqual((r.messages[-1]["speaker"], r.messages[-1].get("origin")), ("codex", "external"))
+        self.assertEqual((r.messages[-1]["speaker"], r.messages[-1].get("origin")), ("external-codex", "external"))
         res = self.rpc("tools/call", {"name": "read_room", "arguments": {"room": r.id}})[1]["result"]
         self.assertIn("目标E", res["content"][0]["text"])
         self.assertIn("外面的 codex 说话", res["content"][0]["text"])

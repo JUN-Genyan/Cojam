@@ -59,10 +59,15 @@ class Broker:
         self.condition.notify_all()
         self._journal()
 
-    def _registered(self, pid, worker, key):
-        w = self.workers.get(pid)
+    def _registered(self, pid, worker, key, room="", token="", leased=False):
+        w = self.workers.get((pid, room)) if room else self.workers.get(pid)
         if not w or w["id"] != worker or w["digest"] != fingerprint(key):
             raise MemberError("成员连接已失效，请重新连接", 403)
+        if room and not leased:
+            from . import execution, room as R
+            r = R.rooms.get(room)
+            if not r or not execution.authorize(r, pid, worker, token, lifecycle=True):
+                raise MemberError("会话不属于此执行端或执行端凭证已失效", 403)
         return w
 
     def register(self, pid, key, data):
@@ -72,8 +77,23 @@ class Broker:
         worker = str(data.get("worker") or "")
         if not ID.fullmatch(worker):
             raise MemberError("worker 必须是 1–80 位字母数字、横线或下划线", 400)
+        scope = str(data.get("room") or "")
+        registration = {}
+        if scope:
+            if data.get("transport") != "standby":
+                raise MemberError("会话独占接入需要使用 cojam_standby", 400)
+            from . import execution, room as R
+            room = R.rooms.get(scope)
+            if not room or not access.allowed(room, pid):
+                raise MemberError("未加入此会话或没有读取权限", 403)
+            try:
+                registration = execution.claim(room, pid, worker, str(data.get("native_session") or ""),
+                                               str(data.get("binding_challenge") or ""), str(data.get("binding_token") or ""))
+            except (ValueError, OSError) as error:
+                raise MemberError(str(error), 409) from error
+        slot = (pid, scope) if scope else pid
         with self.condition:
-            old = self.workers.get(pid)
+            old = self.workers.get(slot)
             transport = str(data.get("transport") or (old.get("transport") if old and old["id"] == worker else "") or "connector")
             # 待命通道任何驱动都能用（Claude/Codex 桌面端、ACP、external）；
             # 普通「自动响应端」仍然只给 Harness 成员，避免把本机 CLI 误当成远程执行端。
@@ -83,24 +103,36 @@ class Broker:
                 raise MemberError("此联系人已有自动响应端；不同 Harness 请分别添加为成员")
             if old and (old["id"] != worker or old["digest"] != fingerprint(key)):
                 for task in self.tasks.values():
-                    if task["member"] == pid and task["state"] in ("queued", "claimed"):
+                    if task["member"] == pid and (not scope or task["room"] == scope) and task["state"] in ("queued", "claimed"):
                         self._state(task, "cancelled", "执行端已更换，旧任务不会重复执行")
             now = time.time()
             started = old.get("started", now) if (old and old["id"] == worker and old["digest"] == fingerprint(key)) else now
-            self.workers[pid] = {"id": worker, "digest": fingerprint(key), "seen": now, "started": started,
+            self.workers[slot] = {"id": worker, "member": pid, "room": scope,
+                                 "native_session": str(data.get("native_session") or ""),
+                                 "digest": fingerprint(key), "seen": now, "started": started,
                                  "transport": transport,
                                  "device": str(data.get("device") or ("本机 MCP 待命" if transport == "standby" else "未命名设备"))[:80],
                                  "workdir": str(data.get("workdir") or "成员自己的工作文件夹")[:500],
                                  "allow_work": data.get("allow_work") is True}
             self.condition.notify_all()
+        if scope:
+            try:
+                registration["binding_version"] = execution.activate(room, pid, worker, registration["binding_token"])
+            except (ValueError, OSError) as error:
+                with self.condition:
+                    self.workers.pop(slot, None)
+                raise MemberError(str(error), 409) from error
         cfg = conn_settings.member_config(pid)
         return {"ok": True, "member": pid, "protocol": 1, "heartbeat_interval": cfg["heartbeat_interval"],
-                "settings": cfg, "settings_rev": cfg["rev"]}
+                "settings": cfg, "settings_rev": cfg["rev"], **registration}
 
-    def status(self, pid):
+    def status(self, pid, room=None):
         digest = current_digest(pid)
         with self.condition:
-            w = self.workers.get(pid)
+            w = self.workers.get((pid, room)) if room else self.workers.get(pid)
+            if not room and (not w or w["digest"] != digest or time.time() - w["seen"] >= ttl(pid)):
+                w = next((value for slot, value in self.workers.items() if isinstance(slot, tuple) and slot[0] == pid
+                          and value["digest"] == digest and time.time() - value["seen"] < ttl(pid)), None)
             live = bool(w and digest == w["digest"] and time.time() - w["seen"] < ttl(pid))
             transport = w.get("transport", "connector") if live else ""
             standby = bool(live and transport == "standby")
@@ -113,13 +145,19 @@ class Broker:
         # Do not acquire a room lock while holding the broker lock.
         from . import room as R
         r = R.rooms.get(task["room"])
+        from . import execution
         return bool(r and not r.closed and access.allowed(r, task["member"], "read") and access.allowed(r, task["member"], "post")
+                    and (task.get("binding_version") is None or (execution.version(r, task["member"]) == task["binding_version"]
+                         and execution.binding(r, task["member"])["phase"] == "ready"))
                     and r.job_tag(task["member"]) == task["epoch"] and current_digest(task["member"]) == task["digest"])
 
     def call(self, pid, prompt, session, mode, room):
         if not access.allowed(room, pid, "read") or not access.allowed(room, pid, "post"):
             return False, "此成员未加入会话或没有读取、发言权限", session, []
-        status = self.status(pid)
+        from . import execution
+        bound = execution.binding(room, pid)
+        scope = room.id if bound["endpoint"] == "desktop" else ""
+        status = self.status(pid, scope or None)
         if not status["automatic"]:
             return False, "%s 尚未开启自动响应；请在该软件里输入 /cojam_standby（或调用 ai-bridge 的 cojam_standby 工具）开启待命，或运行成员连接端。" % pid, session, []
         mode = room.member_mode(pid, mode)
@@ -144,15 +182,18 @@ class Broker:
                     "payload": {"protocol": 1, "id": tid, "room": room.id, "member": pid, "title": room.title(),
                                 "goal": room.goal(), "prompt": prompt, "session": session or "", "mode": mode,
                                 "board": [dict(b) for b in room.meta.get("board", [])],
-                                "permissions": access.permissions(room, pid), "model": room.own_models(pid)[0],
-                                "effort": room.own_models(pid)[1], "allow_work": bool(status.get("allow_work")),
+                                "permissions": access.permissions(room, pid), "model": room.effective_models(pid)[0] if not scope else "",
+                                "effort": room.effective_models(pid)[1] if not scope else "", "allow_work": bool(status.get("allow_work")),
                                 "execution": {"location": "member", "workdir": status["workdir"]}}}
+            if scope:
+                task["binding_version"] = bound["version"]
+                task["payload"]["execution"].update(location="desktop", binding_version=bound["version"], worker=bound["worker"])
             self.tasks[tid] = task
             self._state(task, "queued")
         end = now + timeout_for(mode, pid)[1]
         while True:
             valid = self._valid(task)
-            online = self.status(pid)["automatic"]
+            online = self.status(pid, scope or None)["automatic"]
             with self.condition:
                 if task["state"] == "completed":
                     result = task["result"]
@@ -189,15 +230,26 @@ class Broker:
         except (TypeError, ValueError):
             raise MemberError("timeout 必须是整数", 400)
         end = time.time() + wait
+        scope = str(data.get("room") or "")
         while True:
             if access.identify(key) != pid:
                 raise MemberError("接入密钥已失效", 401)
             with self.condition:
                 if pid in self.standby_stopped:
                     return {"task": None, "stopped": True, "settings_rev": conn_settings.rev()}
-                w = self._registered(pid, data.get("worker"), key)
+                # Authorization can acquire a room lock, so perform it outside the broker lock.
+                w = self.workers.get((pid, scope) if scope else pid)
+            w = self._registered(pid, data.get("worker"), key, scope, str(data.get("binding_token") or ""))
+            if scope:
+                from . import execution, room as R
+                r = R.rooms.get(scope)
+                row = execution.binding(r, pid)
+                if row.get("target") == "cli":
+                    return {"task": None, "release": True, "settings_rev": conn_settings.rev()}
+            with self.condition:
                 w["seen"] = time.time()
-                candidates = [t for t in self.tasks.values() if t["member"] == pid and t["state"] in ("queued", "claimed")]
+                candidates = [t for t in self.tasks.values() if t["member"] == pid and
+                              (t["room"] == scope if scope else t.get("binding_version") is None) and t["state"] in ("queued", "claimed")]
             for task in candidates:
                 if not self._valid(task):
                     with self.condition:
@@ -219,8 +271,10 @@ class Broker:
                 self.condition.wait(min(.5, remaining))
 
     def heartbeat(self, pid, key, data):
+        task = self._task(pid, key, data) if data.get("task") else None
+        scope = task["room"] if task and task.get("binding_version") is not None else str(data.get("room") or "")
+        w = self._registered(pid, data.get("worker"), key, scope, str(data.get("binding_token") or ""), leased=task is not None)
         with self.condition:
-            w = self._registered(pid, data.get("worker"), key)
             w["seen"] = time.time()
         if data.get("task"):
             task = self._task(pid, key, data)
@@ -234,6 +288,11 @@ class Broker:
         if len(data["text"].encode()) > 48 * 1024 or len(str(data.get("session") or "")) > 200:
             raise MemberError("回复或 session 过长", 413)
         result = {"ok": data["ok"], "text": data["text"], "session": str(data.get("session") or "")}
+        if task.get("binding_version") is not None:
+            expected = task["payload"]["session"]
+            if result["session"] and result["session"] != expected:
+                raise MemberError("桌面端不能替换共享的原生会话", 409)
+            result["session"] = expected
         with self.condition:
             if task["state"] == "completed":
                 if task["result"] != result:
@@ -250,7 +309,8 @@ class Broker:
         with self.condition:
             if task["state"] != "claimed":
                 raise MemberError("任务已经停止", 410)
-            self._registered(pid, data.get("worker"), key)["seen"] = time.time()
+            scope = task["room"] if task.get("binding_version") is not None else ""
+            self.workers[(pid, scope) if scope else pid]["seen"] = time.time()
         text = str(data.get("text") or "").strip()
         if not text or len(text.encode()) > 16000:
             raise MemberError("进度文字为空或过长", 400)
@@ -274,11 +334,12 @@ class Broker:
                     self._state(task, "cancelled", "用户已停止此成员的任务")
 
     def disconnect(self, pid, key, data):
+        scope = str(data.get("room") or "")
+        self._registered(pid, data.get("worker"), key, scope, str(data.get("binding_token") or ""))
         with self.condition:
-            self._registered(pid, data.get("worker"), key)
-            self.workers.pop(pid, None)
+            self.workers.pop((pid, scope) if scope else pid, None)
             for task in self.tasks.values():
-                if task["member"] == pid and task["state"] in ("queued", "claimed"):
+                if task["member"] == pid and (not scope or task["room"] == scope) and task["state"] in ("queued", "claimed"):
                     self._state(task, "cancelled", "成员已断开连接")
         return {"ok": True}
 
@@ -291,6 +352,9 @@ class Broker:
                 if now - at >= STANDBY_STOP_COOLDOWN:
                     self.standby_stopped.pop(old, None)
             self.workers.pop(pid, None)
+            for slot in list(self.workers):
+                if isinstance(slot, tuple) and slot[0] == pid:
+                    self.workers.pop(slot, None)
             for task in self.tasks.values():
                 if task["member"] == pid and task["state"] in ("queued", "claimed"):
                     self._state(task, "cancelled", "Cojam 端已停止此成员的待命状态")
@@ -298,7 +362,8 @@ class Broker:
         return {"ok": True, "member": pid, "stopped": True, "resume_after": STANDBY_STOP_COOLDOWN}
 
     def standby(self, pid, key, data):
-        worker = str(data.get("worker") or ("standby-" + fingerprint(key)[:16]))
+        scope = str(data.get("room") or "")
+        worker = str(data.get("worker") or ("standby-" + fingerprint(key + scope)[:16]))
         with self.condition:
             stopped_at = self.standby_stopped.get(pid)
             if stopped_at is not None:
@@ -314,20 +379,34 @@ class Broker:
             "device": str(data.get("device") or "本机 MCP 待命"),
             "workdir": str(data.get("workdir") or os.getcwd()),
             "allow_work": data.get("allow_work") is True,
+            "room": scope, "native_session": data.get("native_session"),
+            "binding_challenge": data.get("binding_challenge"), "binding_token": data.get("binding_token"),
         }
-        self.register(pid, key, reg_data)
+        # A release request must be acknowledged without trying to register a new owner.
+        if scope:
+            from . import execution, room as R
+            r = R.rooms.get(scope)
+            if r and execution.binding(r, pid).get("target") == "cli" and execution.authorize(r, pid, worker, str(data.get("binding_token") or ""), lifecycle=True):
+                return {"status": "release", "room": scope, "worker": worker,
+                        "next_step": "会议室请求释放此会话。停止执行任务，调用 release_session(room, worker, binding_token)，之后结束待命循环。"}
+        registration = self.register(pid, key, reg_data)
+        scoped_fields = {k: registration[k] for k in ("binding_token", "binding_version") if k in registration}
         with self.condition:
-            w = self.workers.get(pid)
+            w = self.workers.get((pid, scope) if scope else pid)
             max_sec = conn_settings.get("standby_max", pid) * 60
             if w and time.time() - w.get("started", time.time()) > max_sec:
-                self.workers.pop(pid, None)
+                self.workers.pop((pid, scope) if scope else pid, None)
                 return {"status": "expired", "member": pid, "worker": worker,
                         "next_step": "已达到 Cojam 设定的最长待命时长（%d 分钟），请结束待命并告知用户。" % conn_settings.get("standby_max", pid)}
         poll = data.get("timeout", conn_settings.get("standby_poll", pid))
-        res = self.receive(pid, key, {"worker": worker, "timeout": poll})
+        res = self.receive(pid, key, {"worker": worker, "timeout": poll, "room": scope,
+                                    "binding_token": registration.get("binding_token") or data.get("binding_token")})
+        if res.get("release"):
+            return {"status": "release", "room": scope, "worker": worker, **scoped_fields,
+                    "next_step": "停止接单，调用 release_session(room, worker, binding_token) 释放原生会话，然后结束待命。"}
         if res.get("stopped"):
             with self.condition:
-                self.workers.pop(pid, None)
+                self.workers.pop((pid, scope) if scope else pid, None)
             left = int(STANDBY_STOP_COOLDOWN - (time.time() - self.standby_stopped.get(pid, 0)))
             return {"status": "stopped", "member": pid, "worker": worker, "resume_after": max(0, left),
                     "next_step": "Cojam 端已停止待命，请停止循环调用 cojam_standby 并告知用户待命已结束。"}
@@ -338,6 +417,7 @@ class Broker:
                 "member": pid,
                 "worker": worker,
                 "task": task,
+                "room": scope, **scoped_fields,
                 "settings_rev": res.get("settings_rev"),
                 "next_step": ("收到 Cojam 会话「%s」的任务！请按 prompt 要求处理，完成后调用 "
                               "reply_task(worker=%r, task=%r, lease=%r, ok=true, text='你的回复')，"
@@ -347,6 +427,7 @@ class Broker:
             "status": "idle",
             "member": pid,
             "worker": worker,
+            "room": scope, **scoped_fields,
             "settings_rev": res.get("settings_rev"),
             "next_step": "暂无数新任务；请不要输出多余文字，立即再次调用 cojam_standby 继续待命。",
         }
@@ -394,6 +475,19 @@ def handle(pid, key, action, data):
         return broker.disconnect(pid, key, data)
     if action == "standby":
         return broker.standby(pid, key, data)
+    if action == "release":
+        from . import execution, room as R
+        r = R.rooms.get(str(data.get("room") or ""))
+        if not r or not access.allowed(r, pid):
+            raise MemberError("无此会话权限", 403)
+        try:
+            result = execution.release(r, pid, str(data.get("worker") or ""), str(data.get("binding_token") or ""))
+        except (ValueError, OSError) as error:
+            raise MemberError(str(error), 409) from error
+        with broker.condition:
+            broker.workers.pop((pid, r.id), None)
+            broker.condition.notify_all()
+        return dict(result, status="stopped", next_step="原生会话已释放给 CLI，请结束此待命循环。")
     if action == "settings":
         cfg = conn_settings.member_config(pid)
         return {"ok": True, "settings": cfg, "settings_rev": cfg["rev"]}

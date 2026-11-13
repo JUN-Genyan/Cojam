@@ -8,7 +8,7 @@ import hmac, json, mimetypes, os, re, secrets, socket, sys, threading, webbrowse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from . import access, agents, common, conn_settings, connections, devices, discovery, install, invites, mcp, members, projects, registry, room as R
+from . import access, agent_settings, agents, common, conn_settings, connections, devices, discovery, execution, install, invites, mcp, members, model_catalog, projects, registry, room as R
 from .common import (AIS, EXTERNAL_SPEAKERS, HERE, HOST, MAX_ANN, MAX_BODY, MAX_UPLOAD, MEET_DIR, PORT, PROJECT,
                      in_dir, kind_of)
 from .guard import USER, guard
@@ -275,6 +275,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, discovery.status())
         if path == "/api/settings/connection":
             return self._json(200, conn_settings.snapshot())
+        if path == "/api/agents/config":
+            try:
+                return self._json(200, agent_settings.view((q.get("id") or [""])[0]))
+            except ValueError as error:
+                return self._json(404, {"error": str(error)})
         if path == "/api/agents":
             if (q.get("reload") or [""])[0] in ("1", "true", "yes"):
                 registry.load()      # 用户刚改了 data/agents.d：重读一遍，不用重启服务器
@@ -310,6 +315,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, r.messages_since(_int(q, "since")))
             if act == "state":
                 return self._json(200, r.api_state())
+            if act == "models/catalog":
+                ai = (q.get("ai") or [""])[0]
+                if ai not in r.ais:
+                    return self._json(400, {"error": "请选择当前会话的 Agent"})
+                return self._json(200, r.model_info(ai))
             if act == "tools":
                 ai = (q.get("ai") or [""])[0]
                 if ai not in r.ais:
@@ -462,6 +472,28 @@ class Handler(BaseHTTPRequestHandler):
         data = self._read_json()
         if data is None:
             return
+        if path == "/api/agents/config":
+            from contextlib import ExitStack
+            pid = str(data.get("id") or "")
+            try:
+                with ExitStack() as stack:
+                    for room in sorted(R.rooms.all(), key=lambda row: row.id):
+                        stack.enter_context(room.lock)
+                        if pid in room.meta.get("participants", []) and (room.busy_for() or execution.binding(room, pid)["phase"] != "ready"):
+                            return self._json(409, {"error": "此 Agent 所在的会话正在回复或排队，请结束后再修改配置"})
+                    result = agent_settings.save(pid, data.get("changes"), data.get("revision"))
+                return self._json(200, {"ok": True, "config": result})
+            except ValueError as error:
+                return self._json(409 if "其他窗口" in str(error) else 400, {"error": str(error)})
+            except OSError:
+                return self._json(500, {"error": "无法保存 Agent 设置，请检查数据目录的写入权限和剩余空间"})
+        if path == "/api/agents/config/mcp":
+            try:
+                result = agent_settings.install_mcp(str(data.get("id") or ""), data.get("replace_key") is True,
+                                                    data.get("revision"))
+                return self._json(200, {"ok": True, "message": result})
+            except (ValueError, OSError) as error:
+                return self._json(400, {"error": str(error)})
         if path == "/api/update/download":
             if not self._is_local_owner():
                 return self._json(403, {"error": "请在运行合拍的电脑上下载更新"})
@@ -552,8 +584,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/discovery/scan":
             return self._json(200, discovery.scan())
         if path == "/api/discovery/connect":
-            ok, res = discovery.connect(str(data.get("id") or ""), data.get("via"))
+            ok, res = discovery.connect(str(data.get("id") or ""), data.get("via"), data.get("replace_key") is True)
             return self._json(200 if ok else 409, res)
+        if path == "/api/discovery/prepare":
+            try:
+                return self._json(200, dict(discovery.prepare(data.get("id"), data.get("via")), ok=True))
+            except (ValueError, OSError) as error:
+                return self._json(409, {"error": str(error)})
         if path == "/api/discovery/dismiss":
             return self._json(200, discovery.dismiss(str(data.get("id") or "all")))
         if path == "/api/settings/connection":
@@ -700,7 +737,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200 if ok else 409, {"ok": ok, "error": msg})
         if act == "models":
             ok, msg, changed = r.set_models(str(data.get("ai", "")), str(data.get("model") or ""), str(data.get("effort") or ""))
-            return self._json(200 if ok else 409, {"ok": ok, "error": msg, "model_changed": changed})
+            return self._json(200 if ok else 409, {"ok": ok, "error": msg, "model_changed": changed, "model": r.model_info(str(data.get("ai", ""))) if ok else None})
+        if act == "models/refresh":
+            ai = str(data.get("ai") or "")
+            try:
+                model_catalog.refresh(r, ai)
+                return self._json(200, {"ok": True, "model": r.model_info(ai)})
+            except ValueError as error:
+                return self._json(409, {"error": str(error)})
+        if act == "execution":
+            pid = str(data.get("ai") or "")
+            try:
+                expected = data.get("version")
+                if not isinstance(expected, int) or isinstance(expected, bool):
+                    raise ValueError("请提供当前执行端版本")
+                result = execution.cancel(r, pid, expected) if data.get("op") == "cancel" else execution.prepare(r, pid, str(data.get("endpoint") or ""), expected)
+                return self._json(200, dict(result, ok=True))
+            except (ValueError, OSError) as error:
+                return self._json(409, {"error": str(error)})
         if act == "tools":
             ok, msg = r.set_tools(str(data.get("ai", "")), data.get("tools"))
             return self._json(200 if ok else 409, {"ok": ok, "error": msg})
@@ -729,11 +783,18 @@ class Handler(BaseHTTPRequestHandler):
             value = data.get("permissions")
             if not isinstance(value, dict):
                 return self._json(400, {"error": "请选择此联系人的会话权限"})
+            if "joined" in data and not isinstance(data["joined"], bool):
+                return self._json(400, {"error": "加入状态必须是布尔值"})
+            if not registry.get(pid):
+                return self._json(409, {"error": "联系人不存在"})
             try:
                 with r.lock:
-                    ids = list(dict.fromkeys(list(r.ais) + [pid]))
-                    perms = {a: access.permissions(r, a) for a in r.ais}
-                    perms[pid] = value
+                    ids = list(dict.fromkeys(list(r.meta.get("participants", [])) + [pid]))
+                    if data.get("joined") is False:
+                        ids = [a for a in ids if a != pid]
+                    perms = {a: access.permissions(r, a) for a in ids}
+                    if pid in ids:
+                        perms[pid] = value
                     ok, msg = r.set_members(ids, perms)
             except OSError:
                 return self._json(500, {"error": "无法保存会话，请检查数据目录权限或文件是否被占用后重试"})
@@ -768,6 +829,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(409 if not rid else 404, {"error": "room 必填，请先列出受邀会话" if not rid else "没有这场会话：" + rid})
         if not access.allowed(r, speaker, "read") or not access.allowed(r, speaker, "post"):
             return self._json(403, {"error": "未加入此会话或没有发言权限"})
+        if not access.external_allowed(r, speaker, str(data.get("worker") or self.headers.get("X-Cojam-Worker") or ""),
+                                       str(data.get("binding_token") or self.headers.get("X-Cojam-Execution") or "")):
+            return self._json(403, {"error": "此会话属于另一个执行端"})
         text = str(data.get("text", "")).strip()
         if not text:
             return self._json(400, {"error": "empty"})
@@ -781,10 +845,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(401, {"error": "接入密钥无效或已撤销"})
         if path == "/api/external/rooms":
             connections.seen(pid, self._bearer(), "http")
-            return self._json(200, {"contact": registry.public(registry.get(pid)), "rooms": access.visible_rooms(pid)})
+            return self._json(200, {"contact": registry.public(registry.get(pid)), "rooms": access.visible_rooms(pid, self.headers.get("X-Cojam-Worker", ""), self.headers.get("X-Cojam-Execution", ""))})
         rid = (q.get("room") or [""])[0]
         r = R.rooms.get(rid) if rid else None
-        if r is None or not access.allowed(r, pid):
+        if r is None or not access.external_allowed(r, pid, self.headers.get("X-Cojam-Worker", ""), self.headers.get("X-Cojam-Execution", "")):
             return self._json(403, {"error": "没有此会话的读取权限"})
         if path == "/api/external/messages":
             connections.seen(pid, self._bearer(), "http")
@@ -823,7 +887,7 @@ class Handler(BaseHTTPRequestHandler):
         if who is None:   # 钥匙对不上（会议室重启过之类）：不挡，免得 AI 白白卡住
             return self._json(200, agents.guard_allow(kind))
         r = R.rooms.get(who[0])
-        if r is not None and (not access.allowed(r, who[1], "work") or who[1] not in r.ais):
+        if r is not None and (execution.binding(r, who[1])["endpoint"] == "desktop" or execution.binding(r, who[1])["phase"] != "ready" or not access.allowed(r, who[1], "work") or who[1] not in r.ais):
             return self._json(200, {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "此成员没有干活权限"}})
         return self._json(200, agents.guard_decide(kind, r, who[1], data))
 

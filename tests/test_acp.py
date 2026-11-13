@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import Mock
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -195,6 +196,28 @@ class TestAcpDriver(unittest.TestCase):
         self.assertTrue(ok2, text2)
         self.assertEqual(sid2, sid)
         self.assertEqual(len(self.config_calls()), 2)   # 没变就不再发
+
+    def test_rejected_config_is_not_cached_as_applied(self):
+        proc = object.__new__(acp.AcpProcess)
+        proc.applied = ('native', 'old-model', 'low')
+        proc.config_options = [{'id':'model','category':'model'}, {'id':'effort','category':'thought_level'}]
+        proc.request = Mock(side_effect=[{}, acp.AcpError('not supported')])
+        with self.assertRaisesRegex(acp.AcpError, 'ACP 拒绝'):
+            proc.apply_config('native','new-model','high')
+        self.assertIsNone(proc.applied)
+        proc.request = Mock(return_value={})
+        proc.apply_config('native','old-model','low')
+        self.assertEqual(proc.request.call_count,2)
+
+    def test_explicit_setting_requires_a_real_config_option(self):
+        proc = object.__new__(acp.AcpProcess)
+        proc.applied = None
+        proc.config_options = []
+        proc.request = Mock()
+        with self.assertRaisesRegex(acp.AcpError,'未提供'):
+            proc.apply_config('native','requested-model','')
+        proc.request.assert_not_called()
+        self.assertIsNone(proc.applied)
 
     def test_acp_capabilities_require_declared_models_and_efforts(self):
         from bridge import agents

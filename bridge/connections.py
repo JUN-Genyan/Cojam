@@ -29,7 +29,7 @@ def _path():
 
 
 def _signature(spec):
-    fields = {k: spec.get(k) for k in ("driver", "bin", "args", "endpoint", "token", "headers", "enabled")}
+    fields = {k: spec.get(k) for k in ("driver", "bin", "args", "endpoint", "token", "headers", "enabled", "prompt", "context")}
     return hashlib.sha256(json.dumps(fields, sort_keys=True).encode()).hexdigest()
 
 
@@ -54,9 +54,9 @@ def seen(pid, key, channel, client=""):
             same = old.get("digest") == digest
             if same and not client and channel == "http" and time.time() - old.get("last_seen", 0) < 3:
                 return
-            data[pid] = {"digest": digest, "last_seen": time.time(),
+            data[pid] = dict(old, **{"digest": digest, "last_seen": time.time(),
                          "channel": old.get("channel", channel) if same and channel == "http" else channel,
-                         "client": str(client or (old.get("client") if same else "") or "")[:60]}
+                         "client": str(client or (old.get("client") if same else "") or "")[:60]})
             os.makedirs(LOG_DIR, exist_ok=True)
             write_json(_path(), data)
 
@@ -165,7 +165,7 @@ def check(pid):
         detail = str(e)
     with LOCK:
         data = read_json(_path()) or {}
-        data[pid] = {"signature": _signature(spec), "checked_at": time.time(), "ok": ok, "detail": detail}
+        data[pid] = dict(data.get(pid) or {}, signature=_signature(spec), checked_at=time.time(), ok=ok, detail=detail)
         os.makedirs(LOG_DIR, exist_ok=True)
         write_json(_path(), data)
     return status(pid)

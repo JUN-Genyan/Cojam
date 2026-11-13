@@ -129,6 +129,14 @@ class DesktopApi:
         result = self._window.create_file_dialog(folder, allow_multiple=False)
         return str(result[0]) if result else None
 
+    def choose_agent_file(self):
+        if self._window is None:
+            raise RuntimeError("桌面窗口尚未准备好")
+        kinds = getattr(self._webview, "FileDialog", None)
+        dialog = kinds.OPEN if kinds else self._webview.OPEN_DIALOG
+        result = self._window.create_file_dialog(dialog, allow_multiple=False)
+        return str(result[0]) if result else None
+
 
 def open_window(url, on_closing, module=None):
     webview = module or __import__("webview")

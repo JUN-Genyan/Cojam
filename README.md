@@ -10,9 +10,11 @@
 
 统一成员：本机和其他设备上的 Harness 都能接收任务、回复、互相 @。另一台 Windows / Mac 可运行轻量成员连接端，选择自己的 Harness 与工作文件夹后加入同一会话。见 [统一成员与跨设备协作](docs/MEMBERS.md)。
 
-启动时会扫描这台机器上已装的 Agent，一键接入；桌面软件可写入 MCP 配置后用 `/cojam_standby` 待命接单。扫描只保留一套实现：见 [本机 Agent 发现](docs/DISCOVERY.md)。
+启动时会扫描这台机器上已装的 Agent，并统一进入可编辑的设置页：CLI 直连，桌面配置 MCP 后以心跳待命。每个会议独立选择执行端，可验证并续接同一原生会话；模型面板可刷新索引、切换模型/effort，并区分已选择、已应用和实际回报。见 [执行端与模型](docs/AGENT_EXECUTION.md)、[本机 Agent 发现](docs/DISCOVERY.md)。
 
 接新的 AI 只用写配置，不改代码：见 [docs/PROVIDERS.md](docs/PROVIDERS.md)。
+
+已有 Agent 可在应用内随时配置：点击联系人或「设置」，修改程序位置、启动参数、默认模型/effort、MCP 接入和加入会话的规则。采用交互表单，无需手动编辑配置文件。见 [Agent 设置](docs/AGENT_SETTINGS.md)。
 
 ![icon](roundtable_preview.png)
 
