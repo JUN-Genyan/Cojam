@@ -32,11 +32,17 @@ function drawRooms(){
     const rooms=live.filter(m=>(m.project||legacyProject(m.workdir))===p.id&&(matchesProject||m.title.toLocaleLowerCase().includes(query)));
     if(query&&!matchesProject&&!rooms.length)return '';
     const expanded=!!query||!collapsedProjects.has(p.id);
-    return '<li class="project"><div class="project-head"><button data-project-toggle="'+esc(p.id)+'" aria-expanded="'+expanded+'">'+uiIcon('folder')+' <span>'+esc(p.name)+'</span><span class="project-count">'+rooms.length+'</span></button><button data-project-new="'+esc(p.id)+'" title="在此项目下新建会话" aria-label="新建会话">＋</button></div><ul class="rl project-rooms"'+(expanded?'':' hidden')+'>'+rooms.map(row).join('')+'<li><button class="new-conversation" data-project-new="'+esc(p.id)+'">＋ 新建会话</button></li></ul></li>';
+    return '<li class="project"><div class="project-head"><button data-project-toggle="'+esc(p.id)+'" aria-expanded="'+expanded+'">'+uiIcon('folder')+' <span>'+esc(p.name)+'</span><span class="project-count">'+rooms.length+'</span></button><button data-project-new="'+esc(p.id)+'" title="在此项目下新建会话" aria-label="新建会话">＋</button></div><ul class="rl project-rooms"'+(expanded?'':' hidden')+'>'+rooms.map(row).join('')+'</ul></li>';
   }).join('')||'<li class="nav-empty">'+(query?'没有匹配的项目或会话':'创建项目，开始第一场会话。')+'</li>';
   if(roomList.innerHTML!==html)roomList.innerHTML=html;
   const wait=ROOMS.filter(m=>m.id!==RID&&!m.archived&&(roomBadge(m)||[])[0]==='you').length;
-  document.getElementById('bList').textContent='会话管理'+(wait?' · '+wait+' 等你':'');document.getElementById('menu').classList.toggle('attn',wait>0);document.title=(wait?'('+wait+') ':'')+(S&&S.title?S.title+' · 合拍 Cojam':'合拍 Cojam');
+  const manage=document.getElementById('bList');
+  manage.innerHTML='管理'+(wait?' <span class="nav-wait">'+wait+'</span>':'');
+  manage.setAttribute('aria-label','会话管理、归档与回收站'+(wait?'，'+wait+' 个其他会话等你回复':''));
+  manage.title='会话管理、归档与回收站'+(wait?' · '+wait+' 个其他会话等你回复':'');
+  const nav=document.getElementById('navToggle');nav.classList.toggle('attn',wait>0);
+  nav.setAttribute('aria-label','打开联系人和项目'+(wait?'，'+wait+' 个其他会话等你回复':''));
+  document.title=(wait?'('+wait+') ':'')+(S&&S.title?S.title+' · 合拍 Cojam':'合拍 Cojam');
 }
 // The server supplies resolved project IDs, including migrated folder groups.
 function legacyProject(wd){return (PROJECTS.find(p=>p.workdir===wd)||{}).id||''}
@@ -52,6 +58,7 @@ function attachWorkspaceFolderPicker(inputId){
 }
 async function openProject(){document.body.classList.remove('nav-open');if(agCat.local_workspace===false){showModal('<h3>新建项目</h3><p class="hint">当前是通过其他设备连接。手机网页不支持使用本地文件夹创建项目，也不能选择或指定运行合拍的电脑文件夹。</p><div class="btns"><button onclick="hideModal()">关闭</button></div>');return}showModal('<h3>新建项目</h3><p class="hint">项目中的会话共用工作文件夹，各自管理成员和权限。</p><label>项目名称<input id="pName" maxlength="60" placeholder="例如：我的应用"></label><label>工作文件夹<input id="pWd" placeholder="工作文件夹完整路径" value="'+esc((S&&S.workdir)||'')+'"></label><p id="pErr" role="alert"></p><div class="btns"><button id="pCancel">取消</button><button id="pSave" class="pri">创建项目</button></div>');attachWorkspaceFolderPicker('pWd');document.getElementById('pCancel').onclick=hideModal;document.getElementById('pSave').onclick=async e=>{const button=e.currentTarget;if(button.disabled)return;const name=document.getElementById('pName').value,workdir=document.getElementById('pWd').value;button.disabled=true;button.textContent='正在创建…';try{const [ok,j]=await post('/api/projects/new',{name,workdir});if(!ok){const error=document.getElementById('pErr');if(error)error.textContent=j.error||'创建失败';return}await pollRooms();if(document.getElementById('pSave')===button){hideModal();openNew(false,j.project.id)}}finally{button.disabled=false;button.textContent='创建项目'}};document.getElementById('pName').focus()}
 async function openNew(first,projectId){
+  document.body.classList.remove('nav-open');
   await pollRooms();await refreshContacts();if(!PROJECTS.length)return openProject();
   const selected=projectId||(S&&(S.project||legacyProject(S.workdir)))||PROJECTS[0].id;
   showModal('<h3>新建会话</h3><label>所属项目<select id="nProject">'+PROJECTS.map(p=>'<option value="'+esc(p.id)+'"'+(selected===p.id?' selected':'')+'>'+esc(p.name)+'</option>').join('')+'</select></label><label>会话标题<input id="nTitle" maxlength="60" placeholder="这次想做什么？"></label><label>目标<textarea id="nAnn" placeholder="描述目标，可稍后修改"></textarea></label><h4>邀请联系人</h4><p class="hint">已按 Agent 的默认加入设置勾选，可以在创建前调整。</p><div id="nContacts">'+contactPicker(agCat.default_participants || [])+'</div><div class="btns"><button id="nCancel">取消</button><button id="nOk" class="pri">创建会话</button></div>');

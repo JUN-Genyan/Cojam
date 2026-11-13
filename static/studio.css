@@ -75,7 +75,6 @@ button:disabled{opacity:.45}button:focus-visible,a:focus-visible,input:focus-vis
 .rl li.cur a{background:var(--btn);color:var(--btn-fg);font-weight:550;box-shadow:0 3px 10px #6022e81a}
 .rl li.cur a>.ui-icon{color:inherit;opacity:1}
 .rl .dot{display:none}.rl .dot.run,.rl .dot.you{display:block;width:5px;height:5px}
-.new-conversation{font-size:10px;padding:8px 10px;color:var(--mut)}
 .nav-new{display:flex;align-items:center;justify-content:space-between;margin:0 8px 20px;padding:11px 13px;width:calc(100% - 16px);background:var(--lime);color:var(--lime-ink);border:1px solid var(--lime);border-radius:9px;font-size:12px;font-weight:600}
 .nav-new:hover{background:#dfff70;transform:translateY(-1px)}.nav-new span{font-size:17px;font-weight:400}
 .nav-foot{display:flex;align-items:center;gap:9px;padding:17px 10px 4px;border-top:1px solid var(--line);font-size:11px;line-height:1.5}
@@ -151,7 +150,7 @@ footer .row:focus-within{border-color:var(--btn);box-shadow:0 0 0 3px color-mix(
  #rooms .brand{padding-bottom:22px}.workspace-label{margin-bottom:22px;padding:10px 12px}.contacts-section{padding-bottom:14px;margin-bottom:19px}
  header{border:0;border-radius:23px 23px 0 0;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:19px;padding:29px 36px 19px;overflow:visible}
  .room-heading{grid-column:1}#modeTag{grid-row:1;grid-column:2}#bar{grid-column:1/-1;display:flex;flex-wrap:wrap;width:100%;padding-top:15px;gap:4px}
- #bar #bList{margin-left:auto}#bar .cap{order:-1;padding-right:9px}#bar .cap .cs,#bar .cap .cx{font-size:10px}#bar .cap .cm{display:none}
+ #bar .cap{order:-1;padding-right:9px}#bar .cap .cs,#bar .cap .cx{font-size:10px}#bar .cap .cm{display:none}
  .session-brief{grid-column:1/-1}
  #feed{padding:18px max(36px,calc((100% - 820px)/2)) 12px;min-height:0}
  #status{padding-left:max(36px,calc((100% - 820px)/2));padding-right:max(36px,calc((100% - 820px)/2))}
@@ -225,3 +224,10 @@ header{position:relative}#menu{display:flex!important;align-items:center;justify
 
 #modal{z-index:80}.card h4{cursor:default}.card h4::after{display:none}.card h4 .ct{flex:1}.card h4 .card-fold{margin-left:2px!important;min-width:28px;min-height:28px;padding:0 5px}.card.shut .card-fold{transform:rotate(-90deg)}
 .detail-path{overflow-wrap:anywhere;font:12px/1.7 var(--mono);margin:7px 0}.detail-agent{padding:10px 0;border-bottom:1px solid var(--line);font-size:12px}.detail-agent:last-child{border:0}.detail-agent .hint{margin:6px 0;overflow-wrap:anywhere}
+
+/* Global conversation navigation belongs to the sidebar. */
+.projects-section>.rh{gap:6px;letter-spacing:0;flex-wrap:nowrap}.project-actions{margin-left:auto;display:flex;align-items:center;gap:3px;flex:none}
+#rooms .project-actions button{margin-left:0;min-height:28px;line-height:24px}#rooms .project-actions #bList{font-size:12px;padding:1px 6px;display:flex;align-items:center;gap:4px}
+.nav-wait{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 4px;border-radius:9px;font-size:10px;background:var(--btn);color:var(--btn-fg)}
+#rooms .contacts-section{margin:10px 6px 6px;border-bottom:0;border-top:1px solid var(--line)}
+#rooms .projects-section{padding-bottom:4px}#rooms .nav-new{margin-bottom:16px}

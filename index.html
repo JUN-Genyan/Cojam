@@ -82,8 +82,8 @@ body.work header{box-shadow:inset 0 -2px 0 var(--work)}
 .rl .b.you{background:color-mix(in srgb,var(--work) 16%,transparent);color:var(--work)}
 .rl .b.run{background:color-mix(in srgb,var(--btn) 14%,transparent);color:var(--btn)}
 .rl li.arch a{opacity:.55}
-#menu.attn{position:relative}
-#menu.attn::after{content:"";position:absolute;top:3px;right:3px;width:8px;height:8px;border-radius:50%;background:var(--work)}
+#navToggle.attn{position:relative}
+#navToggle.attn::after{content:"";position:absolute;top:3px;right:3px;width:8px;height:8px;border-radius:50%;background:var(--work)}
 
 /* ===== 正在改的文件（文件护栏）===== */
 #claimList{list-style:none;margin:0;padding:0}
@@ -472,14 +472,16 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
 <body>
 <div id="navShade"></div>
 <nav id="rooms" aria-label="联系人和项目"><div class="brand"><img src="/static/logo.svg" width="42" height="42" alt=""><span class="brand-word">cojam<small>合拍 · 让想法一起发生</small></span><button id="navClose" aria-label="关闭导航">×</button></div><label class="nav-search" for="navSearch"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="navSearch" type="search" placeholder="搜索项目或会话" autocomplete="off"><kbd aria-hidden="true">⌘ K</kbd></label>
+<button id="rNew" class="nav-new">＋ 新建会话<span aria-hidden="true">↗</span></button>
+<section class="projects-section"><div class="rh">项目与会话<span class="project-actions"><button type="button" id="bList" aria-label="会话管理、归档与回收站" title="会话管理、归档与回收站">管理</button><button id="projectAdd" aria-label="新建项目" title="新建项目">＋</button></span></div><ul class="rl" id="roomList"></ul></section>
 <details class="contacts-section" id="contactsSection"><summary>联系人 <span id="contactCount"></span><span class="contacts-chevron" aria-hidden="true">⌄</span></summary><div class="rh"><span class="rh-actions"><button id="agentSettingsBtn" title="修改 Agent 程序位置、模型与加入设置" aria-label="Agent 与连接管理">管理</button><button id="contactsAdd" aria-label="接入联系人">＋ 接入</button></span></div><ul id="contactList"></ul></details>
-<section class="projects-section"><div class="rh">我的项目<button id="projectAdd" aria-label="新建项目">＋</button></div><ul class="rl" id="roomList"></ul></section><button id="rNew" class="nav-new">＋ 新建会话<span aria-hidden="true">↗</span></button><div class="nav-foot"><img src="/static/logo.svg" width="26" height="26" alt=""><span>本机会议室<small>由这台设备托管</small></span><button type="button" id="updateApp" title="检查并下载更新">更新</button><button type="button" id="quitApp" title="停止本机合拍服务">退出</button></div></nav>
+<div class="nav-foot"><img src="/static/logo.svg" width="26" height="26" alt=""><span>本机会议室<small>由这台设备托管</small></span><button type="button" id="updateApp" title="检查并下载更新">更新</button><button type="button" id="quitApp" title="停止本机合拍服务">退出</button></div></nav>
 <header>
   <button id="navToggle" aria-label="打开联系人和项目">☰</button>
   <div class="room-heading"><div class="room-overline"><div id="roomContext">会话空间</div><span class="room-type"><span aria-hidden="true">✳</span> 一起合拍</span></div><div id="title">会议室</div><div class="room-detail"><div id="roomMemberFaces" aria-hidden="true"></div><div id="roomSummary">人和 AI，在同一张桌上</div></div></div><div id="wd"></div><span id="modeTag">干活模式</span>
   <button type="button" id="menu" aria-label="会议工具与设置" aria-controls="bar" aria-expanded="false" aria-haspopup="dialog">⋯</button>
   <div id="bar" role="dialog" aria-label="会议工具与设置"><div class="meeting-tools-heading">会议工具</div>
-    <button type="button" id="bList">会话管理</button><button type="button" id="bNew">新会话</button><button type="button" id="bMode">讨论模式</button><button type="button" id="bAgents">成员与权限</button><button type="button" id="bWrap" title="整理会议记录并保存到项目">整理并落盘</button><button type="button" id="bSide" aria-controls="side" aria-expanded="false">会议详情与看板</button>
+    <button type="button" id="bMode">讨论模式</button><button type="button" id="bAgents">成员与权限</button><button type="button" id="bWrap" title="整理会议记录并保存到项目">整理并落盘</button><button type="button" id="bSide" aria-controls="side" aria-expanded="false">会议详情与看板</button>
     <div class="meeting-tools-label">参会成员 · 模型与思考强度</div><div id="caps"></div>
   </div>
   <div class="session-brief" id="sessionBrief" hidden><span class="brief-marker" aria-hidden="true">↗</span><div><span class="brief-label">这次的共同目标</span><p id="sessionBriefText"></p></div></div>
@@ -1178,8 +1180,7 @@ function openAi(a){
     await loadState();poll();openAi(a);
   };
 }
-document.getElementById('bList').onclick=openList;
-document.getElementById('bNew').onclick=()=>openNew(false);
+document.getElementById('bList').onclick=()=>{document.body.classList.remove('nav-open');openList()};
 document.getElementById('bMode').onclick=toggleMode;
 const stopsEl=document.getElementById('stops');
 function drawStops(){
