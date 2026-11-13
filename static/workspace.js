@@ -64,8 +64,6 @@ async function openAgents(){if(!RID)return;contactMode='members';const rid=RID;a
 }
 document.getElementById('contactsAdd').onclick=()=>startConnectionWizard();
 if(document.getElementById('agentSettingsBtn'))document.getElementById('agentSettingsBtn').onclick=()=>openAgentManager();
-if(document.getElementById('contactsScan'))document.getElementById('contactsScan').onclick=()=>{if(typeof openDiscoveryModal==='function')openDiscoveryModal(true)};
-if(document.getElementById('connSettingsBtn'))document.getElementById('connSettingsBtn').onclick=()=>{if(typeof openConnectionSettingsModal==='function')openConnectionSettingsModal()};
 document.getElementById('contactList').onclick=async e=>{const del=e.target.closest('[data-contact-delete]');if(del){const id=del.dataset.contactDelete,contact=CONTACTS.find(a=>a.id===id);if(!confirm('删除联系人 '+(contact?contact.label:id)+'？接入密钥将失效，会话记录会保留。'))return;del.disabled=true;const [ok,j]=await post('/api/agents/remove',{id});if(!ok){del.disabled=false;return alert(j.error||'删除失败')}await refreshContacts();await loadState();return}if(e.target.closest('[data-owner-devices]'))return startConnectionWizard('','mydevice');const b=e.target.closest('[data-contact-open]');if(b)openConnection(b.dataset.contactOpen)};
 document.getElementById('projectAdd').onclick=openProject;
 document.getElementById('navToggle').onclick=()=>document.body.classList.toggle('nav-open');

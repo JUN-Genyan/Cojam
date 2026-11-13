@@ -173,10 +173,25 @@ function bindAgentSettings(config) {
 }
 async function openAgentManager() {
   document.body.classList.remove('nav-open');
-  await refreshContacts(null,true);
-  showModal('<div id="agentManager"><h3>Agent 设置</h3><p class="hint">已接入和暂未找到程序的 Agent 都可以修改。</p>'+CONTACTS.filter(a=>a.kind!=='user').map(a=>'<div class="agent-room-row"><span>'+esc(a.label)+'<small>@'+esc(a.id)+' · '+(a.enabled?'已检测到':'未找到程序')+'</small></span><button type="button" data-agent-settings="'+esc(a.id)+'">配置</button></div>').join('')+'<div class="btns"><button onclick="hideModal()">关闭</button><button id="agentManagerAdd" class="pri">添加 Agent</button></div></div>');
+  showModal('<div id="agentManagerLoading"><h3>正在读取 Agent 与连接…</h3><div class="btns"><button onclick="hideModal()">关闭</button></div></div>');
+  const loading=document.getElementById('agentManagerLoading');
+  try{await refreshContacts(null,true)}catch(error){if(document.getElementById('agentManagerLoading')===loading)loading.innerHTML='<h3>暂时无法读取</h3><p role="alert">'+esc(error.message)+'</p><div class="btns"><button onclick="openAgentManager()">重试</button><button onclick="hideModal()">关闭</button></div>';return;}
+  if(document.getElementById('agentManagerLoading')!==loading)return;
+  const local=agCat.local_workspace!==false;
+  const agents=CONTACTS.filter(a=>a.kind!=='user');
+  showModal('<div id="agentManager"><div class="connection-heading"><div><span class="eyebrow">应用设置</span><h3>Agent 与连接</h3></div><button id="agentManagerClose" aria-label="关闭设置">×</button></div>'
+    +'<p class="hint">程序位置、默认模型、加入规则和连接状态，在这里统一管理。</p>'
+    +'<div class="agent-manager-tools">'+(local?'<button id="contactsScan">扫描本机 Agent</button>':'')+'<button id="connSettingsBtn">连接与心跳</button><button id="managerDevices">我的浏览器 / 设备</button></div>'
+    +'<h4>我的 Agent <span class="badge">'+agents.length+'</span></h4>'
+    +(agents.map(a=>'<div class="agent-room-row"><span><b>'+esc(a.label)+'</b><small>@'+esc(a.id)+' · '+esc(contactChannelLabel(a))+'</small><small>'+esc(a.enabled?contactStatusLabel(a):'未找到程序，可修改路径')+'</small></span><button type="button" data-agent-settings="'+esc(a.id)+'">配置</button></div>').join('')||'<p class="nav-empty">还没有 Agent，添加后可邀请加入会议。</p>')
+    +'<div class="btns agent-settings-actions"><button id="agentManagerDone">完成</button><button id="agentManagerAdd" class="pri">添加 Agent</button></div></div>');
   mbox.querySelectorAll('[data-agent-settings]').forEach(b=>b.onclick=()=>openAgentSettings(b.dataset.agentSettings));
   document.getElementById('agentManagerAdd').onclick=()=>startConnectionWizard('','local');
+  document.getElementById('agentManagerClose').onclick=hideModal;
+  document.getElementById('agentManagerDone').onclick=hideModal;
+  document.getElementById('connSettingsBtn').onclick=()=>openConnectionSettingsModal();
+  document.getElementById('managerDevices').onclick=()=>startConnectionWizard('','mydevice');
+  if(local)document.getElementById('contactsScan').onclick=()=>openDiscoveryModal(true);
 }
 async function openAgentMembership(id, roomId) {
   document.body.classList.remove('nav-open');

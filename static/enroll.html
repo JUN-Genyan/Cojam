@@ -82,13 +82,13 @@ async function alreadyEnrolled() {
   if (!await alreadyEnrolled()) return;
   if (code) {
     el('error').textContent = '';
-    el('address').textContent = '这台设备已经接入过，不需要新的接入码。';
+    el('address').textContent = '当前浏览器已经接入过，不需要新的接入码。';
     const enter = el('enter');
     enter.hidden = false;
     enter.onclick = () => location.replace('/');
   } else {
     el('error').textContent = '';
-    el('address').textContent = '这台设备已经接入过，正在进入…';
+    el('address').textContent = '当前浏览器已经接入过，正在进入…';
     location.replace('/');
   }
 })();

@@ -182,3 +182,19 @@ footer .row:focus-within{border-color:var(--btn);box-shadow:0 0 0 3px color-mix(
 #quitApp{margin-left:auto;background:transparent;border:1px solid var(--line);color:var(--mut);border-radius:7px;padding:5px 9px;font:11px var(--font)}#quitApp:hover{background:var(--hover);color:var(--fg)}
 #updateApp{margin-left:auto;background:transparent;border:1px solid var(--line);color:var(--mut);border-radius:7px;padding:5px 9px;font:11px var(--font)}#updateApp:hover{background:var(--hover);color:var(--fg)}#updateApp.has-update{color:var(--fg);border-color:var(--lime)}#quitApp{margin-left:0}
 .closed-screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);color:var(--fg);text-align:center;padding:24px}.closed-screen h1{font-size:23px;margin:18px 0 4px}.closed-screen p{font-size:13px;color:var(--mut)}.closed-screen button{border:0;background:var(--btn);color:var(--btn-fg);border-radius:10px;padding:10px 18px;font:inherit}
+
+/* Reading and message actions share the same behavior in browser and desktop. */
+.msg .body,.msg .qt,.msg pre,.msg code{-webkit-user-select:text;user-select:text;cursor:text}
+.msg ::selection{background:color-mix(in srgb,var(--btn) 25%,var(--bar));color:var(--fg)}
+.message-actions{display:inline-flex;gap:4px;margin-left:auto;flex:none;-webkit-user-select:none;user-select:none}
+.msg .who .message-actions button{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:11px;min-height:28px;padding:3px 7px;margin:0;cursor:pointer;opacity:.8}
+.msg .who .message-actions button:hover,.msg .who .message-actions button:focus-visible{opacity:1;background:var(--soft);color:var(--btn)}
+.msg.me .who .message-actions button:hover,.msg.me .who .message-actions button:focus-visible{background:#ffffff24;color:#fff}
+#selectionTools{position:fixed;z-index:65;display:flex;gap:4px;padding:5px;background:var(--bar);color:var(--fg);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-lg)}
+#selectionTools[hidden]{display:none}#selectionTools button{border:0;border-radius:6px;padding:7px 10px;background:transparent;color:inherit;font-size:12px;cursor:pointer}
+#selectionTools button:hover{background:var(--soft);color:var(--btn)}
+#copyNotice{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);z-index:90;max-width:calc(100vw - 32px);padding:10px 16px;border-radius:10px;background:var(--fg);color:var(--bg);box-shadow:var(--shadow);font-size:13px;pointer-events:none;opacity:0;transition:opacity .15s}
+#copyNotice.on{opacity:1}.agent-manager-tools{display:flex;flex-wrap:wrap;gap:8px;padding:12px 0 18px;border-bottom:1px solid var(--line)}
+#agentManager h4{margin:20px 0 4px;font-size:13px}#agentManager .agent-room-row{padding:14px 0}#agentManager .agent-room-row>span{flex:1}
+#rooms .contacts-section .rh{flex-wrap:nowrap;gap:4px;font-size:13px;letter-spacing:0}#rooms .rh-actions{flex-wrap:nowrap}
+@media(max-width:540px){.message-actions{gap:0}.msg .who{gap:6px;flex-wrap:wrap}.msg .who .message-actions button{min-height:32px;padding:4px 7px}.agent-manager-tools button{flex:1;white-space:nowrap}}

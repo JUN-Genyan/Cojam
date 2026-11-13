@@ -293,7 +293,7 @@ body.work header{box-shadow:inset 0 -2px 0 var(--work)}
 #cmenu.on{display:block;animation:pop .12s ease-out}
 #cmenu button{display:block;width:100%;text-align:left;border:0;background:transparent;color:inherit;padding:7px 12px;border-radius:7px;font-size:14px}
 #cmenu button:hover{background:var(--soft)}
-@media(hover:hover) and (pointer:fine){.who .rp{display:none}}
+
 
 /* 跳到我的发言：聊天区右下角两个圆按钮 */
 #jump{position:fixed;z-index:15;display:none;flex-direction:column;gap:6px}
@@ -472,7 +472,7 @@ textarea{flex:1;min-width:0;font-size:15px;font-family:inherit;line-height:1.5;p
 <body>
 <div id="navShade"></div>
 <nav id="rooms" aria-label="联系人和项目"><div class="brand"><img src="/static/logo.svg" width="42" height="42" alt=""><span class="brand-word">cojam<small>合拍 · 让想法一起发生</small></span><button id="navClose" aria-label="关闭导航">×</button></div><label class="nav-search" for="navSearch"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="navSearch" type="search" placeholder="搜索项目或会话" autocomplete="off"><kbd aria-hidden="true">⌘ K</kbd></label>
-<section class="contacts-section"><div class="rh">联系人 <span id="contactCount"></span><span class="rh-actions"><button id="agentSettingsBtn" title="修改 Agent 程序位置、模型与加入设置" aria-label="Agent 设置">设置</button><button id="contactsScan" title="扫描本机已安装的 Agent 并一键连接" aria-label="扫描本机 Agent">扫描</button><button id="connSettingsBtn" title="连接与心跳设置" aria-label="连接与心跳设置">心跳</button><button id="contactsAdd" aria-label="接入联系人">＋ 接入</button></span></div><ul id="contactList"></ul></section>
+<section class="contacts-section"><div class="rh">联系人 <span id="contactCount"></span><span class="rh-actions"><button id="agentSettingsBtn" title="修改 Agent 程序位置、模型与加入设置" aria-label="Agent 与连接管理">管理</button><button id="contactsAdd" aria-label="接入联系人">＋ 接入</button></span></div><ul id="contactList"></ul></section>
 <section class="projects-section"><div class="rh">我的项目<button id="projectAdd" aria-label="新建项目">＋</button></div><ul class="rl" id="roomList"></ul></section><button id="rNew" class="nav-new">＋ 新建会话<span aria-hidden="true">↗</span></button><div class="nav-foot"><img src="/static/logo.svg" width="26" height="26" alt=""><span>本机会议室<small>由这台设备托管</small></span><button type="button" id="updateApp" title="检查并下载更新">更新</button><button type="button" id="quitApp" title="停止本机合拍服务">退出</button></div></nav>
 <header>
   <button id="navToggle" aria-label="打开联系人和项目">☰</button>
@@ -669,14 +669,16 @@ function add(m){
   d.className='msg '+cls+(m.to_user?' touser':'')+(m.step!=null?' step':'');
   if(cls==='ai'){d.style.setProperty('--c',agentColor(m.speaker));d.dataset.l=agentLetter(m.speaker)}
   const tag=m.to_user?'<span class="tag">→ 用户</span>':'';
-  const who=cls==='sys'?'':'<div class="who"><span class="nm">'+esc((agentMeta(m.speaker)||{}).label||m.speaker)+'</span><span class="tm">'+esc(m.time)+'</span>'+tag+'<button type="button" class="rp" title="引用回复">↩ 引用</button></div>';
+  const who=cls==='sys'?'':'<div class="who"><span class="nm">'+esc((agentMeta(m.speaker)||{}).label||m.speaker)+'</span><span class="tm">'+esc(m.time)+'</span>'+tag+'<span class="message-actions"><button type="button" class="mc" title="复制消息文字">复制</button><button type="button" class="rp" title="选中文字可引用片段">引用</button></span></div>';
   const q=m.reply_to?'<div class="qt" data-to="'+m.reply_to.id+'">'+esc(m.reply_to.speaker)+'：'+(m.reply_to.part?'“'+esc(m.reply_to.text)+'”':esc(m.reply_to.text))+'</div>':'';
   d.dataset.id=m.id;msgById[m.id]=m;
   const md=cls==='ai';
   d.innerHTML=who+q+(m.text?'<div class="body'+(md?' md':'')+'">'+render(m.text,md)+'</div>':'')+attHtml(m.attachments)+(m.step!=null?'<button type="button" class="undo" data-step="'+m.step+'">撤回这一步</button>':'');
   feed.appendChild(d);
   const ub=d.querySelector('.undo');if(ub)ub.onclick=()=>undoStep(m.step);
-  const rb=d.querySelector('.rp');if(rb)rb.onclick=()=>{const sel=lastSel&&lastSel.id===m.id&&Date.now()-lastSel.t<15000?lastSel.text:'';setQuote(m,sel)};
+  d.querySelectorAll('.message-actions button').forEach(b=>b.onmousedown=e=>e.preventDefault());
+  const rb=d.querySelector('.rp');if(rb)rb.onclick=()=>{const selected=selIn();setQuote(m,selected&&selected.id===m.id?selected.text:'')};
+  const cb=d.querySelector('.mc');if(cb)cb.onclick=()=>copyMessageText(m.text||'');
   const qb=d.querySelector('.qt');if(qb)qb.onclick=()=>{const o=feed.querySelector('.msg[data-id="'+qb.dataset.to+'"]');if(o){o.scrollIntoView({block:'center',behavior:'smooth'});o.classList.add('flash');setTimeout(()=>o.classList.remove('flash'),1200)}};
 }
 // 状态行：谁在想、想了多久，下面是它这一轮最近说的一句中途的话（不进会议记录，点一下展开）
@@ -791,28 +793,61 @@ function selIn(){
   if(!el)return null;
   return {id:+el.dataset.id,text};
 }
-let lastSel=null;
-document.addEventListener('selectionchange',()=>{const x=selIn();if(x)lastSel={...x,t:Date.now()}});
 const cmenu=document.getElementById('cmenu');
+cmenu.setAttribute('role','group');cmenu.setAttribute('aria-label','消息操作');
+const selectionTools=document.createElement('div');
+selectionTools.id='selectionTools';selectionTools.hidden=true;
+selectionTools.setAttribute('role','group');selectionTools.setAttribute('aria-label','选中文字操作');
+selectionTools.innerHTML='<button type="button" data-selection="copy">复制选中</button><button type="button" data-selection="quote">引用选中</button>';
+document.body.appendChild(selectionTools);
+const copyNotice=document.createElement('div');copyNotice.id='copyNotice';copyNotice.setAttribute('role','status');document.body.appendChild(copyNotice);
+let copyNoticeTimer;
+async function copyMessageText(text){
+  const ok=await copyText(text);
+  copyNotice.textContent=ok?'已复制':'复制失败，请选中文字后按 Ctrl/Cmd+C';
+  copyNotice.classList.add('on');clearTimeout(copyNoticeTimer);
+  copyNoticeTimer=setTimeout(()=>copyNotice.classList.remove('on'),2500);
+}
+function placeMessageTools(element,x,y){
+  const w=element.offsetWidth,h=element.offsetHeight;
+  element.style.left=Math.max(8,Math.min(x,innerWidth-w-8))+'px';
+  element.style.top=Math.max(8,Math.min(y,innerHeight-h-8))+'px';
+}
 function hideMenu(){cmenu.classList.remove('on')}
+function updateSelectionTools(){
+  const selected=selIn();
+  if(!selected||!msgById[selected.id]||cmenu.classList.contains('on')){selectionTools.hidden=true;return}
+  const rect=getSelection().getRangeAt(0).getBoundingClientRect(),bounds=feed.getBoundingClientRect();
+  if(rect.bottom<bounds.top||rect.top>bounds.bottom){selectionTools.hidden=true;return}
+  selectionTools.hidden=false;
+  placeMessageTools(selectionTools,rect.left,Math.max(bounds.top+8,rect.top-selectionTools.offsetHeight-8));
+}
+document.addEventListener('selectionchange',updateSelectionTools);
+selectionTools.onmousedown=e=>e.preventDefault();
+selectionTools.onclick=e=>{
+  const button=e.target.closest('[data-selection]'),selected=selIn();if(!button||!selected)return;
+  if(button.dataset.selection==='copy')copyMessageText(selected.text);
+  else {setQuote(msgById[selected.id],selected.text);getSelection().removeAllRanges();selectionTools.hidden=true;}
+};
 feed.addEventListener('contextmenu',e=>{
   const el=e.target.closest('.msg[data-id]');if(!el)return;
-  const m=msgById[+el.dataset.id];if(!m||!(m.speaker==='你'||isAgent(m.speaker)))return;
+  const m=msgById[+el.dataset.id];if(!m)return;
   const x=selIn(),part=x&&x.id===m.id?x.text:'';
-  e.preventDefault();
+  e.preventDefault();selectionTools.hidden=true;
   const items=[];
-  if(part){items.push(['引用这段回复',()=>setQuote(m,part)]);items.push(['复制',()=>navigator.clipboard&&navigator.clipboard.writeText(part).catch(()=>{})])}
-  items.push(['引用整条回复',()=>setQuote(m)]);
+  if(part){items.push(['复制选中文字',()=>copyMessageText(part)]);items.push(['引用选中片段',()=>setQuote(m,part)])}
+  items.push(['复制整条消息',()=>copyMessageText(m.text||'')]);
+  if(m.speaker==='你'||isAgent(m.speaker))items.push(['引用整条消息',()=>setQuote(m)]);
   cmenu.innerHTML='';
   items.forEach(([t,f])=>{const b=document.createElement('button');b.type='button';b.textContent=t;b.onclick=()=>{hideMenu();f()};cmenu.appendChild(b)});
-  cmenu.classList.add('on');
-  const w=cmenu.offsetWidth,h=cmenu.offsetHeight;
-  cmenu.style.left=Math.max(4,Math.min(e.clientX,innerWidth-w-4))+'px';
-  cmenu.style.top=Math.max(4,Math.min(e.clientY,innerHeight-h-4))+'px';
+  cmenu.classList.add('on');placeMessageTools(cmenu,e.clientX,e.clientY);
+  if(e.button===0)cmenu.querySelector('button').focus();
 });
+cmenu.onmousedown=e=>e.preventDefault();
 document.addEventListener('mousedown',e=>{if(!cmenu.contains(e.target))hideMenu()});
-document.addEventListener('keydown',e=>{if(e.key==='Escape')hideMenu()});
-feed.addEventListener('scroll',hideMenu);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){hideMenu();selectionTools.hidden=true;}});
+feed.addEventListener('scroll',()=>{hideMenu();updateSelectionTools()});
+addEventListener('resize',()=>{hideMenu();updateSelectionTools()});
 fileEl.onchange=async()=>{const fs=[...fileEl.files];fileEl.value='';for(const f of fs)await upload(f)};
 async function send(){
   const text=ta.value.trim();
@@ -1022,10 +1057,19 @@ async function openList(showTrash){
     el.onclick=()=>{hideModal();bar.classList.remove('show');switchRoom(el.dataset.id)};
   });
 }
-function fallbackCopy(t){const x=document.createElement('textarea');x.value=t;document.body.appendChild(x);x.select();try{document.execCommand('copy')}catch(e){}x.remove()}
-function copyText(t){
-  if(navigator.clipboard&&window.isSecureContext)return navigator.clipboard.writeText(t).catch(()=>fallbackCopy(t));
-  fallbackCopy(t);
+function fallbackCopy(t){
+  const active=document.activeElement,selection=getSelection();
+  const ranges=selection?Array.from({length:selection.rangeCount},(_,i)=>selection.getRangeAt(i).cloneRange()):[];
+  const x=document.createElement('textarea');x.value=t;x.setAttribute('aria-label','复制消息');
+  x.style.cssText='position:fixed;top:0;left:-9999px';document.body.appendChild(x);x.select();
+  let ok=false;try{ok=document.execCommand('copy')}catch(e){}finally{
+    x.remove();if(active&&active.focus)active.focus({preventScroll:true});
+    if(selection){selection.removeAllRanges();ranges.forEach(r=>selection.addRange(r))}
+  }return ok;
+}
+async function copyText(t){
+  if(navigator.clipboard&&window.isSecureContext){try{await navigator.clipboard.writeText(t);return true}catch(e){}}
+  return fallbackCopy(t);
 }
 function openAi(a){
   const x=S&&S.ais&&S.ais[a];if(!x)return;
@@ -1356,6 +1400,7 @@ roomList.addEventListener('click',e=>{
   e.preventDefault();switchRoom(a.dataset.id);
 });
 function resetRoomView(){
+  hideMenu();selectionTools.hidden=true;
   since=0;curMeeting=undefined;S=null;feed.innerHTML='';
   for(const k in msgById)delete msgById[k];
   pend=[];drawPend();setQuote(null);lastRun={running:[],queued:0};
@@ -1454,7 +1499,7 @@ async function loadTools(a,x){
 
 setInterval(()=>{if(RID)poll()},1500);
 setInterval(pollRooms,3000);
-refreshContacts().then(()=>{if(typeof checkStartupDiscovery==='function')checkStartupDiscovery()}).catch(e=>console.error(e));
+refreshContacts().catch(e=>console.error(e));
 setInterval(()=>refreshContacts(undefined,true).catch(()=>{}),10000);
 if(RID)switchRoom(RID,true);else pickRoom();
 </script>

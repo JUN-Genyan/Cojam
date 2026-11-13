@@ -725,19 +725,6 @@ function renderConnectionComplete(w) {
   const enter = document.getElementById('connEnter'); if (enter) enter.onclick = () => { const rid = w.target; hideModal(); switchRoom(rid); };
 }
 
-let startupDiscoveryChecked = false;
-async function checkStartupDiscovery() {
-  if (startupDiscoveryChecked) return;
-  startupDiscoveryChecked = true;
-  if (typeof agCat === 'object' && agCat && agCat.local_workspace === false) return;
-  try {
-    const [ok, disc] = await connectionGet('/api/discovery');
-    if (ok && disc && disc.pending_count > 0 && !document.getElementById('modal').classList.contains('show')) {
-      renderDiscoveryModal(disc);
-    }
-  } catch (e) {}
-}
-
 async function openDiscoveryModal(forceRescan = false) {
   stopConnectionWizard();
   document.body.classList.remove('nav-open');
@@ -763,13 +750,12 @@ function renderDiscoveryModal(disc) {
       + (item.level === 'unsupported' ? '<span class="hint">暂不支持接入</span>' : '');
     return '<div class="disc-row agent-room-row"><div><b>'+esc(item.label)+'</b> <small>@'+esc(item.id)+'</small><p class="hint">'+esc(label)+'</p><small>'+esc(item.exe || item.desktop_path || '')+'</small></div><div class="btns">'+actions+'</div></div>';
   }).join('');
-  showModal('<div id="discoveryModal"><div class="connection-heading"><span class="eyebrow">本机 Agent 自动发现</span><button id="discClose" aria-label="关闭">×</button></div><h3>在这台电脑上发现 '+detected.length+' 个 Agent</h3><p class="hint">CLI 走直连；桌面配置 MCP 后开启 /cojam_standby，以真实心跳保持接入。扫描只提供候选程序，所有修改均进入同一个 Agent 设置页。</p>'+rows+'<p id="discError" role="alert"></p><div class="btns"><button id="discRescan">重新扫描</button><button id="discManual">手动添加</button><button id="discDismiss">不再自动提示</button><button id="discDone" class="pri">完成</button></div></div>');
+  showModal('<div id="discoveryModal"><div class="connection-heading"><span class="eyebrow">本机 Agent 自动发现</span><button id="discClose" aria-label="关闭">×</button></div><h3>在这台电脑上发现 '+detected.length+' 个 Agent</h3><p class="hint">CLI 走直连；桌面配置 MCP 后开启 /cojam_standby，以真实心跳保持接入。扫描只提供候选程序，所有修改均进入同一个 Agent 设置页。</p>'+rows+'<p id="discError" role="alert"></p><div class="btns"><button id="discRescan">重新扫描</button><button id="discManual">手动添加</button><button id="discDone" class="pri">完成</button></div></div>');
   const current = document.getElementById('discoveryModal');
   document.getElementById('discClose').onclick = hideModal;
   document.getElementById('discDone').onclick = hideModal;
   document.getElementById('discRescan').onclick = () => openDiscoveryModal(true);
   document.getElementById('discManual').onclick = () => startConnectionWizard();
-  document.getElementById('discDismiss').onclick = async () => { await post('/api/discovery/dismiss',{id:'all'}); if(document.getElementById('discoveryModal')===current)hideModal(); };
   mbox.querySelectorAll('[data-disc-config]').forEach(button => button.onclick = async () => {
     button.disabled = true;
     try {

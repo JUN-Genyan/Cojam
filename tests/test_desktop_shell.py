@@ -274,6 +274,7 @@ class WindowAndFlow(unittest.TestCase):
         self.assertEqual(fake.created["url"], "http://127.0.0.1:8765/?owner_tab=" + "a" * 32)
         self.assertEqual((fake.created["width"], fake.created["height"]), (1280, 860))
         self.assertEqual(fake.created["min_size"], (960, 640))
+        self.assertTrue(fake.created["text_select"])
         self.assertEqual(fake.window.events.closing.items, [handler])
         self.assertEqual(fake.window.events.shown.items, [shell_main.tint_title_bar])
         self.assertTrue(fake.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"])

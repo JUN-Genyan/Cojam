@@ -662,6 +662,40 @@ vm.runInContext(js.match(/async function checkConnectionBackend\(signal\) \{[\s\
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+class MessageClipboard(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to exercise clipboard fallback')
+    def test_http_copy_and_denied_clipboard_restore_selection_and_report_failure(self):
+        root = Path(__file__).resolve().parents[1]
+        script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const html=fs.readFileSync('index.html','utf8');
+const source=html.slice(html.indexOf('function fallbackCopy(t)'),html.indexOf('function openAi(a)'));
+let restored=false,removed=false,focused=false,payload='',allowCopy=true;
+const range={cloneRange(){return this}},selection={rangeCount:1,getRangeAt(){return range},
+ removeAllRanges(){restored=false},addRange(r){assert.equal(r,range);restored=true}};
+const textarea={value:'',style:{},setAttribute(){},select(){payload=this.value},remove(){removed=true}};
+const context=vm.createContext({window:{isSecureContext:false},navigator:{},getSelection:()=>selection,
+ document:{activeElement:{focus(){focused=true}},createElement:()=>textarea,body:{appendChild(){}},
+ execCommand(command){assert.equal(command,'copy');return allowCopy}}});
+vm.runInContext(source,context);
+(async()=>{
+ assert.equal(await context.copyText('第一行\nsecond line'),true);
+ assert.equal(payload,'第一行\nsecond line');assert.ok(restored&&removed&&focused);
+ context.window.isSecureContext=true;
+ context.navigator.clipboard={writeText:async()=>{throw Error('permission denied')}};
+ assert.equal(await context.copyText('denied then fallback'),true);assert.equal(payload,'denied then fallback');
+ allowCopy=false;assert.equal(await context.copyText('failed'),false);
+ assert.ok(restored&&removed&&focused);
+ context.document.execCommand=()=>{throw Error('unsupported')};
+ assert.equal(await context.copyText('unsupported'),false);assert.ok(restored&&removed&&focused);
+ let securePayload='';context.navigator.clipboard.writeText=async t=>{securePayload=t};
+ assert.equal(await context.copyText('secure'),true);assert.equal(securePayload,'secure');
+})().catch(error=>{console.error(error);process.exitCode=1});
+'''
+        result = subprocess.run(['node', '-e', script], cwd=root, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 class DiscoveryAndHeartbeatModals(unittest.TestCase):
     @unittest.skipUnless(shutil.which('node'), 'Node is needed to execute browser helper functions')
     def test_discovery_and_heartbeat_settings_render_and_submit(self):
@@ -702,7 +736,8 @@ const context = vm.createContext({
 });
 vm.runInContext(js, context);
 (async () => {
-  await context.checkStartupDiscovery();
+  assert.equal(modalHtml, "", "startup must not open Agent onboarding");
+  await context.openDiscoveryModal();
   assert.match(modalHtml, /发现 1 个 Agent/);
   assert.match(modalHtml, /MCP 待命中/);
   assert.match(modalHtml, /\/cojam_standby/);
