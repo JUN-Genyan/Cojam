@@ -1,8 +1,8 @@
 {
   "app": "Cojam",
-  "version": "2.7.2",
-  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.7.2.exe",
-  "sha256": "52139c3e8df9b17588e073807f8556dd5f1b1aa21c6279e60ee6ace7d08483d0",
-  "size": 31214721,
-  "notes": "会议室里所有 Agent 都能动态切换模型（OpenCode / Cursor / Antigravity / Gemini 等）。修复 ACP 会话失效后反复新建会话的问题：失效时丢掉旧会话、带完整上下文重试一次；修复模型与思考强度设置发错配置名导致不生效的问题；Cursor / OpenCode 接入与输出解析修复。"
+  "version": "2.8.0",
+  "url": "https://jun-genyan.github.io/Cojam/downloads/Cojam-Setup-2.8.0.exe",
+  "sha256": "c6451ab1665238e460079d227dbd4d292fe9b99c595c039c681c0a869cddfd2b",
+  "size": 31803812,
+  "notes": "统一 Agent 应用内配置及 CLI/桌面接入；支持会议模型与 effort 切换；修复桌面消息选字、复制与片段引用；联系人默认收起，会议工具整合到右上角，修复详情与看板；取消启动接入弹窗。"
 }
