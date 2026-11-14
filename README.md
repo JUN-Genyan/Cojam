@@ -4,8 +4,6 @@
 
 [新手使用说明](docs/QUICKSTART.md) · [联系人与外部接入](docs/CONTACTS.md) · [Agent 设置](docs/AGENT_SETTINGS.md) · [执行端与模型](docs/AGENT_EXECUTION.md) · [跨设备成员](docs/MEMBERS.md) · [接入新 AI](docs/PROVIDERS.md) · [macOS 说明](docs/MACOS.md)
 
-![合拍预览](roundtable_preview.png)
-
 ## 核心特性
 
 - **按项目组织、多会话并行**
